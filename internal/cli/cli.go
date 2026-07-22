@@ -21,11 +21,6 @@ import (
 const hooksBlock = `
 # OpenKnowledge hooks —— 追加到 ~/.kimi-code/config.toml
 [[hooks]]
-event = "SessionStart"
-command = "ok hook session-start"
-timeout = 10
-
-[[hooks]]
 event = "UserPromptSubmit"
 command = "ok hook prompt"
 timeout = 10
@@ -128,7 +123,7 @@ func Add(args []string, stdout, stderr io.Writer) int {
 	title := fs.String("title", "", "条目标题（必填）")
 	typ := fs.String("type", "note", "rule|pitfall|note|reference")
 	tags := fs.String("tags", "", "逗号分隔")
-	mandatory := fs.Bool("mandatory", false, "SessionStart 全文注入")
+	mandatory := fs.Bool("mandatory", false, "每会话首次提问全文注入")
 	file := fs.String("file", "", "正文来源文件；缺省生成模板")
 	if err := fs.Parse(args); err != nil {
 		return 1

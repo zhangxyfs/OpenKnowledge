@@ -26,7 +26,7 @@ type Event struct {
 	Cwd           string          `json:"cwd"`
 	ToolName      string          `json:"tool_name"`
 	ToolInput     json.RawMessage `json:"tool_input"`
-	Prompt        string          `json:"prompt"`
+	Prompt        json.RawMessage `json:"prompt"`
 }
 
 func ParseEvent(r io.Reader) (*Event, error) {
@@ -41,13 +41,42 @@ func ParseEvent(r io.Reader) (*Event, error) {
 	return e, nil
 }
 
-// FilePath 从 tool_input 提取文件路径（Write/Edit 工具）。
+// PromptText 提取提问文本：兼容字符串与内容块数组 [{"type":"text","text":"..."}]。
+func (e *Event) PromptText() string {
+	if len(e.Prompt) == 0 {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(e.Prompt, &s); err == nil {
+		return s
+	}
+	var parts []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(e.Prompt, &parts); err != nil {
+		return ""
+	}
+	var texts []string
+	for _, p := range parts {
+		if p.Text != "" {
+			texts = append(texts, p.Text)
+		}
+	}
+	return strings.Join(texts, "\n")
+}
+
+// FilePath 从 tool_input 提取文件路径：kimi 用 path，兼容 file_path。
 func (e *Event) FilePath() string {
 	var ti struct {
+		Path     string `json:"path"`
 		FilePath string `json:"file_path"`
 	}
 	if len(e.ToolInput) > 0 {
 		_ = json.Unmarshal(e.ToolInput, &ti)
+	}
+	if ti.Path != "" {
+		return ti.Path
 	}
 	return ti.FilePath
 }
@@ -61,43 +90,16 @@ func logErr(format string, args ...any) {
 	fmt.Fprintf(f, time.Now().Format("2006-01-02 15:04:05 ")+format+"\n", args...)
 }
 
-// HandleSessionStart 注入 mandatory 条目全文 + 索引；顺带清理过期会话状态。
-func HandleSessionStart(r io.Reader, w io.Writer) int {
-	ev, err := ParseEvent(r)
-	if err != nil {
-		logErr("session-start parse: %v", err)
-		return 0
-	}
-	pc, err := project.FromCwd(ev.Cwd)
-	if err != nil {
-		return 0
-	}
-	_ = state.Clean(pc.Store.StateDir(), 7*24*time.Hour)
-	entries, errs := entry.LoadTolerant(pc.Store.KnowledgeDir())
-	for _, err := range errs {
-		logErr("session-start skip bad entry: %v", err)
-	}
-	var b strings.Builder
-	for _, e := range entries {
-		if !e.Mandatory {
-			continue
-		}
-		fmt.Fprintf(&b, "## %s\n\n%s\n\n", e.Title, e.Body)
-	}
-	if idx, err := os.ReadFile(pc.Store.IndexPath()); err == nil {
-		b.Write(idx)
-	}
-	out := store.TruncateToBudget(b.String(), pc.Config.Inject.MaxTokens)
-	if strings.TrimSpace(out) != "" {
-		fmt.Fprintln(w, out)
-	}
-	return 0
-}
-
-// HandlePrompt 混合检索并注入 top-N 条目；embedding 失败降级为关键词检索。
+// HandlePrompt 基础注入（每会话首次：mandatory 全文 + 索引）+ 检索注入（每次）。
+// embedding 失败降级为关键词检索；任何内部错误 fail-open。
 func HandlePrompt(r io.Reader, w io.Writer) int {
 	ev, err := ParseEvent(r)
-	if err != nil || strings.TrimSpace(ev.Prompt) == "" {
+	if err != nil {
+		logErr("prompt parse: %v", err)
+		return 0
+	}
+	promptText := ev.PromptText()
+	if strings.TrimSpace(promptText) == "" {
 		return 0
 	}
 	pc, err := project.FromCwd(ev.Cwd)
@@ -105,8 +107,29 @@ func HandlePrompt(r io.Reader, w io.Writer) int {
 		return 0
 	}
 	entries, errs := entry.LoadTolerant(pc.Store.KnowledgeDir())
-	for _, err := range errs {
-		logErr("prompt skip bad entry: %v", err)
+	for _, e := range errs {
+		logErr("prompt skip bad entry: %v", e)
+	}
+	st := state.Load(pc.Store.StateDir(), ev.SessionID)
+	var b strings.Builder
+	if !st.BaseInjected {
+		_ = state.Clean(pc.Store.StateDir(), 7*24*time.Hour)
+		base := b.Len()
+		for _, e := range entries {
+			if !e.Mandatory {
+				continue
+			}
+			fmt.Fprintf(&b, "## %s\n\n%s\n\n", e.Title, e.Body)
+		}
+		if idx, err := os.ReadFile(pc.Store.IndexPath()); err == nil {
+			b.Write(idx)
+		}
+		if b.Len() > base {
+			st.BaseInjected = true
+			if err := st.Save(pc.Store.StateDir()); err != nil {
+				logErr("prompt save state: %v", err)
+			}
+		}
 	}
 	vs, err := embed.LoadVectors(pc.Store.VectorsPath())
 	if err != nil {
@@ -121,21 +144,20 @@ func HandlePrompt(r io.Reader, w io.Writer) int {
 			Model:   pc.Config.Embedding.Model,
 			Timeout: time.Duration(pc.Config.Embedding.TimeoutSec) * time.Second,
 		}
-		if vec, err := client.Embed(context.Background(), ev.Prompt); err != nil {
+		if vec, err := client.Embed(context.Background(), promptText); err != nil {
 			logErr("prompt embed: %v", err)
 		} else {
 			queryVec = vec
 		}
 	}
-	ranked := retrieve.Rank(entries, ev.Prompt, queryVec, vs, pc.Config.Retrieve)
-	if len(ranked) == 0 {
-		return 0
-	}
-	var b strings.Builder
+	ranked := retrieve.Rank(entries, promptText, queryVec, vs, pc.Config.Retrieve)
 	for _, s := range ranked {
 		fmt.Fprintf(&b, "## %s\n\n%s\n\n", s.Entry.Title, s.Entry.Body)
 	}
-	fmt.Fprintln(w, store.TruncateToBudget(b.String(), pc.Config.Inject.MaxTokens))
+	out := store.TruncateToBudget(b.String(), pc.Config.Inject.MaxTokens)
+	if strings.TrimSpace(out) != "" {
+		fmt.Fprintln(w, out)
+	}
 	return 0
 }
 

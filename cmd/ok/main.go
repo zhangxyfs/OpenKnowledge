@@ -49,8 +49,6 @@ func runHook(args []string) (code int) {
 		return 0
 	}
 	switch args[0] {
-	case "session-start":
-		return hook.HandleSessionStart(os.Stdin, os.Stdout)
 	case "prompt":
 		return hook.HandlePrompt(os.Stdin, os.Stdout)
 	case "post-tool":

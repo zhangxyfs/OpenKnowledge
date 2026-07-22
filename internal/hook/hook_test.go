@@ -61,31 +61,59 @@ summary: 提交信息格式
 使用 Conventional Commits。
 `
 
-func TestSessionStartInjectsMandatoryAndIndex(t *testing.T) {
+func TestFirstPromptInjectsBaseOnce(t *testing.T) {
 	projDir, kbRoot := setupProject(t)
 	writeEntry(t, kbRoot, "rule.md", mandatoryEntry)
 	writeEntry(t, kbRoot, "git.md", gitEntry)
 	if err := os.WriteFile(filepath.Join(kbRoot, "INDEX.md"), []byte("# 知识索引\n\n- **Git 提交规范**\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	in := fmt.Sprintf(`{"hook_event_name":"SessionStart","session_id":"s1","cwd":%q}`, projDir)
+	mkPrompt := func(text string) string {
+		return fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":[{"type":"text","text":%q}]}`, projDir, text)
+	}
 	var out bytes.Buffer
-	if code := HandleSessionStart(strings.NewReader(in), &out); code != 0 {
+	// 首次提问：基础注入（mandatory 全文 + 索引）+ 检索命中
+	if code := HandlePrompt(strings.NewReader(mkPrompt("git 提交规范是什么")), &out); code != 0 {
 		t.Fatalf("exit %d", code)
 	}
 	got := out.String()
 	if !strings.Contains(got, "改完代码先写日志。") || !strings.Contains(got, "知识索引") {
-		t.Fatalf("unexpected output %q", got)
+		t.Fatalf("first prompt missing base injection: %q", got)
 	}
-	if strings.Contains(got, "Conventional Commits") {
-		t.Fatal("non-mandatory body should not be injected at session start")
+	if !strings.Contains(got, "Conventional Commits") {
+		t.Fatalf("first prompt missing retrieval: %q", got)
+	}
+	// 第二次提问（同会话）：不再重复基础注入，检索仍生效
+	out.Reset()
+	if code := HandlePrompt(strings.NewReader(mkPrompt("git 提交规范是什么")), &out); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	got = out.String()
+	if strings.Contains(got, "改完代码先写日志。") || strings.Contains(got, "知识索引") {
+		t.Fatalf("base injection repeated: %q", got)
+	}
+	if !strings.Contains(got, "Conventional Commits") {
+		t.Fatalf("retrieval lost on second prompt: %q", got)
+	}
+}
+
+func TestPromptStringFormCompat(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	writeEntry(t, kbRoot, "git.md", gitEntry)
+	in := fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":"git 提交"}`, projDir)
+	var out bytes.Buffer
+	if code := HandlePrompt(strings.NewReader(in), &out); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if !strings.Contains(out.String(), "Conventional Commits") {
+		t.Fatalf("string prompt form broken: %q", out.String())
 	}
 }
 
 func TestPromptKeywordFallback(t *testing.T) {
 	projDir, kbRoot := setupProject(t)
 	writeEntry(t, kbRoot, "git.md", gitEntry)
-	in := fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":"git 提交规范是什么"}`, projDir)
+	in := fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":[{"type":"text","text":"git 提交规范是什么"}]}`, projDir)
 	var out bytes.Buffer
 	if code := HandlePrompt(strings.NewReader(in), &out); code != 0 {
 		t.Fatalf("exit %d", code)
@@ -95,16 +123,16 @@ func TestPromptKeywordFallback(t *testing.T) {
 	}
 }
 
-func TestSessionStartSkipsBadEntry(t *testing.T) {
+func TestFirstPromptSkipsBadEntry(t *testing.T) {
 	projDir, kbRoot := setupProject(t)
 	writeEntry(t, kbRoot, "rule.md", mandatoryEntry)
 	writeEntry(t, kbRoot, "broken.md", "no frontmatter at all")
 	if err := os.WriteFile(filepath.Join(kbRoot, "INDEX.md"), []byte("# 知识索引\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	in := fmt.Sprintf(`{"hook_event_name":"SessionStart","session_id":"s1","cwd":%q}`, projDir)
+	in := fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":[{"type":"text","text":"随便问问"}]}`, projDir)
 	var out bytes.Buffer
-	if code := HandleSessionStart(strings.NewReader(in), &out); code != 0 {
+	if code := HandlePrompt(strings.NewReader(in), &out); code != 0 {
 		t.Fatalf("exit %d", code)
 	}
 	if !strings.Contains(out.String(), "改完代码先写日志。") {
@@ -116,7 +144,7 @@ func TestPromptSkipsBadEntry(t *testing.T) {
 	projDir, kbRoot := setupProject(t)
 	writeEntry(t, kbRoot, "git.md", gitEntry)
 	writeEntry(t, kbRoot, "broken.md", "---\ntitle: x\ntype: bogus\n---\n")
-	in := fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":"git 提交"}`, projDir)
+	in := fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":[{"type":"text","text":"git 提交"}]}`, projDir)
 	var out bytes.Buffer
 	if code := HandlePrompt(strings.NewReader(in), &out); code != 0 {
 		t.Fatalf("exit %d", code)
@@ -128,7 +156,7 @@ func TestPromptSkipsBadEntry(t *testing.T) {
 
 func TestPromptUnregisteredProjectSilent(t *testing.T) {
 	t.Setenv("OK_HOME", t.TempDir())
-	in := `{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":"/nowhere","prompt":"git"}`
+	in := `{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":"/nowhere","prompt":[{"type":"text","text":"git"}]}`
 	var out bytes.Buffer
 	if code := HandlePrompt(strings.NewReader(in), &out); code != 0 || out.Len() != 0 {
 		t.Fatalf("expected silent 0, got %d %q", code, out.String())
@@ -148,7 +176,7 @@ message = "请补变更日志"
 		t.Fatal(err)
 	}
 	codeFile := filepath.Join(projDir, "main.go")
-	post := fmt.Sprintf(`{"hook_event_name":"PostToolUse","session_id":"s1","cwd":%q,"tool_name":"Write","tool_input":{"file_path":%q}}`, projDir, codeFile)
+	post := fmt.Sprintf(`{"hook_event_name":"PostToolUse","session_id":"s1","cwd":%q,"tool_name":"Write","tool_input":{"path":%q}}`, projDir, codeFile)
 	if code := HandlePostTool(strings.NewReader(post)); code != 0 {
 		t.Fatalf("post-tool exit %d", code)
 	}
@@ -167,9 +195,9 @@ message = "请补变更日志"
 	}
 	// 新会话：触碰代码 + 触碰变更日志 → 放行
 	cl := filepath.Join(projDir, "docs", "changelogs", "2026-07-22.md")
-	post2 := fmt.Sprintf(`{"hook_event_name":"PostToolUse","session_id":"s2","cwd":%q,"tool_name":"Write","tool_input":{"file_path":%q}}`, projDir, codeFile)
+	post2 := fmt.Sprintf(`{"hook_event_name":"PostToolUse","session_id":"s2","cwd":%q,"tool_name":"Write","tool_input":{"path":%q}}`, projDir, codeFile)
 	_ = HandlePostTool(strings.NewReader(post2))
-	post3 := fmt.Sprintf(`{"hook_event_name":"PostToolUse","session_id":"s2","cwd":%q,"tool_name":"Write","tool_input":{"file_path":%q}}`, projDir, cl)
+	post3 := fmt.Sprintf(`{"hook_event_name":"PostToolUse","session_id":"s2","cwd":%q,"tool_name":"Write","tool_input":{"path":%q}}`, projDir, cl)
 	_ = HandlePostTool(strings.NewReader(post3))
 	stderr.Reset()
 	stop2 := fmt.Sprintf(`{"hook_event_name":"Stop","session_id":"s2","cwd":%q}`, projDir)

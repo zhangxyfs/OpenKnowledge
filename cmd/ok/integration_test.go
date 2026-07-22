@@ -83,21 +83,19 @@ func TestEndToEnd(t *testing.T) {
 		t.Fatalf("add mandatory failed: code=%d", code)
 	}
 
-	// session-start：注入 mandatory 全文 + 索引，不含非 mandatory 正文
-	ev := fmt.Sprintf(`{"hook_event_name":"SessionStart","session_id":"s1","cwd":%q}`, proj)
-	stdout, _, code = runOK(t, home, proj, ev, "hook", "session-start")
-	if code != 0 || !strings.Contains(stdout, "改完代码先写日志。") || !strings.Contains(stdout, "知识索引") {
-		t.Fatalf("session-start: code=%d out=%q", code, stdout)
+	// 首次 prompt：基础注入（mandatory 全文 + 索引）+ 检索命中
+	mkPrompt := func(text string) string {
+		return fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":[{"type":"text","text":%q}]}`, proj, text)
 	}
-	if strings.Contains(stdout, "Conventional Commits") {
-		t.Fatalf("non-mandatory body leaked: %q", stdout)
+	stdout, _, code = runOK(t, home, proj, mkPrompt("git 提交规范"), "hook", "prompt")
+	if code != 0 || !strings.Contains(stdout, "改完代码先写日志。") || !strings.Contains(stdout, "知识索引") || !strings.Contains(stdout, "Conventional Commits") {
+		t.Fatalf("first prompt: code=%d out=%q", code, stdout)
 	}
 
-	// prompt：关键词命中注入
-	ev = fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":"git 提交规范"}`, proj)
-	stdout, _, code = runOK(t, home, proj, ev, "hook", "prompt")
-	if code != 0 || !strings.Contains(stdout, "Conventional Commits") {
-		t.Fatalf("prompt: code=%d out=%q", code, stdout)
+	// 第二次 prompt（同会话）：不再重复基础注入，检索仍生效
+	stdout, _, code = runOK(t, home, proj, mkPrompt("git 提交规范"), "hook", "prompt")
+	if code != 0 || strings.Contains(stdout, "改完代码先写日志。") || strings.Contains(stdout, "知识索引") || !strings.Contains(stdout, "Conventional Commits") {
+		t.Fatalf("second prompt: code=%d out=%q", code, stdout)
 	}
 
 	// 配置强制规则
@@ -113,7 +111,7 @@ func TestEndToEnd(t *testing.T) {
 
 	// post-tool 触碰代码 → stop 阻断一次 → 第二次放行
 	codeFile := filepath.Join(proj, "main.go")
-	ev = fmt.Sprintf(`{"hook_event_name":"PostToolUse","session_id":"s9","cwd":%q,"tool_name":"Write","tool_input":{"file_path":%q}}`, proj, codeFile)
+	ev := fmt.Sprintf(`{"hook_event_name":"PostToolUse","session_id":"s9","cwd":%q,"tool_name":"Write","tool_input":{"path":%q}}`, proj, codeFile)
 	if _, _, code = runOK(t, home, proj, ev, "hook", "post-tool"); code != 0 {
 		t.Fatalf("post-tool: code=%d", code)
 	}
@@ -127,7 +125,7 @@ func TestEndToEnd(t *testing.T) {
 	}
 
 	// 未注册目录：所有 hook 静默放行
-	ev = fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":"git"}`, filepath.Join(home, "nowhere"))
+	ev = fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":[{"type":"text","text":"git"}]}`, filepath.Join(home, "nowhere"))
 	stdout, _, code = runOK(t, home, proj, ev, "hook", "prompt")
 	if code != 0 || stdout != "" {
 		t.Fatalf("unregistered should be silent: code=%d out=%q", code, stdout)

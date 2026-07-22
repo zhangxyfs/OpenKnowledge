@@ -12,6 +12,7 @@ type Session struct {
 	SessionID    string   `json:"session_id"`
 	Touched      []string `json:"touched"`
 	BlockedRules []string `json:"blocked_rules"`
+	BaseInjected bool     `json:"base_injected"`
 }
 
 func fileName(sessionID string) string {
