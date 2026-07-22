@@ -72,7 +72,8 @@ paths = ["D:/develop/OpenKnowledge"]
 ```
 
 **项目路由**：hook 从 stdin 取 `cwd`，对所有注册项目的 `paths` 做最长前缀匹配；
-匹配不到任何项目时静默 exit 0（fail-open，不打扰未注册的项目）。
+匹配前对路径做规范化（统一分隔符为 `/`，Windows 下大小写不敏感）。匹配不到
+任何项目时静默 exit 0（fail-open，不打扰未注册的项目）。
 
 ## 5. 知识条目格式
 
@@ -103,7 +104,8 @@ summary: 每次代码修改必须立即记录变更日志
 
 ### UserPromptSubmit
 
-混合检索，每条知识得分 = `α·关键词分 + β·语义分`（α、β 可配置，默认 1.0 / 1.0）：
+混合检索，每条知识得分 = `α·关键词分 + β·语义分`（α、β 在项目 config.toml 的
+`[retrieve]` 节配置，默认 1.0 / 1.0；top-N 同在 `[retrieve]`，键名 `top_n`）：
 
 - **关键词分**：用户提问对 title / tags / summary 的匹配，tags 权重最高。
 - **语义分**：调 embedding API 嵌入用户提问，与 vectors.json 中缓存的条目向量
@@ -116,7 +118,8 @@ summary: 每次代码修改必须立即记录变更日志
 - embedding 请求独立超时（默认 5s），失败或超时**降级为纯关键词检索**。
 - 条目向量在 `ok add` 时自动增量更新（按文件 mtime 判断）；hook 路径上从不为
   条目算向量，每次调用只为提问算一次 embedding。
-- 注入文本按 `max_tokens` 预算截断（字符数粗估 token，宁少勿多）。
+- 注入文本按 `inject.max_tokens` 预算截断，token 按"字符数 ÷ 2"保守估算
+  （中英文混排宁少勿多）。
 
 ## 7. 强制检查（PostToolUse + Stop）
 
@@ -149,7 +152,7 @@ PostToolUse 会记录，下次 Stop 自然放行。无 enforce 配置时 Stop �
 | 命令 | 作用 |
 |---|---|
 | `ok init <name>` | 在当前目录注册项目（写 registry），创建 KB 骨架，并打印需追加到 `~/.kimi-code/config.toml` 的 hooks 配置块 |
-| `ok add` | 按模板新建知识条目（flags: `--title --type --tags --mandatory --file`），自动重建 INDEX、增量更新向量 |
+| `ok add` | 按模板新建知识条目（flags: `--title --type --tags --mandatory --file`；`--file` 指定正文来源文件，不带时生成模板文件供手动编辑），自动重建 INDEX、增量更新向量 |
 | `ok search <query>` | 命令行跑一遍混合检索，预览注入效果（调试用） |
 | `ok index` | 全量重建 vectors.json |
 | `ok list` | 列出项目与条目 |
@@ -192,6 +195,14 @@ base_url = "https://api.openai.com/v1"
 api_key_env = "OPENAI_API_KEY"    # 从环境变量读取，不写明文
 model = "text-embedding-3-small"
 timeout_sec = 5
+
+[inject]
+max_tokens = 1500        # 每次注入的预算上限（SessionStart / UserPromptSubmit 各自适用）
+
+[retrieve]
+alpha = 1.0              # 关键词分权重
+beta = 1.0               # 语义分权重
+top_n = 3                # UserPromptSubmit 注入条数
 ```
 
 ## 9. 错误处理
