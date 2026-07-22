@@ -1,0 +1,96 @@
+package cli
+
+import (
+	"bytes"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"openknowledge/internal/entry"
+)
+
+// chdir 切换工作目录并在结束时还原。
+func chdir(t *testing.T, dir string) {
+	t.Helper()
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(old) })
+}
+
+func TestInitAddSearchList(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("OK_HOME", home)
+	t.Setenv("OPENAI_API_KEY", "") // 防止真实网络调用，保证测试离线
+	proj := filepath.Join(home, "demo")
+	if err := os.MkdirAll(proj, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	chdir(t, proj)
+	var out, errBuf bytes.Buffer
+
+	// init
+	if code := Init([]string{"demo"}, &out, &errBuf); code != 0 {
+		t.Fatalf("init code=%d err=%q", code, errBuf.String())
+	}
+	if !strings.Contains(out.String(), "[[hooks]]") {
+		t.Fatalf("init should print hooks block, got %q", out.String())
+	}
+
+	// add（无 embedding key → 提示跳过向量，仍成功）
+	body := filepath.Join(proj, "body.md")
+	if err := os.WriteFile(body, []byte("使用 Conventional Commits。"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	code := Add([]string{"--title", "Git 提交规范", "--type", "note", "--tags", "git", "--file", body}, &out, &errBuf)
+	if code != 0 {
+		t.Fatalf("add code=%d err=%q", code, errBuf.String())
+	}
+	kb := filepath.Join(home, "projects", "demo")
+	entries, err := entry.Load(filepath.Join(kb, "knowledge"))
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("entries %+v err=%v", entries, err)
+	}
+	if data, err := os.ReadFile(filepath.Join(kb, "INDEX.md")); err != nil || !strings.Contains(string(data), "Git 提交规范") {
+		t.Fatalf("INDEX not rebuilt: %v %q", err, data)
+	}
+
+	// 重复 add 同名条目 → 失败
+	out.Reset()
+	if code := Add([]string{"--title", "Git 提交规范", "--type", "note"}, &out, &errBuf); code == 0 {
+		t.Fatal("expected duplicate add to fail")
+	}
+
+	// search（无 embedding key → 纯关键词）
+	out.Reset()
+	if code := Search([]string{"git", "提交"}, &out, &errBuf); code != 0 {
+		t.Fatalf("search code=%d err=%q", code, errBuf.String())
+	}
+	if !strings.Contains(out.String(), "Git 提交规范") {
+		t.Fatalf("search should hit, got %q", out.String())
+	}
+
+	// list
+	out.Reset()
+	if code := List(nil, &out, &errBuf); code != 0 {
+		t.Fatalf("list code=%d", code)
+	}
+	if !strings.Contains(out.String(), "demo") || !strings.Contains(out.String(), "Git 提交规范") {
+		t.Fatalf("list output %q", out.String())
+	}
+}
+
+func TestAddOutsideProjectFails(t *testing.T) {
+	t.Setenv("OK_HOME", t.TempDir())
+	chdir(t, t.TempDir())
+	var out, errBuf bytes.Buffer
+	if code := Add([]string{"--title", "X", "--type", "note"}, &out, &errBuf); code == 0 {
+		t.Fatal("expected failure outside registered project")
+	}
+}
