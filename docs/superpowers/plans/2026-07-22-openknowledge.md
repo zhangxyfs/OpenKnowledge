@@ -2866,3 +2866,266 @@ git commit -m "test: end-to-end integration test via compiled binary"
 2. 把 `ok init` 打印的 hooks 块追加到 `~/.kimi-code/config.toml`。
 3. **验证 stdin 字段名**（Global Constraints 中的 `prompt` / `tool_input.file_path` 是按 Kimi/Claude 约定假设的）：临时把 prompt hook 改为 `command = "sh -c 'cat > /tmp/ok-prompt.json'"`，在 Kimi Code 中发一条消息，检查 `/tmp/ok-prompt.json` 里提问文本的实际字段名；同样用 Write 工具触发一次 PostToolUse 验证 `file_path`。若字段名不同，改 `internal/hook/hook.go` 中 `Event` 结构体的 json tag 并回归 `go test ./...`。
 4. 恢复正式 hooks 配置，新开 Kimi Code 会话验证：启动时注入 mandatory + 索引；提问相关关键词时注入条目；修改 `.go` 文件后结束回合被阻断并提示补变更日志。
+
+---
+
+## 验收修正（2026-07-22 真实 Kimi Code 0.28.1 实测后）
+
+真实验收发现三处与载荷假设不符（详见规格附录 A）：
+
+1. `UserPromptSubmit` 的 `prompt` 是内容块数组 `[{"type":"text","text":"..."}]`，
+   不是字符串 —— 原 `Event.Prompt string` 解析失败，`HandlePrompt` 静默 exit 0。
+2. SessionStart 的 stdout **不进入上下文**（标记注入实验：UserPromptSubmit 标记
+   1 命中，SessionStart 标记 0 命中）—— SessionStart 注入通道不存在。
+3. `PostToolUse` 的文件路径字段是 `tool_input.path`，不是 `file_path`。
+
+### Task 11: 实测修正 —— prompt 数组、path 字段、基础注入迁移
+
+**Files:**
+- Modify: `internal/hook/hook.go`（Event 结构、PromptText/FilePath、HandlePrompt 重写、删 HandleSessionStart）
+- Modify: `internal/state/state.go`（Session 增加字段）
+- Modify: `cmd/ok/main.go`（删 session-start 分支）
+- Modify: `internal/cli/cli.go`（hooksBlock 删 SessionStart 条目）
+- Test: `internal/hook/hook_test.go`
+- Test: `cmd/ok/integration_test.go`
+
+**Interfaces:**
+- Consumes: 现有全部包接口
+- Produces:
+  - `Event.Prompt` 改为 `json.RawMessage`；新增 `(e *Event) PromptText() string`
+  - `(e *Event) FilePath() string`：`tool_input.path` 优先，兼容 `file_path`
+  - `state.Session` 新增字段 `BaseInjected bool`（json: `base_injected`）
+  - `hook.HandleSessionStart` 删除；`HandlePrompt` 承担基础注入 + 检索注入
+
+- [ ] **Step 1: 改测试（先失败）**
+
+`internal/hook/hook_test.go` 调整：
+
+1. 所有 prompt 载荷改为真实数组形态，例如：
+   `"prompt":[{"type":"text","text":"git 提交规范是什么"}]`
+2. 所有 PostToolUse 载荷的 `"file_path"` 改为 `"path"`。
+3. 删除 `TestSessionStartInjectsMandatoryAndIndex`，替换为：
+
+```go
+func TestFirstPromptInjectsBaseOnce(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	writeEntry(t, kbRoot, "rule.md", mandatoryEntry)
+	writeEntry(t, kbRoot, "git.md", gitEntry)
+	if err := os.WriteFile(filepath.Join(kbRoot, "INDEX.md"), []byte("# 知识索引\n\n- **Git 提交规范**\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mkPrompt := func(text string) string {
+		return fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":[{"type":"text","text":%q}]}`, projDir, text)
+	}
+	var out bytes.Buffer
+	// 首次提问：基础注入（mandatory 全文 + 索引）+ 检索命中
+	if code := HandlePrompt(strings.NewReader(mkPrompt("git 提交规范是什么")), &out); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	got := out.String()
+	if !strings.Contains(got, "改完代码先写日志。") || !strings.Contains(got, "知识索引") {
+		t.Fatalf("first prompt missing base injection: %q", got)
+	}
+	if !strings.Contains(got, "Conventional Commits") {
+		t.Fatalf("first prompt missing retrieval: %q", got)
+	}
+	// 第二次提问（同会话）：不再重复基础注入，检索仍生效
+	out.Reset()
+	if code := HandlePrompt(strings.NewReader(mkPrompt("git 提交规范是什么")), &out); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	got = out.String()
+	if strings.Contains(got, "改完代码先写日志。") || strings.Contains(got, "知识索引") {
+		t.Fatalf("base injection repeated: %q", got)
+	}
+	if !strings.Contains(got, "Conventional Commits") {
+		t.Fatalf("retrieval lost on second prompt: %q", got)
+	}
+}
+
+func TestPromptStringFormCompat(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	writeEntry(t, kbRoot, "git.md", gitEntry)
+	in := fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":"git 提交"}`, projDir)
+	var out bytes.Buffer
+	if code := HandlePrompt(strings.NewReader(in), &out); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if !strings.Contains(out.String(), "Conventional Commits") {
+		t.Fatalf("string prompt form broken: %q", out.String())
+	}
+}
+```
+
+`cmd/ok/integration_test.go` 调整：
+- 删去 `hook session-start` 调用段；改为：首次 `hook prompt` 断言同时含
+  mandatory 正文（"改完代码先写日志。"）、知识索引与检索命中；第二次
+  `hook prompt` 断言不含 mandatory 正文与"知识索引"但仍含检索命中。
+- PostToolUse 载荷 `"file_path"` 改 `"path"`。
+
+- [ ] **Step 2: 运行测试确认失败**
+
+Run: `go test ./internal/hook/ ./cmd/ok/`
+Expected: FAIL（当前实现解析数组 prompt 失败；无基础注入）
+
+- [ ] **Step 3: 实现**
+
+`internal/state/state.go` — Session 增加字段（其余不动）：
+
+```go
+type Session struct {
+	SessionID    string   `json:"session_id"`
+	Touched      []string `json:"touched"`
+	BlockedRules []string `json:"blocked_rules"`
+	BaseInjected bool     `json:"base_injected"`
+}
+```
+
+`internal/hook/hook.go` — Event 与 FilePath/PromptText：
+
+```go
+type Event struct {
+	HookEventName string          `json:"hook_event_name"`
+	SessionID     string          `json:"session_id"`
+	Cwd           string          `json:"cwd"`
+	ToolName      string          `json:"tool_name"`
+	ToolInput     json.RawMessage `json:"tool_input"`
+	Prompt        json.RawMessage `json:"prompt"`
+}
+
+// PromptText 提取提问文本：兼容字符串与内容块数组 [{"type":"text","text":"..."}]。
+func (e *Event) PromptText() string {
+	if len(e.Prompt) == 0 {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(e.Prompt, &s); err == nil {
+		return s
+	}
+	var parts []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(e.Prompt, &parts); err != nil {
+		return ""
+	}
+	var texts []string
+	for _, p := range parts {
+		if p.Text != "" {
+			texts = append(texts, p.Text)
+		}
+	}
+	return strings.Join(texts, "\n")
+}
+
+// FilePath 从 tool_input 提取文件路径：kimi 用 path，兼容 file_path。
+func (e *Event) FilePath() string {
+	var ti struct {
+		Path     string `json:"path"`
+		FilePath string `json:"file_path"`
+	}
+	if len(e.ToolInput) > 0 {
+		_ = json.Unmarshal(e.ToolInput, &ti)
+	}
+	if ti.Path != "" {
+		return ti.Path
+	}
+	return ti.FilePath
+}
+```
+
+删除 `HandleSessionStart` 整个函数。`HandlePrompt` 重写为：
+
+```go
+// HandlePrompt 基础注入（每会话首次：mandatory 全文 + 索引）+ 检索注入（每次）。
+// embedding 失败降级为关键词检索；任何内部错误 fail-open。
+func HandlePrompt(r io.Reader, w io.Writer) int {
+	ev, err := ParseEvent(r)
+	if err != nil {
+		logErr("prompt parse: %v", err)
+		return 0
+	}
+	promptText := ev.PromptText()
+	if strings.TrimSpace(promptText) == "" {
+		return 0
+	}
+	pc, err := project.FromCwd(ev.Cwd)
+	if err != nil {
+		return 0
+	}
+	entries, errs := entry.LoadTolerant(pc.Store.KnowledgeDir())
+	for _, e := range errs {
+		logErr("prompt skip bad entry: %v", e)
+	}
+	st := state.Load(pc.Store.StateDir(), ev.SessionID)
+	var b strings.Builder
+	if !st.BaseInjected {
+		_ = state.Clean(pc.Store.StateDir(), 7*24*time.Hour)
+		base := b.Len()
+		for _, e := range entries {
+			if !e.Mandatory {
+				continue
+			}
+			fmt.Fprintf(&b, "## %s\n\n%s\n\n", e.Title, e.Body)
+		}
+		if idx, err := os.ReadFile(pc.Store.IndexPath()); err == nil {
+			b.Write(idx)
+		}
+		if b.Len() > base {
+			st.BaseInjected = true
+			if err := st.Save(pc.Store.StateDir()); err != nil {
+				logErr("prompt save state: %v", err)
+			}
+		}
+	}
+	vs, err := embed.LoadVectors(pc.Store.VectorsPath())
+	if err != nil {
+		logErr("prompt load vectors: %v", err)
+		vs = nil
+	}
+	var queryVec []float32
+	if key := os.Getenv(pc.Config.Embedding.APIKeyEnv); key != "" && pc.Config.Embedding.BaseURL != "" {
+		client := &embed.OpenAIClient{
+			BaseURL: pc.Config.Embedding.BaseURL,
+			APIKey:  key,
+			Model:   pc.Config.Embedding.Model,
+			Timeout: time.Duration(pc.Config.Embedding.TimeoutSec) * time.Second,
+		}
+		if vec, err := client.Embed(context.Background(), promptText); err != nil {
+			logErr("prompt embed: %v", err)
+		} else {
+			queryVec = vec
+		}
+	}
+	ranked := retrieve.Rank(entries, promptText, queryVec, vs, pc.Config.Retrieve)
+	for _, s := range ranked {
+		fmt.Fprintf(&b, "## %s\n\n%s\n\n", s.Entry.Title, s.Entry.Body)
+	}
+	out := store.TruncateToBudget(b.String(), pc.Config.Inject.MaxTokens)
+	if strings.TrimSpace(out) != "" {
+		fmt.Fprintln(w, out)
+	}
+	return 0
+}
+```
+
+`cmd/ok/main.go` — 删除 `case "session-start"` 分支。
+
+`internal/cli/cli.go` — hooksBlock 删除 SessionStart 的 `[[hooks]]` 条目（保留
+UserPromptSubmit / PostToolUse / Stop 三条）。
+
+- [ ] **Step 4: 运行测试确认通过**
+
+Run: `go build ./... && go test ./... -v`
+Expected: 全部 PASS（含更新后的集成测试）
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add internal/hook/ internal/state/ cmd/ok/ internal/cli/
+git commit -m "fix: parse real kimi hook payloads and move base injection to first prompt"
+```
+
+**验收（控制器执行，非本任务）**：更新 `~/.kimi-code/config.toml` 为三条 hook，
+真实 kimi 会话复验：首次提问上下文含 mandatory+索引；PostToolUse 记录生效；
+改代码后 Stop 阻断。

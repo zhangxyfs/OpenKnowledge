@@ -21,7 +21,7 @@ v1 只支持 Kimi Code，调用方式只用 hooks。
 
 - Go 单二进制 CLI（`ok`），内含 hooks 入口与管理子命令
 - 集中式存储 + 项目注册表（按 cwd 路由项目）
-- SessionStart 注入（mandatory 条目全文 + 轻量索引）
+- 每会话首次提问注入（mandatory 条目全文 + 轻量索引）
 - UserPromptSubmit 混合检索注入（关键词 + 向量语义）
 - PostToolUse + Stop 强制检查（v1 规则类型：`changelog_required`）
 - OpenAI 兼容 API 的 embedding
@@ -97,12 +97,16 @@ summary: 每次代码修改必须立即记录变更日志
 
 ## 6. 检索与注入
 
-### SessionStart（matcher: `startup|resume`）
+**注入通道只有 UserPromptSubmit**（实测 SessionStart 的 stdout 不进入上下文，
+见附录 A）。注入分两部分：
 
-注入内容 = 全部 `mandatory: true` 条目全文 + INDEX.md 全文。受项目配置
-`inject.max_tokens`（默认 1500）预算限制；超出时 mandatory 条目优先，INDEX 截断。
+### 基础注入（每会话首次提问一次）
 
-### UserPromptSubmit
+某会话第一次触发 UserPromptSubmit 时，基础注入 = 全部 `mandatory: true` 条目
+全文 + INDEX.md 全文。注入后在 session state 中标记 `base_injected`，后续提问
+不再重复（内容已存在于会话历史中）。
+
+### 检索注入（每次提问）
 
 混合检索，每条知识得分 = `α·关键词分 + β·语义分`（α、β 在项目 config.toml 的
 `[retrieve]` 节配置，默认 1.0 / 1.0；top-N 同在 `[retrieve]`，键名 `top_n`）：
@@ -118,13 +122,13 @@ summary: 每次代码修改必须立即记录变更日志
 - embedding 请求独立超时（默认 5s），失败或超时**降级为纯关键词检索**。
 - 条目向量在 `ok add` 时自动增量更新（按文件 mtime 判断）；hook 路径上从不为
   条目算向量，每次调用只为提问算一次 embedding。
-- 注入文本按 `inject.max_tokens` 预算截断，token 按"字符数 ÷ 2"保守估算
-  （中英文混排宁少勿多）。
+- 注入文本（基础注入 + 检索注入合并）按 `inject.max_tokens` 预算截断，token 按
+  "字符数 ÷ 2"保守估算；超出时 mandatory 条目优先，检索结果其次，INDEX 最后。
 
 ## 7. 强制检查（PostToolUse + Stop）
 
-- **PostToolUse**（matcher: `Write|Edit`）：把本会话触碰的文件路径追加到
-  `state/session-<session_id>.json`。
+- **PostToolUse**（matcher: `Write|Edit`）：从 `tool_input.path` 取文件路径，
+  把本会话触碰的文件路径追加到 `state/session-<session_id>.json`。
 - **Stop**：评估项目 config.toml 中的 `[[enforce]]` 规则。v1 支持一种类型：
 
 ```toml
@@ -145,7 +149,8 @@ PostToolUse 会记录，下次 Stop 自然放行。无 enforce 配置时 Stop �
 教会 AI；hook 只机械检查"日志文件有没有被碰过"，不理解细则，保持检查逻辑
 简单可靠。
 
-会话状态文件按 `session_id` 隔离，超过 7 天的在 SessionStart 时清理。
+会话状态文件按 `session_id` 隔离，记录触碰文件、已阻断规则与 `base_injected`
+标记；超过 7 天的状态文件在首次提问注入时清理。
 
 ## 8. CLI 命令面与 hooks 配置
 
@@ -157,19 +162,13 @@ PostToolUse 会记录，下次 Stop 自然放行。无 enforce 配置时 Stop �
 | `ok index` | 全量重建 vectors.json |
 | `ok list` | 列出项目与条目 |
 | `ok doctor` | 检查注册表、配置、embedding API 连通性 |
-| `ok hook session-start` | SessionStart 入口 |
-| `ok hook prompt` | UserPromptSubmit 入口 |
+| `ok hook prompt` | UserPromptSubmit 入口（基础注入 + 检索注入） |
 | `ok hook stop` | Stop 入口 |
 | `ok hook post-tool` | PostToolUse 入口 |
 
 hooks 配置块（全局一份，由 `ok init` 打印供用户追加）：
 
 ```toml
-[[hooks]]
-event = "SessionStart"
-command = "ok hook session-start"
-timeout = 10
-
 [[hooks]]
 event = "UserPromptSubmit"
 command = "ok hook prompt"
@@ -197,7 +196,7 @@ model = "text-embedding-3-small"
 timeout_sec = 5
 
 [inject]
-max_tokens = 1500        # 每次注入的预算上限（SessionStart / UserPromptSubmit 各自适用）
+max_tokens = 1500        # 每次注入的预算上限（基础注入与检索注入合并计算）
 
 [retrieve]
 alpha = 1.0              # 关键词分权重
@@ -216,7 +215,7 @@ top_n = 3                # UserPromptSubmit 注入条数
 
 - Go 单元测试：存储读写、frontmatter 解析、混合检索打分、enforce 规则判定、
   项目路由（最长前缀匹配）。
-- 集成测试：用编译好的二进制喂 stdin JSON 模拟四种 hook 事件，断言 exit code
+- 集成测试：用编译好的二进制喂 stdin JSON 模拟三种 hook 事件，断言 exit code
   与 stdout 内容（表驱动）。
 - embedding API 抽象为接口，测试用 fake 实现，不碰真实网络。
 
@@ -226,7 +225,23 @@ top_n = 3                # UserPromptSubmit 注入条数
 |---|---|
 | 技术栈 | Go 单二进制（hook 启动快、零运行时依赖） |
 | 存储 | 集中存储 `~/.openknowledge/` + registry 项目映射 |
-| 注入时机 | SessionStart + UserPromptSubmit + Stop 全套 |
+| 注入时机 | UserPromptSubmit 单通道（首次提问基础注入 + 每次检索注入）+ Stop 强制检查 |
 | 检索 | 关键词 + 向量语义混合，embedding 走 OpenAI 兼容 API |
 | 知识写入 | 人工维护 Markdown 为主，`ok add` 辅助 |
 | 失败策略 | 全面 fail-open |
+
+## 附录 A：Kimi Code hooks 实测行为（0.28.1 实测验证）
+
+以下来自对真实 Kimi Code 0.28.1 的 hook 载荷抓取与标记注入实验：
+
+- `UserPromptSubmit` 载荷的 `prompt` 是内容块数组：
+  `"prompt":[{"type":"text","text":"..."}]`，不是字符串。解析需兼容数组
+  （拼接 text 块）与字符串两种形态。
+- `SessionStart` 的 stdout **不进入上下文**（观察型事件，fire-and-forget）；
+  其载荷含额外字段 `source`（`startup`/`resume`）。因此基础注入只能走
+  UserPromptSubmit。
+- `PostToolUse` 载荷中文件路径字段是 `tool_input.path`（不是 Claude Code 的
+  `file_path`）；解析时 `path` 优先、兼容 `file_path`。
+- hook 命令在 Windows 上由系统 shell 执行，`sh -c` 不可用；直接的可执行文件
+  路径（如 `D:/path/ok.exe hook prompt`）可用。
+
