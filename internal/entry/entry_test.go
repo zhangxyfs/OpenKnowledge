@@ -89,3 +89,31 @@ func TestLoad(t *testing.T) {
 		t.Fatalf("unexpected %+v", entries)
 	}
 }
+
+func TestLoadTolerant(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "good.md"), []byte(sample), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	badPath := filepath.Join(dir, "bad.md")
+	if err := os.WriteFile(badPath, []byte("---\ntitle: x\ntype: bogus\n---\nbody\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	entries, errs := LoadTolerant(dir)
+	if len(entries) != 1 || entries[0].Title != "变更日志强制规则" {
+		t.Fatalf("expected 1 valid entry, got %+v", entries)
+	}
+	if len(errs) != 1 || !strings.Contains(errs[0].Error(), badPath) {
+		t.Fatalf("expected 1 error mentioning %q, got %v", badPath, errs)
+	}
+
+	// 全部有效 → errs 为空
+	dir2 := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir2, "a.md"), []byte(sample), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	entries2, errs2 := LoadTolerant(dir2)
+	if len(entries2) != 1 || len(errs2) != 0 {
+		t.Fatalf("all-valid: entries=%d errs=%v", len(entries2), errs2)
+	}
+}

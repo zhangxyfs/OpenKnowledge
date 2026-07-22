@@ -93,6 +93,31 @@ func Load(dir string) ([]*Entry, error) {
 	return entries, nil
 }
 
+// LoadTolerant 与 Load 相同，但单个文件读取/解析失败时跳过并收集错误，
+// 只返回成功解析的条目；供 hook 注入路径使用，避免一个坏文件禁用全部注入。
+func LoadTolerant(dir string) (entries []*Entry, errs []error) {
+	matches, err := filepath.Glob(filepath.Join(dir, "*.md"))
+	if err != nil {
+		return nil, []error{err}
+	}
+	sort.Strings(matches)
+	for _, m := range matches {
+		data, err := os.ReadFile(m)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		e, err := Parse(data)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", m, err))
+			continue
+		}
+		e.Path = m
+		entries = append(entries, e)
+	}
+	return entries, errs
+}
+
 // Slug 将标题转为安全文件名（不含扩展名）。
 func Slug(title string) string {
 	title = strings.TrimSpace(title)

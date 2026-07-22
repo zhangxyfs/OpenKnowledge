@@ -252,20 +252,24 @@ func Search(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// Index: ok index —— 全量重建向量
+// Index: ok index —— 重建 INDEX.md 并全量重建向量
 func Index(args []string, stdout, stderr io.Writer) int {
 	pc, code := resolveFromCwd(stderr)
 	if pc == nil {
 		return code
 	}
-	client := embeddingClient(pc)
-	if client == nil {
-		fmt.Fprintln(stderr, "未配置 embedding API key，无法重建向量")
-		return 1
-	}
 	entries, err := entry.Load(pc.Store.KnowledgeDir())
 	if err != nil {
 		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if err := pc.Store.RebuildIndex(entries); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	client := embeddingClient(pc)
+	if client == nil {
+		fmt.Fprintln(stderr, "INDEX 已重建；未配置 embedding API key，跳过向量重建")
 		return 1
 	}
 	vs := &embed.VectorSet{Vectors: map[string]*embed.EntryVector{}}
@@ -277,7 +281,7 @@ func Index(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "已重建 %d 条向量\n", len(vs.Vectors))
+	fmt.Fprintf(stdout, "INDEX 已重建；已重建 %d 条向量\n", len(vs.Vectors))
 	return 0
 }
 

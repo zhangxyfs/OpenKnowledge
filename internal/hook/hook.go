@@ -73,10 +73,9 @@ func HandleSessionStart(r io.Reader, w io.Writer) int {
 		return 0
 	}
 	_ = state.Clean(pc.Store.StateDir(), 7*24*time.Hour)
-	entries, err := entry.Load(pc.Store.KnowledgeDir())
-	if err != nil {
-		logErr("session-start load entries: %v", err)
-		return 0
+	entries, errs := entry.LoadTolerant(pc.Store.KnowledgeDir())
+	for _, err := range errs {
+		logErr("session-start skip bad entry: %v", err)
 	}
 	var b strings.Builder
 	for _, e := range entries {
@@ -105,10 +104,9 @@ func HandlePrompt(r io.Reader, w io.Writer) int {
 	if err != nil {
 		return 0
 	}
-	entries, err := entry.Load(pc.Store.KnowledgeDir())
-	if err != nil {
-		logErr("prompt load entries: %v", err)
-		return 0
+	entries, errs := entry.LoadTolerant(pc.Store.KnowledgeDir())
+	for _, err := range errs {
+		logErr("prompt skip bad entry: %v", err)
 	}
 	vs, err := embed.LoadVectors(pc.Store.VectorsPath())
 	if err != nil {

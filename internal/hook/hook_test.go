@@ -95,6 +95,37 @@ func TestPromptKeywordFallback(t *testing.T) {
 	}
 }
 
+func TestSessionStartSkipsBadEntry(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	writeEntry(t, kbRoot, "rule.md", mandatoryEntry)
+	writeEntry(t, kbRoot, "broken.md", "no frontmatter at all")
+	if err := os.WriteFile(filepath.Join(kbRoot, "INDEX.md"), []byte("# 知识索引\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	in := fmt.Sprintf(`{"hook_event_name":"SessionStart","session_id":"s1","cwd":%q}`, projDir)
+	var out bytes.Buffer
+	if code := HandleSessionStart(strings.NewReader(in), &out); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if !strings.Contains(out.String(), "改完代码先写日志。") {
+		t.Fatalf("mandatory entry should survive a corrupt sibling, got %q", out.String())
+	}
+}
+
+func TestPromptSkipsBadEntry(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	writeEntry(t, kbRoot, "git.md", gitEntry)
+	writeEntry(t, kbRoot, "broken.md", "---\ntitle: x\ntype: bogus\n---\n")
+	in := fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":"git 提交"}`, projDir)
+	var out bytes.Buffer
+	if code := HandlePrompt(strings.NewReader(in), &out); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if !strings.Contains(out.String(), "Conventional Commits") {
+		t.Fatalf("expected git entry injected despite corrupt sibling, got %q", out.String())
+	}
+}
+
 func TestPromptUnregisteredProjectSilent(t *testing.T) {
 	t.Setenv("OK_HOME", t.TempDir())
 	in := `{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":"/nowhere","prompt":"git"}`

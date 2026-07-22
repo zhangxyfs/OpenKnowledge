@@ -94,3 +94,40 @@ func TestAddOutsideProjectFails(t *testing.T) {
 		t.Fatal("expected failure outside registered project")
 	}
 }
+
+// 无 API key 时 ok index 仍应重建 INDEX.md（向量跳过，退出码保持 1）。
+func TestIndexRebuildsIndexWithoutAPIKey(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("OK_HOME", home)
+	t.Setenv("OPENAI_API_KEY", "")
+	proj := filepath.Join(home, "demo")
+	if err := os.MkdirAll(proj, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	chdir(t, proj)
+	var out, errBuf bytes.Buffer
+	if code := Init([]string{"demo"}, &out, &errBuf); code != 0 {
+		t.Fatalf("init code=%d err=%q", code, errBuf.String())
+	}
+	// 手工写入条目（绕过 ok add，模拟手工维护后 INDEX 过期）
+	kb := filepath.Join(home, "projects", "demo")
+	manual := "---\ntitle: 手工条目\ntype: note\nsummary: 手工添加\n---\n\n手工正文。\n"
+	if err := os.WriteFile(filepath.Join(kb, "knowledge", "manual.md"), []byte(manual), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errBuf.Reset()
+	if code := Index(nil, &out, &errBuf); code != 1 {
+		t.Fatalf("expected exit 1 without API key, got %d", code)
+	}
+	data, err := os.ReadFile(filepath.Join(kb, "INDEX.md"))
+	if err != nil {
+		t.Fatalf("INDEX.md should exist after ok index: %v", err)
+	}
+	if !strings.Contains(string(data), "手工条目") {
+		t.Fatalf("INDEX should be rebuilt with manual entry, got %q", data)
+	}
+	if !strings.Contains(errBuf.String(), "INDEX") {
+		t.Fatalf("stderr should mention INDEX rebuilt, got %q", errBuf.String())
+	}
+}
