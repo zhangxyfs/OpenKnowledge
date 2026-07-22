@@ -1,0 +1,221 @@
+# OpenKnowledge 设计文档
+
+日期：2026-07-22
+状态：已确认
+
+## 1. 背景与目标
+
+OpenKnowledge 是一个为 AI 编程助手提供的项目知识库系统。知识按项目隔离，通过
+Kimi Code 的 hooks 机制自动注入 AI 上下文，解决两类问题：
+
+1. **静态项目约定**：架构说明、代码规范、强制工作流（如"每次代码修改必须立即
+   记录变更日志"）等，需要始终在 AI 上下文中在场。
+2. **踩坑经验积累**：报错原因、修复方法、注意事项等随使用逐渐积累的知识，需要
+   在相关提问时被检索注入。
+
+v1 只支持 Kimi Code，调用方式只用 hooks。
+
+## 2. 范围
+
+### v1 包含
+
+- Go 单二进制 CLI（`ok`），内含 hooks 入口与管理子命令
+- 集中式存储 + 项目注册表（按 cwd 路由项目）
+- SessionStart 注入（mandatory 条目全文 + 轻量索引）
+- UserPromptSubmit 混合检索注入（关键词 + 向量语义）
+- PostToolUse + Stop 强制检查（v1 规则类型：`changelog_required`）
+- OpenAI 兼容 API 的 embedding
+
+### 非目标（v1 不做）
+
+- 其他 AI 编程工具（Cursor、Claude Code 等）的适配
+- hooks 自动从会话中提取经验写入知识库（写入路径以人工维护为主）
+- 本地 embedding 模型（会引入 ONNX/Python sidecar，破坏单二进制）
+- MCP server 形态
+- 多人协作与知识库远程同步
+
+## 3. 总体架构
+
+单一 Go 二进制 `ok`，两类子命令：
+
+- **`ok hook <event>`**：hooks 调用的入口。从 stdin 读取事件 JSON，处理，按
+  Kimi Code hooks 约定响应（exit 0 = 放行，stdout 追加进上下文；exit 2 = 阻断，
+  stderr 为阻断原因）。
+- **管理子命令**：`init / add / search / index / list / doctor`，供人维护知识库。
+
+Kimi Code 全局配置 `~/.kimi-code/config.toml` 中只需配置一份 hooks（见第 8 节），
+hook 按事件 stdin 中的 `cwd` 自动路由到对应项目知识库。
+
+## 4. 存储布局
+
+集中存储于用户目录：
+
+```
+~/.openknowledge/
+├── ok.log                  # 运行日志（hook 错误等）
+├── registry.toml           # 项目注册表
+└── projects/
+    └── <项目名>/
+        ├── config.toml     # 本项目 KB 配置：embedding、注入预算、强制规则
+        ├── knowledge/      # 知识条目，一文件一条，Markdown
+        ├── INDEX.md        # 自动生成的轻量索引（标题+摘要+tags）
+        ├── vectors.json    # 各条目 embedding 缓存（含文件 mtime）
+        └── state/          # 会话运行时状态 session-<session_id>.json
+```
+
+`registry.toml`：
+
+```toml
+[[project]]
+name = "OpenKnowledge"
+paths = ["D:/develop/OpenKnowledge"]
+```
+
+**项目路由**：hook 从 stdin 取 `cwd`，对所有注册项目的 `paths` 做最长前缀匹配；
+匹配不到任何项目时静默 exit 0（fail-open，不打扰未注册的项目）。
+
+## 5. 知识条目格式
+
+每条知识是一个带 YAML frontmatter 的 Markdown 文件：
+
+```markdown
+---
+title: 变更日志强制规则
+type: rule              # rule | pitfall | note | reference
+tags: [changelog, workflow]
+mandatory: true         # true 时 SessionStart 全文注入
+summary: 每次代码修改必须立即记录变更日志
+---
+正文（Markdown 自由格式）
+```
+
+- `type`：`rule`/`note` 表示静态约定，`pitfall`/`reference` 表示积累的经验与速查。
+- `mandatory: true` 的条目在 SessionStart 时全文注入，保证强制约束始终在场。
+- `INDEX.md` 由工具从全量条目自动生成（标题 + summary + tags），禁止手改；
+  `ok add` 或手动增删条目后自动重建。
+
+## 6. 检索与注入
+
+### SessionStart（matcher: `startup|resume`）
+
+注入内容 = 全部 `mandatory: true` 条目全文 + INDEX.md 全文。受项目配置
+`inject.max_tokens`（默认 1500）预算限制；超出时 mandatory 条目优先，INDEX 截断。
+
+### UserPromptSubmit
+
+混合检索，每条知识得分 = `α·关键词分 + β·语义分`（α、β 可配置，默认 1.0 / 1.0）：
+
+- **关键词分**：用户提问对 title / tags / summary 的匹配，tags 权重最高。
+- **语义分**：调 embedding API 嵌入用户提问，与 vectors.json 中缓存的条目向量
+  计算余弦相似度。
+
+取 top-N（默认 3）注入全文；`mandatory` 条目已在上下文中，不重复注入。
+
+约束：
+
+- embedding 请求独立超时（默认 5s），失败或超时**降级为纯关键词检索**。
+- 条目向量在 `ok add` 时自动增量更新（按文件 mtime 判断）；hook 路径上从不为
+  条目算向量，每次调用只为提问算一次 embedding。
+- 注入文本按 `max_tokens` 预算截断（字符数粗估 token，宁少勿多）。
+
+## 7. 强制检查（PostToolUse + Stop）
+
+- **PostToolUse**（matcher: `Write|Edit`）：把本会话触碰的文件路径追加到
+  `state/session-<session_id>.json`。
+- **Stop**：评估项目 config.toml 中的 `[[enforce]]` 规则。v1 支持一种类型：
+
+```toml
+[[enforce]]
+type = "changelog_required"
+code_globs = ["**/*.go", "src/**"]        # 触碰这些算"改了代码"
+changelog_glob = "docs/changelogs/**"     # 触碰这些算"写了日志"
+message = "本次会话修改了代码但未更新变更日志，请先按规范补齐。"
+```
+
+判定逻辑：会话触碰文件中存在匹配 `code_globs` 的，且不存在匹配
+`changelog_glob` 的 → exit 2 阻断，stderr 输出 `message`，模型被要求继续执行。
+
+防死循环：同一会话同一规则只阻断一次（记入 session state）；模型补写日志后
+PostToolUse 会记录，下次 Stop 自然放行。无 enforce 配置时 Stop 直接 exit 0。
+
+设计边界：变更日志的目录结构、INDEX 更新细则等属于知识条目正文内容，由注入
+教会 AI；hook 只机械检查"日志文件有没有被碰过"，不理解细则，保持检查逻辑
+简单可靠。
+
+会话状态文件按 `session_id` 隔离，超过 7 天的在 SessionStart 时清理。
+
+## 8. CLI 命令面与 hooks 配置
+
+| 命令 | 作用 |
+|---|---|
+| `ok init <name>` | 在当前目录注册项目（写 registry），创建 KB 骨架，并打印需追加到 `~/.kimi-code/config.toml` 的 hooks 配置块 |
+| `ok add` | 按模板新建知识条目（flags: `--title --type --tags --mandatory --file`），自动重建 INDEX、增量更新向量 |
+| `ok search <query>` | 命令行跑一遍混合检索，预览注入效果（调试用） |
+| `ok index` | 全量重建 vectors.json |
+| `ok list` | 列出项目与条目 |
+| `ok doctor` | 检查注册表、配置、embedding API 连通性 |
+| `ok hook session-start` | SessionStart 入口 |
+| `ok hook prompt` | UserPromptSubmit 入口 |
+| `ok hook stop` | Stop 入口 |
+| `ok hook post-tool` | PostToolUse 入口 |
+
+hooks 配置块（全局一份，由 `ok init` 打印供用户追加）：
+
+```toml
+[[hooks]]
+event = "SessionStart"
+command = "ok hook session-start"
+timeout = 10
+
+[[hooks]]
+event = "UserPromptSubmit"
+command = "ok hook prompt"
+timeout = 10
+
+[[hooks]]
+event = "PostToolUse"
+matcher = "Write|Edit"
+command = "ok hook post-tool"
+timeout = 5
+
+[[hooks]]
+event = "Stop"
+command = "ok hook stop"
+timeout = 5
+```
+
+项目 config.toml 中的 embedding 配置：
+
+```toml
+[embedding]
+base_url = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"    # 从环境变量读取，不写明文
+model = "text-embedding-3-small"
+timeout_sec = 5
+```
+
+## 9. 错误处理
+
+- **全面 fail-open**：hook 路径上任何内部错误（配置缺失、API 故障、文件损坏）
+  只记日志到 `~/.openknowledge/ok.log`，exit 0，绝不影响正常会话。
+- embedding 失败降级为纯关键词检索（见第 6 节）。
+- Stop 阻断有防死循环（见第 7 节）。
+
+## 10. 测试策略
+
+- Go 单元测试：存储读写、frontmatter 解析、混合检索打分、enforce 规则判定、
+  项目路由（最长前缀匹配）。
+- 集成测试：用编译好的二进制喂 stdin JSON 模拟四种 hook 事件，断言 exit code
+  与 stdout 内容（表驱动）。
+- embedding API 抽象为接口，测试用 fake 实现，不碰真实网络。
+
+## 11. 技术决策摘要
+
+| 决策点 | 结论 |
+|---|---|
+| 技术栈 | Go 单二进制（hook 启动快、零运行时依赖） |
+| 存储 | 集中存储 `~/.openknowledge/` + registry 项目映射 |
+| 注入时机 | SessionStart + UserPromptSubmit + Stop 全套 |
+| 检索 | 关键词 + 向量语义混合，embedding 走 OpenAI 兼容 API |
+| 知识写入 | 人工维护 Markdown 为主，`ok add` 辅助 |
+| 失败策略 | 全面 fail-open |
