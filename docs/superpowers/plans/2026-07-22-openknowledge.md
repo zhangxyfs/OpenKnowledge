@@ -3595,3 +3595,354 @@ Expected: 全部 PASS
 git add internal/ cmd/ docs/changelogs/
 git commit -m "feat: first-run setup wizard, kimi skills install, and global hooks toggle"
 ```
+
+---
+
+## v1.2 特性（2026-07-23 用户追加需求）
+
+### Task 13: 全局配置合并 + ok setup 交互式 embedding 配置
+
+**Files:**
+- Modify: `internal/config/config.go`（Embedding 加 APIKey；加 LoadMerged 与 ResolvedAPIKey）
+- Modify: `internal/project/project.go`（FromCwd 改用 LoadMerged）
+- Modify: `internal/hook/hook.go`（HandlePrompt 用 ResolvedAPIKey）
+- Modify: `internal/cli/cli.go`（embeddingClient 用 ResolvedAPIKey；defaultProjectConfig 模板改为注释引导）
+- Modify: `internal/cli/setup.go`（Setup 加 embedding 交互/flags；签名加 stdin）
+- Modify: `cmd/ok/main.go`（Setup 调用传 os.Stdin）
+- Create: `docs/changelogs/2026-07-23-setup-embedding.md`
+- Test: `internal/config/config_test.go`（追加）、`internal/cli/setup_test.go`（追加）
+
+**Interfaces:**
+- Consumes: 现有全部包接口
+- Produces:
+  - `config.Embedding` 新增字段 `APIKey string \`toml:"api_key"\``
+  - `config.LoadMerged(projectPath, globalPath string) (Config, error)` — Default ← global ← project
+  - `(e Embedding) ResolvedAPIKey() string` — api_key 优先，其次 api_key_env 环境变量
+  - `cli.Setup(args []string, in io.Reader, stdout, stderr io.Writer) int`（签名变更）
+
+- [ ] **Step 1: 写失败的测试**
+
+`internal/config/config_test.go` 追加：
+
+```go
+func TestLoadMergedPrecedence(t *testing.T) {
+	dir := t.TempDir()
+	global := filepath.Join(dir, "global.toml")
+	project := filepath.Join(dir, "project.toml")
+	if err := os.WriteFile(global, []byte("[retrieve]\ntop_n = 5\n[embedding]\nbase_url = \"https://g.example.com/v1\"\napi_key = \"gk\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(project, []byte("[retrieve]\ntop_n = 9\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadMerged(project, global)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Retrieve.TopN != 9 {
+		t.Fatalf("project should override global, got %d", cfg.Retrieve.TopN)
+	}
+	if cfg.Embedding.BaseURL != "https://g.example.com/v1" || cfg.Embedding.APIKey != "gk" {
+		t.Fatalf("global embedding should apply, got %+v", cfg.Embedding)
+	}
+	if cfg.Inject.MaxTokens != 1500 {
+		t.Fatalf("builtin default lost, got %+v", cfg.Inject)
+	}
+}
+
+func TestLoadMergedMissingFiles(t *testing.T) {
+	cfg, err := LoadMerged(filepath.Join(t.TempDir(), "a.toml"), filepath.Join(t.TempDir(), "b.toml"))
+	if err != nil || cfg.Retrieve.TopN != 3 {
+		t.Fatalf("missing files should yield defaults, got %+v err=%v", cfg, err)
+	}
+}
+
+func TestResolvedAPIKey(t *testing.T) {
+	t.Setenv("OK_TEST_KEY", "envkey")
+	if got := (Embedding{APIKey: "direct", APIKeyEnv: "OK_TEST_KEY"}).ResolvedAPIKey(); got != "direct" {
+		t.Fatalf("direct key should win, got %q", got)
+	}
+	if got := (Embedding{APIKeyEnv: "OK_TEST_KEY"}).ResolvedAPIKey(); got != "envkey" {
+		t.Fatalf("env fallback failed, got %q", got)
+	}
+	if got := (Embedding{}).ResolvedAPIKey(); got != "" {
+		t.Fatalf("expected empty, got %q", got)
+	}
+}
+```
+
+`internal/cli/setup_test.go` 追加：
+
+```go
+func TestSetupWithEmbeddingFlags(t *testing.T) {
+	t.Setenv("OK_HOME", t.TempDir())
+	t.Setenv("KIMI_CODE_HOME", filepath.Join(t.TempDir(), "kimi"))
+	t.Setenv("OK_SKILLS_HOME", t.TempDir())
+	var out, errBuf bytes.Buffer
+	code := Setup([]string{"--embedding-base-url", "https://g.example.com/v1", "--embedding-model", "m1", "--embedding-key", "sk-test"}, strings.NewReader(""), &out, &errBuf)
+	if code != 0 {
+		t.Fatalf("setup code=%d err=%q", code, errBuf.String())
+	}
+	data, err := os.ReadFile(filepath.Join(os.Getenv("OK_HOME"), "config.toml"))
+	if err != nil {
+		t.Fatalf("global config not written: %v", err)
+	}
+	got := string(data)
+	if !strings.Contains(got, `api_key = "sk-test"`) || !strings.Contains(got, `base_url = "https://g.example.com/v1"`) || !strings.Contains(got, `model = "m1"`) {
+		t.Fatalf("global config wrong: %q", got)
+	}
+}
+
+func TestSetupInteractiveSkipKeepsGlobal(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("OK_HOME", home)
+	t.Setenv("KIMI_CODE_HOME", filepath.Join(t.TempDir(), "kimi"))
+	t.Setenv("OK_SKILLS_HOME", t.TempDir())
+	var out, errBuf bytes.Buffer
+	// 三行全回车 → 跳过 embedding 配置，且不得创建/破坏全局配置
+	code := Setup(nil, strings.NewReader("\n\n\n"), &out, &errBuf)
+	if code != 0 {
+		t.Fatalf("setup code=%d err=%q", code, errBuf.String())
+	}
+	if _, err := os.Stat(filepath.Join(home, "config.toml")); !os.IsNotExist(err) {
+		t.Fatal("global config should not be created when skipped")
+	}
+}
+
+func TestInitTemplateHasNoActiveEmbedding(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("OK_HOME", home)
+	proj := filepath.Join(home, "demo")
+	if err := os.MkdirAll(proj, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	chdir(t, proj)
+	var out, errBuf bytes.Buffer
+	if code := Init(nil, &out, &errBuf); code != 0 {
+		t.Fatalf("init code=%d err=%q", code, errBuf.String())
+	}
+	cfg, err := config.Load(filepath.Join(home, "projects", "demo", "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Embedding.BaseURL != "" || cfg.Embedding.APIKey != "" || cfg.Embedding.APIKeyEnv != "" {
+		t.Fatalf("project template should leave embedding empty for global inheritance, got %+v", cfg.Embedding)
+	}
+}
+```
+
+（setup_test.go 需要给 imports 加 `"bytes"`；TestInitTemplateHasNoActiveEmbedding 放在 cli_test.go 则需要加 `"openknowledge/internal/config"` import——任选其一文件放置，对应补 import。）
+
+- [ ] **Step 2: 运行测试确认失败**
+
+Run: `go test ./internal/config/ ./internal/cli/`
+Expected: 编译失败，`undefined: LoadMerged` / `ResolvedAPIKey` / Setup 参数不匹配等
+
+- [ ] **Step 3: 实现**
+
+`internal/config/config.go` — Embedding 加字段；追加 LoadMerged 与 ResolvedAPIKey（需加 `os` import，已有）：
+
+```go
+type Embedding struct {
+	BaseURL    string `toml:"base_url"`
+	APIKey     string `toml:"api_key"`
+	APIKeyEnv  string `toml:"api_key_env"`
+	Model      string `toml:"model"`
+	TimeoutSec int    `toml:"timeout_sec"`
+}
+
+// ResolvedAPIKey 返回生效的 embedding API key：api_key 字段优先，其次 api_key_env 环境变量。
+func (e Embedding) ResolvedAPIKey() string {
+	if e.APIKey != "" {
+		return e.APIKey
+	}
+	if e.APIKeyEnv != "" {
+		return os.Getenv(e.APIKeyEnv)
+	}
+	return ""
+}
+
+// LoadMerged 合并配置：内置默认 ← globalPath ← projectPath，后者覆盖前者。
+// 两个文件都可以不存在（视为空）。
+func LoadMerged(projectPath, globalPath string) (Config, error) {
+	cfg := Default()
+	for _, path := range []string{globalPath, projectPath} {
+		data, err := os.ReadFile(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return cfg, err
+		}
+		if err := toml.Unmarshal(data, &cfg); err != nil {
+			return cfg, fmt.Errorf("解析 %s: %w", path, err)
+		}
+	}
+	return cfg, nil
+}
+```
+
+（config.go 需加 `"fmt"` import；保留现有 `Load` 不动。）
+
+`internal/project/project.go` — FromCwd 中：
+
+```go
+	cfg, err := config.LoadMerged(st.ConfigPath(), filepath.Join(registry.Home(), "config.toml"))
+```
+
+`internal/hook/hook.go` — HandlePrompt 中 key 判断改为：
+
+```go
+	if key := pc.Config.Embedding.ResolvedAPIKey(); key != "" && pc.Config.Embedding.BaseURL != "" {
+```
+
+`internal/cli/cli.go`：
+- `embeddingClient` 中 `key := os.Getenv(pc.Config.Embedding.APIKeyEnv)` 改为
+  `key := pc.Config.Embedding.ResolvedAPIKey()`
+- `defaultProjectConfig` 整体替换为：
+
+```go
+const defaultProjectConfig = `# OpenKnowledge 项目知识库配置
+# [embedding] / [inject] / [retrieve] 缺省继承全局配置 ~/.openknowledge/config.toml。
+# 需要按项目覆盖时自行添加对应小节（字段见 ok setup 输出与设计文档）。
+
+# 强制规则（glob 一律小写；同会话同规则只阻断一次）：
+# [[enforce]]
+# type = "changelog_required"
+# code_globs = ["**/*.go"]
+# changelog_glob = "docs/changelogs/**"
+# message = "本次会话修改了代码但未更新变更日志，请先按规范补齐。"
+`
+```
+
+`internal/cli/setup.go` — Setup 换签名并加 embedding 步骤（追加到文件，需加
+`"bufio"`、`"strings"`（已有）、`"openknowledge/internal/config"`、
+`"openknowledge/internal/embed"`、`"openknowledge/internal/registry"`、
+`"github.com/BurntSushi/toml"`、`"context"`、`"time"` imports）：
+
+```go
+// Setup: ok setup —— 首次引导：写 hooks 配置、装技能、配 embedding、打印引导
+func Setup(args []string, in io.Reader, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("setup", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	baseURL := fs.String("embedding-base-url", "", "embedding base_url")
+	model := fs.String("embedding-model", "", "embedding model")
+	apiKey := fs.String("embedding-key", "", "embedding API key")
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+	cfgPath := filepath.Join(kimiHome(), "config.toml")
+	if data, err := os.ReadFile(cfgPath); err == nil {
+		_ = os.WriteFile(cfgPath+".bak-openknowledge", data, 0o644)
+	}
+	if err := upsertHooksBlock(cfgPath, hooksBlockFor(exe)); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "hooks 配置已写入 %s\n", cfgPath)
+	if err := installSkills(exe); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "技能已安装到 %s (openknowledge-init/on/off)\n", skillsHome())
+	setupEmbedding(fs.NFlag() > 0, *baseURL, *model, *apiKey, in, stdout)
+	fmt.Fprintln(stdout, guideText)
+	return 0
+}
+
+// setupEmbedding 交互或按 flags 写入全局 embedding 配置并验证连通性。
+func setupEmbedding(nonInteractive bool, baseURL, model, apiKey string, in io.Reader, stdout io.Writer) {
+	if !nonInteractive {
+		fmt.Fprintln(stdout, "\n配置 embedding 语义检索（可选，直接回车跳过）：")
+		r := bufio.NewReader(in)
+		fmt.Fprintf(stdout, "base_url [https://api.openai.com/v1]: ")
+		baseURL, _ = r.ReadString('\n')
+		baseURL = strings.TrimSpace(baseURL)
+		fmt.Fprintf(stdout, "model [text-embedding-3-small]: ")
+		model, _ = r.ReadString('\n')
+		model = strings.TrimSpace(model)
+		fmt.Fprintf(stdout, "API key（粘贴后回车；留空跳过）: ")
+		apiKey, _ = r.ReadString('\n')
+		apiKey = strings.TrimSpace(apiKey)
+	}
+	if apiKey == "" {
+		fmt.Fprintln(stdout, "跳过 embedding 配置（仅关键词检索；之后可重跑 ok setup 配置）")
+		return
+	}
+	if baseURL == "" {
+		baseURL = "https://api.openai.com/v1"
+	}
+	if model == "" {
+		model = "text-embedding-3-small"
+	}
+	globalPath := filepath.Join(registry.Home(), "config.toml")
+	cfg, err := config.LoadMerged("", globalPath)
+	if err != nil {
+		fmt.Fprintf(stdout, "全局配置读取失败，跳过 embedding: %v\n", err)
+		return
+	}
+	cfg.Embedding.BaseURL = baseURL
+	cfg.Embedding.Model = model
+	cfg.Embedding.APIKey = apiKey
+	cfg.Embedding.APIKeyEnv = ""
+	var buf strings.Builder
+	if err := toml.NewEncoder(&buf).Encode(cfg); err != nil {
+		fmt.Fprintf(stdout, "全局配置编码失败: %v\n", err)
+		return
+	}
+	if err := os.MkdirAll(registry.Home(), 0o755); err != nil {
+		fmt.Fprintf(stdout, "%v\n", err)
+		return
+	}
+	if err := os.WriteFile(globalPath, []byte(buf.String()), 0o600); err != nil {
+		fmt.Fprintf(stdout, "全局配置写入失败: %v\n", err)
+		return
+	}
+	fmt.Fprintf(stdout, "embedding 已写入全局配置 %s\n", globalPath)
+	client := &embed.OpenAIClient{BaseURL: baseURL, APIKey: apiKey, Model: model, Timeout: 10 * time.Second}
+	if _, err := client.Embed(context.Background(), "ping"); err != nil {
+		fmt.Fprintf(stdout, "embedding 连通性验证失败（不影响使用关键词检索）: %v\n", err)
+	} else {
+		fmt.Fprintln(stdout, "embedding 连通性验证通过")
+	}
+}
+```
+
+`cmd/ok/main.go` — Setup 调用改为：
+
+```go
+	case "setup":
+		return cli.Setup(argv[2:], os.Stdin, os.Stdout, os.Stderr)
+```
+
+`docs/changelogs/2026-07-23-setup-embedding.md`：
+
+```markdown
+# ok setup 交互式 embedding 配置 + 全局配置合并
+
+- 新增全局配置 ~/.openknowledge/config.toml：内置默认 ← 全局 ← 项目，后者覆盖前者。
+- embedding 新增 api_key 字段（0600 落盘），ResolvedAPIKey 优先取字段、其次环境变量。
+- ok setup 增加 embedding 交互配置（base_url/model/API key，回车跳过），支持
+  --embedding-base-url/--embedding-model/--embedding-key 非交互 flags，写完即验连通性。
+- ok init 的项目配置模板不再预置 embedding/inject/retrieve，缺省全部继承全局。
+```
+
+- [ ] **Step 4: 运行测试确认通过**
+
+Run: `go build ./... && go test ./... -v`
+Expected: 全部 PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add internal/ cmd/ docs/changelogs/
+git commit -m "feat: global config merge and interactive embedding setup"
+```

@@ -26,6 +26,7 @@ v1 只支持 Kimi Code，调用方式只用 hooks。
 - PostToolUse + Stop 强制检查（v1 规则类型：`changelog_required`）
 - OpenAI 兼容 API 的 embedding
 - `ok setup` 首次引导（自动写入 hooks 配置、安装 kimi 技能）
+- `ok setup` 交互式配置 embedding（写入全局配置，一次问答）
 - hooks 全局开关（`ok on` / `ok off`，默认开启，持续到手动切换）
 
 ### 非目标（v1 不做）
@@ -56,6 +57,8 @@ hook 按事件 stdin 中的 `cwd` 自动路由到对应项目知识库。
 ~/.openknowledge/
 ├── ok.log                  # 运行日志（hook 错误等）
 ├── registry.toml           # 项目注册表
+├── config.toml             # 全局配置：embedding/inject/retrieve 默认值（项目可覆盖）
+├── hooks-disabled          # 全局开关标志文件（存在即关闭）
 └── projects/
     └── <项目名>/
         ├── config.toml     # 本项目 KB 配置：embedding、注入预算、强制规则
@@ -64,6 +67,14 @@ hook 按事件 stdin 中的 `cwd` 自动路由到对应项目知识库。
         ├── vectors.json    # 各条目 embedding 缓存（含文件 mtime）
         └── state/          # 会话运行时状态 session-<session_id>.json
 ```
+
+**配置合并**：生效配置 = 内置默认值 ← 全局 `~/.openknowledge/config.toml` ←
+项目 `config.toml`，后者覆盖前者。全局配置只承载 `[embedding]`/`[inject]`/
+`[retrieve]`；`[[enforce]]` 规则仅项目级。
+
+**API key 解析顺序**：项目 `api_key` → 全局 `api_key` → `api_key_env` 指向的
+环境变量 → 无（仅关键词检索）。`ok setup` 交互写入的 key 存于全局配置的
+`api_key` 字段（文件权限 0600）。
 
 `registry.toml`：
 
@@ -190,12 +201,13 @@ command = "ok hook stop"
 timeout = 5
 ```
 
-项目 config.toml 中的 embedding 配置：
+项目 config.toml 中的 embedding 配置（全部可选，缺省继承全局配置）：
 
 ```toml
 [embedding]
 base_url = "https://api.openai.com/v1"
-api_key_env = "OPENAI_API_KEY"    # 从环境变量读取，不写明文
+api_key = "sk-..."               # 直接存 key（0600）；与 api_key_env 二选一
+api_key_env = "OPENAI_API_KEY"   # 或指向环境变量，不写明文
 model = "text-embedding-3-small"
 timeout_sec = 5
 
@@ -220,7 +232,12 @@ top_n = 3                # UserPromptSubmit 注入条数
 3. 安装三个用户技能到 `~/.agents/skills/`（可用 `OK_SKILLS_HOME` 覆盖）：
    `openknowledge-init`（在项目目录执行 `ok init`）、`openknowledge-on`、
    `openknowledge-off`。技能内容里烧入 exe 绝对路径，不依赖 PATH。
-4. 打印使用引导（init → add → 新会话生效）。
+4. **交互式配置 embedding**（语义检索）：询问 base_url / model / API key
+   （可直接粘贴；留空跳过且不破坏已有全局配置），写入全局
+   `~/.openknowledge/config.toml`（0600），并立即做一次连通性验证。
+   非交互场景可用 flags：`--embedding-base-url` / `--embedding-model` /
+   `--embedding-key`（任一 flag 存在则跳过提问）。
+5. 打印使用引导（init → add → 新会话生效）。
 
 **全局开关**：`ok off` 创建 `~/.openknowledge/hooks-disabled` 标志文件，
 `ok on` 删除之。三个 hook 入口在处理任何逻辑前先检查该文件，存在即静默
