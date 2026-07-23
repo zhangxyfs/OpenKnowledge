@@ -140,7 +140,7 @@ func HandlePrompt(r io.Reader, w io.Writer) int {
 		vs = nil
 	}
 	var queryVec []float32
-	if key := os.Getenv(pc.Config.Embedding.APIKeyEnv); key != "" && pc.Config.Embedding.BaseURL != "" {
+	if key := pc.Config.Embedding.ResolvedAPIKey(); key != "" && pc.Config.Embedding.BaseURL != "" {
 		client := &embed.OpenAIClient{
 			BaseURL: pc.Config.Embedding.BaseURL,
 			APIKey:  key,

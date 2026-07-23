@@ -27,7 +27,7 @@ func FromCwd(cwd string) (*Context, error) {
 		return nil, fmt.Errorf("目录未注册为知识库项目: %s", cwd)
 	}
 	st := store.New(filepath.Join(registry.Home(), "projects", p.Name))
-	cfg, err := config.Load(st.ConfigPath())
+	cfg, err := config.LoadMerged(st.ConfigPath(), filepath.Join(registry.Home(), "config.toml"))
 	if err != nil {
 		return nil, err
 	}

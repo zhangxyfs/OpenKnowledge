@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"os"
 
 	"github.com/BurntSushi/toml"
@@ -9,9 +10,21 @@ import (
 
 type Embedding struct {
 	BaseURL    string `toml:"base_url"`
+	APIKey     string `toml:"api_key"`
 	APIKeyEnv  string `toml:"api_key_env"`
 	Model      string `toml:"model"`
 	TimeoutSec int    `toml:"timeout_sec"`
+}
+
+// ResolvedAPIKey 返回生效的 embedding API key：api_key 字段优先，其次 api_key_env 环境变量。
+func (e Embedding) ResolvedAPIKey() string {
+	if e.APIKey != "" {
+		return e.APIKey
+	}
+	if e.APIKeyEnv != "" {
+		return os.Getenv(e.APIKeyEnv)
+	}
+	return ""
 }
 
 type Inject struct {
@@ -58,6 +71,25 @@ func Load(path string) (Config, error) {
 	}
 	if err := toml.Unmarshal(data, &cfg); err != nil {
 		return cfg, err
+	}
+	return cfg, nil
+}
+
+// LoadMerged 合并配置：内置默认 ← globalPath ← projectPath，后者覆盖前者。
+// 两个文件都可以不存在（视为空）。
+func LoadMerged(projectPath, globalPath string) (Config, error) {
+	cfg := Default()
+	for _, path := range []string{globalPath, projectPath} {
+		data, err := os.ReadFile(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return cfg, err
+		}
+		if err := toml.Unmarshal(data, &cfg); err != nil {
+			return cfg, fmt.Errorf("解析 %s: %w", path, err)
+		}
 	}
 	return cfg, nil
 }

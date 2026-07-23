@@ -21,7 +21,7 @@ func run(argv []string) int {
 	case "hook":
 		return runHook(argv[2:])
 	case "setup":
-		return cli.Setup(argv[2:], os.Stdout, os.Stderr)
+		return cli.Setup(argv[2:], os.Stdin, os.Stdout, os.Stderr)
 	case "init":
 		return cli.Init(argv[2:], os.Stdout, os.Stderr)
 	case "add":

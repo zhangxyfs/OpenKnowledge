@@ -1,19 +1,37 @@
 package cli
 
 import (
+	"bufio"
+	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"github.com/BurntSushi/toml"
+
+	"openknowledge/internal/config"
+	"openknowledge/internal/embed"
+	"openknowledge/internal/registry"
 )
 
 const markerBegin = "# >>> openknowledge hooks >>>"
 const markerEnd = "# <<< openknowledge hooks <<<"
 
-// Setup: ok setup —— 首次引导：写入 hooks 配置、安装技能、打印引导
-func Setup(args []string, stdout, stderr io.Writer) int {
+// Setup: ok setup —— 首次引导：写 hooks 配置、装技能、配 embedding、打印引导
+func Setup(args []string, in io.Reader, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("setup", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	baseURL := fs.String("embedding-base-url", "", "embedding base_url")
+	model := fs.String("embedding-model", "", "embedding model")
+	apiKey := fs.String("embedding-key", "", "embedding API key")
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		fmt.Fprintln(stderr, err)
@@ -36,8 +54,66 @@ func Setup(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	fmt.Fprintf(stdout, "技能已安装到 %s (openknowledge-init/on/off)\n", skillsHome())
+	setupEmbedding(fs.NFlag() > 0, *baseURL, *model, *apiKey, in, stdout)
 	fmt.Fprint(stdout, guideText+"\n")
 	return 0
+}
+
+// setupEmbedding 交互或按 flags 写入全局 embedding 配置并验证连通性。
+func setupEmbedding(nonInteractive bool, baseURL, model, apiKey string, in io.Reader, stdout io.Writer) {
+	if !nonInteractive {
+		fmt.Fprintln(stdout, "\n配置 embedding 语义检索（可选，直接回车跳过）：")
+		r := bufio.NewReader(in)
+		fmt.Fprintf(stdout, "base_url [https://api.openai.com/v1]: ")
+		baseURL, _ = r.ReadString('\n')
+		baseURL = strings.TrimSpace(baseURL)
+		fmt.Fprintf(stdout, "model [text-embedding-3-small]: ")
+		model, _ = r.ReadString('\n')
+		model = strings.TrimSpace(model)
+		fmt.Fprintf(stdout, "API key（粘贴后回车；留空跳过）: ")
+		apiKey, _ = r.ReadString('\n')
+		apiKey = strings.TrimSpace(apiKey)
+	}
+	if apiKey == "" {
+		fmt.Fprintln(stdout, "跳过 embedding 配置（仅关键词检索；之后可重跑 ok setup 配置）")
+		return
+	}
+	if baseURL == "" {
+		baseURL = "https://api.openai.com/v1"
+	}
+	if model == "" {
+		model = "text-embedding-3-small"
+	}
+	globalPath := filepath.Join(registry.Home(), "config.toml")
+	cfg, err := config.LoadMerged("", globalPath)
+	if err != nil {
+		fmt.Fprintf(stdout, "全局配置读取失败，跳过 embedding: %v\n", err)
+		return
+	}
+	cfg.Embedding.BaseURL = baseURL
+	cfg.Embedding.Model = model
+	cfg.Embedding.APIKey = apiKey
+	cfg.Embedding.APIKeyEnv = ""
+	var buf strings.Builder
+	if err := toml.NewEncoder(&buf).Encode(cfg); err != nil {
+		fmt.Fprintf(stdout, "全局配置编码失败: %v\n", err)
+		return
+	}
+	if err := os.MkdirAll(registry.Home(), 0o755); err != nil {
+		fmt.Fprintf(stdout, "%v\n", err)
+		return
+	}
+	if err := os.WriteFile(globalPath, []byte(buf.String()), 0o600); err != nil {
+		fmt.Fprintf(stdout, "全局配置写入失败: %v\n", err)
+		return
+	}
+	fmt.Fprintf(stdout, "embedding 已写入全局配置 %s\n", globalPath)
+	client := &embed.OpenAIClient{BaseURL: baseURL, APIKey: apiKey, Model: model, Timeout: 10 * time.Second}
+	if _, err := client.Embed(context.Background(), "ping"); err != nil {
+		fmt.Fprintf(stdout, "embedding 连通性验证失败（不影响使用关键词检索）: %v\n", err)
+	} else {
+		fmt.Fprintln(stdout, "embedding 连通性验证通过")
+	}
 }
 
 func kimiHome() string {

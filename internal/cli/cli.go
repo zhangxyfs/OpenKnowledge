@@ -38,19 +38,8 @@ timeout = 5
 `
 
 const defaultProjectConfig = `# OpenKnowledge 项目知识库配置
-[embedding]
-base_url = "https://api.openai.com/v1"
-api_key_env = "OPENAI_API_KEY"
-model = "text-embedding-3-small"
-timeout_sec = 5
-
-[inject]
-max_tokens = 1500
-
-[retrieve]
-alpha = 1.0
-beta = 1.0
-top_n = 3
+# [embedding] / [inject] / [retrieve] 缺省继承全局配置 ~/.openknowledge/config.toml。
+# 需要按项目覆盖时自行添加对应小节（字段见 ok setup 输出与设计文档）。
 
 # 强制规则（glob 一律小写；同会话同规则只阻断一次）：
 # [[enforce]]
@@ -203,7 +192,7 @@ func afterAdd(pc *project.Context, stdout, stderr io.Writer) int {
 
 // embeddingClient 配置齐全时返回客户端，否则返回 nil。
 func embeddingClient(pc *project.Context) *embed.OpenAIClient {
-	key := os.Getenv(pc.Config.Embedding.APIKeyEnv)
+	key := pc.Config.Embedding.ResolvedAPIKey()
 	if key == "" || pc.Config.Embedding.BaseURL == "" {
 		return nil
 	}
