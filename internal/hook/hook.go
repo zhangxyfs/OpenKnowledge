@@ -3,6 +3,7 @@ package hook
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -126,15 +127,23 @@ func HandlePrompt(r io.Reader, w io.Writer) int {
 	}
 	defer db.Close()
 	if err := db.Sync(pc.Store.KnowledgeDir(), client); err != nil {
-		if client == nil {
+		var corrupt *index.CorruptEntriesError
+		switch {
+		case errors.As(err, &corrupt):
+			// 损坏条目已跳过、其余已提交：记日志后继续正常注入（无需降级重试）
+			logErr("prompt sync index: %v", err)
+		case client == nil:
 			logErr("prompt sync index: %v", err)
 			return 0
-		}
-		// embedding 失败：降级重试（仅同步 INDEX），保证基础注入与关键词检索不被阻断
-		logErr("prompt sync index with embedding: %v", err)
-		if err2 := db.Sync(pc.Store.KnowledgeDir(), nil); err2 != nil {
-			logErr("prompt sync index: %v", err2)
-			return 0
+		default:
+			// embedding 失败：降级重试（仅同步 INDEX），保证基础注入与关键词检索不被阻断
+			logErr("prompt sync index with embedding: %v", err)
+			if err2 := db.Sync(pc.Store.KnowledgeDir(), nil); err2 != nil {
+				logErr("prompt sync index: %v", err2)
+				if !errors.As(err2, &corrupt) {
+					return 0
+				}
+			}
 		}
 	}
 	st := state.Load(pc.Store.StateDir(), ev.SessionID)

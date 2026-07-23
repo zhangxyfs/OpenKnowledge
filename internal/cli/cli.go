@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -171,17 +172,25 @@ func afterAdd(pc *project.Context, stdout, stderr io.Writer) int {
 		client = c
 	}
 	if err := db.Sync(pc.Store.KnowledgeDir(), client); err != nil {
-		if client == nil {
+		var corrupt *index.CorruptEntriesError
+		switch {
+		case errors.As(err, &corrupt):
+			// 损坏条目已跳过、INDEX 已重建：警告到 stderr，成功流程继续
+			fmt.Fprintln(stderr, err)
+		case client == nil:
 			fmt.Fprintln(stderr, err)
 			return 1
+		default:
+			// embedding 失败：降级为只同步 INDEX，向量稍后 ok index 补齐
+			if err2 := db.Sync(pc.Store.KnowledgeDir(), nil); err2 != nil {
+				fmt.Fprintln(stderr, err2)
+				if !errors.As(err2, &corrupt) {
+					return 1
+				}
+			}
+			fmt.Fprintf(stdout, "INDEX 已更新；向量更新失败（可稍后 ok index 重试）: %v\n", err)
+			return 0
 		}
-		// embedding 失败：降级为只同步 INDEX，向量稍后 ok index 补齐
-		if err2 := db.Sync(pc.Store.KnowledgeDir(), nil); err2 != nil {
-			fmt.Fprintln(stderr, err2)
-			return 1
-		}
-		fmt.Fprintf(stdout, "INDEX 已更新；向量更新失败（可稍后 ok index 重试）: %v\n", err)
-		return 0
 	}
 	if client == nil {
 		fmt.Fprintln(stdout, "INDEX 已更新；未配置 embedding API key，向量跳过（稍后运行 ok index）")
@@ -263,8 +272,14 @@ func Index(args []string, stdout, stderr io.Writer) int {
 		client = c
 	}
 	if err := db.Sync(pc.Store.KnowledgeDir(), client); err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
+		var corrupt *index.CorruptEntriesError
+		if errors.As(err, &corrupt) {
+			// 损坏条目已跳过、INDEX 已重建：警告到 stderr，成功流程继续
+			fmt.Fprintln(stderr, err)
+		} else {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
 	}
 	n, err := db.Count()
 	if err != nil {

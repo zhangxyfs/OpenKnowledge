@@ -16,6 +16,13 @@ import (
 // 供 FTS 表入库；MATCH 查询使用同样的切分保证词元一致。
 func ftsText(s string) string { return strings.Join(retrieve.Terms(s), " ") }
 
+// CorruptEntriesError 表示同步已完成，但有文件因解析失败被跳过。
+type CorruptEntriesError struct{ Files []string }
+
+func (e *CorruptEntriesError) Error() string {
+	return fmt.Sprintf("跳过 %d 个损坏条目: %s", len(e.Files), strings.Join(e.Files, ", "))
+}
+
 // readEntry 读取并解析单个条目文件；仅当 diff 判定条目变化
 // （或未变化条目需要补向量）时才被调用。
 func readEntry(path string) (*entry.Entry, error) {
@@ -36,9 +43,12 @@ func readEntry(path string) (*entry.Entry, error) {
 // filename+mtime 对比；仅新增/变化的条目才 read+parse 并 upsert
 // （entries 存原文，entries_fts 存 ftsText 切分文本），client!=nil 时
 // 为变化条目重算向量、并为缺向量的未变化条目补齐向量（只读这些文件）；
-// 库中多余的 filename 删除。变化条目解析失败即中止并回滚（事务性，
-// CLI 路径需要暴露损坏文件）。diff 非空或 INDEX.md 缺失时重建
-// <dir>/../INDEX.md，无变化的纯热路径不做任何写盘。
+// 库中多余的 filename 删除。变化条目解析失败时跳过该文件（已索引旧行
+// 保留，无旧行则缺席），其余条目照常提交——一个 YAML 笔误不能压制全部
+// 注入；提交成功后若有跳过，返回 *CorruptEntriesError 警告（调用方用
+// errors.As 区分）。SQL 失败、目录不可读、INDEX.md 写入失败等致命错误
+// 仍中止并回滚。diff 非空或 INDEX.md 缺失时重建 <dir>/../INDEX.md，
+// 无变化的纯热路径不做任何写盘。
 func (db *DB) Sync(dir string, client embed.Client) error {
 	// Windows 上 DirEntry.Info 复用 readdir 数据，无额外系统调用
 	dirents, err := os.ReadDir(dir)
@@ -112,6 +122,7 @@ func (db *DB) Sync(dir string, client embed.Client) error {
 
 	alive := map[string]bool{}
 	changed := false
+	var skipped []string
 	for _, f := range disk {
 		name := f.name
 		alive[name] = true
@@ -137,7 +148,10 @@ func (db *DB) Sync(dir string, client embed.Client) error {
 		changed = true
 		e, err := readEntry(f.path)
 		if err != nil {
-			return rollback(err)
+			// 损坏条目跳过：已索引旧行保留（新文件则缺席），其余条目照常提交；
+			// mtime 未入库，下次同步会重试并在修复后自动追上
+			skipped = append(skipped, name)
+			continue
 		}
 		tags := strings.Join(e.Tags, ", ")
 		mandatory := 0
@@ -194,7 +208,13 @@ func (db *DB) Sync(dir string, client embed.Client) error {
 			return nil
 		}
 	}
-	return db.rebuildIndex(dir)
+	if err := db.rebuildIndex(dir); err != nil {
+		return err
+	}
+	if len(skipped) > 0 {
+		return &CorruptEntriesError{Files: skipped}
+	}
+	return nil
 }
 
 // rebuildIndex 从 entries 表重写 <dir>/../INDEX.md（标题+类型+tags+摘要的固定行格式）。

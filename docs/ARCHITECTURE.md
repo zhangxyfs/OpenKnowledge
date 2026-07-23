@@ -128,7 +128,7 @@ OpenKnowledge/
 │   │   └── embed_test.go
 │   ├── index/                     # ★ SQLite+FTS5 索引库（kb.db）
 │   │   ├── db.go                  #   Open/Close/Count、旧版 vectors.json 迁移
-│   │   ├── sync.go                #   增量同步（filename+mtime）、INDEX.md 重建
+│   │   ├── sync.go                #   增量同步（filename+mtime）、损坏条目跳过、INDEX.md 重建
 │   │   ├── query.go               #   FTS5 BM25 + 余弦混合查询、Mandatory
 │   │   └── index_test.go
 │   ├── retrieve/                  # 检索分词
@@ -180,10 +180,8 @@ Windows 下大小写不敏感与分隔符混乱问题全部收敛到 `NormalizeP
 
 知识的最小单位：`---\n<yaml frontmatter>\n---\n<body>` 格式的 Markdown 文件。frontmatter 含 `title/type/tags/mandatory/summary`，`Body` 与磁盘路径 `Path` 不序列化（`yaml:"-"`）。解析容忍 CRLF 与 UTF-8 BOM；`type` 限定 `rule|pitfall|note|reference` 四种。
 
-双加载策略是手维护场景的关键设计：
-
-- `Load(dir)` — 严格模式，任何文件解析失败即整体报错（CLI 用，错误要暴露给用户）
-- `LoadTolerant(dir)` — 宽容模式，坏文件跳过并收集错误（hook 用，一个 YAML 笔误不能瘫痪全部注入）
+- `Load(dir)` — 严格模式，任何文件解析失败即整体报错（`ok list` 用，错误要暴露给用户）
+- `LoadTolerant(dir)` — 宽容模式，坏文件跳过并收集错误；已不在生产路径上——注入路径的容错由 `index.Sync` 的损坏跳过实现（见 5.6），保留为可用 API
 
 ### 5.3 config — 三层配置合并（95 行）
 
@@ -207,11 +205,11 @@ func (e Embedding) ResolvedAPIKey() string  // api_key 字段 > api_key_env 环�
 - `OpenAIClient` 实现 OpenAI 兼容协议：`POST {base_url}/embeddings`，`Authorization: Bearer <key>`，带 context 超时
 - 条目向量不再存 vectors.json，而是存于 kb.db 的 `vectors` 表（float32 小端 blob，见 5.6）；旧版 vectors.json 在首次打开 kb.db 时自动导入并改名为 `.bak`
 
-### 5.6 index/retrieve — 索引化混合检索（db.go 138 + sync.go 168 + query.go 138 + retrieve.go 44 行）
+### 5.6 index/retrieve — 索引化混合检索（db.go 138 + sync.go 240 + query.go 138 + retrieve.go 44 行）
 
 检索不再逐文件扫描 Markdown，而是查询 SQLite 索引库 `kb.db`（位于各项目 KB 根目录）：
 
-- **同步**（`Sync`）：按 filename+mtime 增量——新增/变化条目 upsert 进 `entries`（原文）与 `entries_fts`（FTS5 表，存 Terms 切分文本），client!=nil 时为变化条目重算向量、并为缺向量的未变化条目补齐；已删条目连带清理；最后重建 INDEX.md。hook 与 CLI 共用这一条路径
+- **同步**（`Sync`）：按 filename+mtime 增量——新增/变化条目 upsert 进 `entries`（原文）与 `entries_fts`（FTS5 表，存 Terms 切分文本），client!=nil 时为变化条目重算向量、并为缺向量的未变化条目补齐；已删条目连带清理；最后重建 INDEX.md。变化条目解析失败时**跳过该文件**（已索引旧行保留，新文件则缺席；mtime 未入库，修复后下次同步自动追上），其余条目照常提交，提交后返回 `*CorruptEntriesError` 警告（调用方 `errors.As` 区分）；SQL 失败、目录不可读、INDEX.md 写入失败等致命错误仍中止回滚。hook 与 CLI 共用这一条路径
 - **查询**（`Query`）：`score = α·归一BM25 + β·余弦`。关键词通道走 FTS5 `bm25()`（列权重 title>tags>summary>body），语义通道全量读向量算余弦（万条毫秒级）；mandatory 条目不参与（已在基础注入中）；只留 score>0，分数降序、同分标题升序，截 top_n；`queryVec=nil` 时自动退化为纯关键词（embedding 失败降级路径）
 - `Mandatory()` 返回 mandatory 条目供基础注入；`retrieve.Terms` 是自研分词器——小写拉丁/数字词（≥2 字符）+ **CJK 二元组**（`unicode.Han`），FTS 入库与 MATCH 查询共用同一切分保证词元一致
 
@@ -223,17 +221,17 @@ func (e Embedding) ResolvedAPIKey() string  // api_key 字段 > api_key_env 环�
 
 v1 仅 `changelog_required`：触碰文件中存在匹配 `code_globs` 的 且 不存在匹配 `changelog_glob` 的 → 阻断并返回用户配置的 message。用 doublestar 做 `**` glob 匹配（`**/*.go` 可匹配根目录文件）。刻意**不理解**变更日志的细则——细则写在知识条目里由注入教给 AI，hook 只做机械检查。
 
-### 5.9 hook — hooks 事件处理（247 行，全项目最大文件）
+### 5.9 hook — hooks 事件处理（264 行，全项目最大文件）
 
 三个 handler 共享同一套防御结构：**第一行检查全局开关 → 解析事件 → 路由项目 → 各自逻辑 → 任何错误只记 ok.log 并 exit 0**。
 
 - `Event` 的 `Prompt` 是 `json.RawMessage`，`PromptText()` 兼容两种真实载荷形态（字符串 / `[{"type":"text","text":"..."}]` 数组）
 - `FilePath()` 取 `tool_input.path`（kimi 实际字段），兼容 `file_path`
-- `HandlePrompt`：打开 kb.db → **查询前增量同步**（`Sync`，无 key 时跳过向量）→ 每会话首次提问做基础注入（`Mandatory()` 全文 + INDEX.md，标记 `BaseInjected` 且仅当内容非空才置位）→ 每次提问 `Query` 混合检索注入；embedding 失败降级纯关键词
+- `HandlePrompt`：打开 kb.db → **查询前增量同步**（`Sync`，无 key 时跳过向量；返回 `*CorruptEntriesError` 时记 ok.log 后继续注入）→ 每会话首次提问做基础注入（`Mandatory()` 全文 + INDEX.md，标记 `BaseInjected` 且仅当内容非空才置位）→ 每次提问 `Query` 混合检索注入；embedding 失败降级纯关键词
 - `HandlePostTool`：记录触碰文件（经 `relativize` 转项目相对、小写、`/` 分隔）
 - `HandleStop`：评估 enforce 规则，命中即 `MarkBlocked` → 保存状态 → stderr 输出 message → **exit 2**（全项目唯一非零出口）
 
-### 5.10 cli — 管理命令（cli.go 354 行 + setup.go 210 行 + toggle.go 38 行）
+### 5.10 cli — 管理命令（cli.go 369 行 + setup.go 210 行 + toggle.go 38 行）
 
 - `cli.go`：`Init`（项目名缺省取目录基名）、`Add`（重复条目拒绝；后接索引库同步）、`Search`（检索预览，走 `index.Query`）、`Index`（索引库增量同步并打印条目数）、`List`（文件扫描，人用命令开销可忽略）、`Doctor`（注册表/配置/embedding 连通性/hooks 安装状态/开关状态）
 - `setup.go`：见第 6.4 节
@@ -352,7 +350,7 @@ ok setup
 
 **写入纪律**：INDEX.md 与 kb.db 由工具维护，不手改；knowledge/ 是人工维护区；config.toml 项目级手写（模板含注释示例）。旧版 vectors.json 首次打开 kb.db 时自动导入并改名为 `.bak`。
 
-**一致性策略**：全部 JSON/TOML 读取对"文件不存在"宽容（视为空）；损坏文件按层处理——entry 解析失败在 Sync（LoadTolerant）中跳过单文件；state 损坏回退空状态（最坏情况是重复阻断一次，fail-safe 方向正确）；kb.db 损坏/打开失败时 hook 记 ok.log 后静默放行（fail-open）。
+**一致性策略**：全部 JSON/TOML 读取对"文件不存在"宽容（视为空）；损坏文件按层处理——entry 解析失败在 `index.Sync` 中跳过单文件（已索引旧行保留，提交后返回 `*CorruptEntriesError` 警告）；state 损坏回退空状态（最坏情况是重复阻断一次，fail-safe 方向正确）；kb.db 损坏/打开失败时 hook 记 ok.log 后静默放行（fail-open）。
 
 ---
 
@@ -385,7 +383,7 @@ ok setup
 | **embedding 失败降级** | `hook.HandlePrompt` | 超时/失败自动退化为纯关键词检索，注入永不缺席 |
 | **token 预算截断** | `store.TruncateToBudget` | 注入文本按 `inject.max_tokens` 截断（字符数÷2 保守估算） |
 | **全面 fail-open** | 所有 hook handler | 任何内部错误 → ok.log + exit 0；`main.runHook` 还有 panic-recover 兜底 |
-| **宽容加载** | `entry.LoadTolerant` | 一个坏条目不拖垮全部注入 |
+| **损坏条目跳过** | `index.Sync` | 变化条目解析失败跳过该文件（已索引旧行保留）并返回 `*CorruptEntriesError`：一个坏条目不拖垮全部注入 |
 | **阻断防死循环** | `state.BlockedRules` | 同会话同规则只阻断一次 |
 | **状态 GC** | `state.Clean` | 7 天前的会话状态自动清理 |
 | **测试零网络** | 全测试套件 | `OK_HOME` 隔离 + `OPENAI_API_KEY` 置空 + `httptest` fake server |

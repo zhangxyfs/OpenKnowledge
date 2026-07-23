@@ -155,37 +155,22 @@ timeout_sec = 1
 	}
 }
 
-func TestFirstPromptBadEntryFailsOpen(t *testing.T) {
+func TestFirstPromptSkipsBadEntry(t *testing.T) {
 	projDir, kbRoot := setupProject(t)
 	writeEntry(t, kbRoot, "rule.md", mandatoryEntry)
 	writeEntry(t, kbRoot, "broken.md", "no frontmatter at all")
-	if err := os.WriteFile(filepath.Join(kbRoot, "INDEX.md"), []byte("# 知识索引\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	in := fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":[{"type":"text","text":"随便问问"}]}`, projDir)
 	var out bytes.Buffer
-	// Sync 对损坏条目中止并回滚：hook fail-open（退出 0、不注入、不崩溃），
-	// 已索引内容不被破坏
-	if code := HandlePrompt(strings.NewReader(in), &out); code != 0 {
-		t.Fatalf("exit %d", code)
-	}
-	if strings.Contains(out.String(), "改完代码先写日志。") {
-		t.Fatalf("corrupt sync must suppress injection, got %q", out.String())
-	}
-	// 移除损坏文件后下一次提问恢复注入（回滚没有毁掉索引）
-	if err := os.Remove(filepath.Join(kbRoot, "knowledge", "broken.md")); err != nil {
-		t.Fatal(err)
-	}
-	out.Reset()
+	// 同步容忍损坏条目（跳过坏文件、其余提交）：一个 YAML 笔误不能压制全部注入
 	if code := HandlePrompt(strings.NewReader(in), &out); code != 0 {
 		t.Fatalf("exit %d", code)
 	}
 	if !strings.Contains(out.String(), "改完代码先写日志。") {
-		t.Fatalf("injection should recover after bad entry removed, got %q", out.String())
+		t.Fatalf("corrupt sibling must not suppress base injection, got %q", out.String())
 	}
 }
 
-func TestPromptBadEntryFailsOpen(t *testing.T) {
+func TestPromptSkipsBadEntry(t *testing.T) {
 	projDir, kbRoot := setupProject(t)
 	writeEntry(t, kbRoot, "git.md", gitEntry)
 	writeEntry(t, kbRoot, "broken.md", "---\ntitle: x\ntype: bogus\n---\n")
@@ -194,19 +179,8 @@ func TestPromptBadEntryFailsOpen(t *testing.T) {
 	if code := HandlePrompt(strings.NewReader(in), &out); code != 0 {
 		t.Fatalf("exit %d", code)
 	}
-	if strings.Contains(out.String(), "Conventional Commits") {
-		t.Fatalf("corrupt sync must suppress injection, got %q", out.String())
-	}
-	// 修复坏文件后恢复注入
-	if err := os.Remove(filepath.Join(kbRoot, "knowledge", "broken.md")); err != nil {
-		t.Fatal(err)
-	}
-	out.Reset()
-	if code := HandlePrompt(strings.NewReader(in), &out); code != 0 {
-		t.Fatalf("exit %d", code)
-	}
 	if !strings.Contains(out.String(), "Conventional Commits") {
-		t.Fatalf("injection should recover after bad entry removed, got %q", out.String())
+		t.Fatalf("corrupt sibling must not suppress retrieval, got %q", out.String())
 	}
 }
 

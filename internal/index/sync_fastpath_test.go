@@ -1,6 +1,7 @@
 package index
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -91,5 +92,112 @@ summary: 分支模型选择
 	data, err := os.ReadFile(filepath.Join(filepath.Dir(kdir), "INDEX.md"))
 	if err != nil || !strings.Contains(string(data), "Git 分支策略") {
 		t.Fatalf("INDEX.md not updated: %v %q", err, data)
+	}
+}
+
+// 变化条目解析失败不再中止同步：坏文件跳过（已索引旧行保留），其余条目
+// 正常提交；提交成功后返回 *CorruptEntriesError 列出被跳过的文件。
+func TestSyncSkipsCorruptChangedFile(t *testing.T) {
+	db, kdir := setupDB(t)
+	if err := db.Sync(kdir, fakeEmbedder{}); err != nil {
+		t.Fatal(err)
+	}
+
+	// git.md 改坏（新 mtime）；build.md 正常更新
+	victim := filepath.Join(kdir, "git.md")
+	fi, err := os.Stat(victim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(victim, []byte("---\ntitle: [unclosed\n---\n\n已损坏\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	later := fi.ModTime().Add(2 * time.Second)
+	if err := os.Chtimes(victim, later, later); err != nil {
+		t.Fatal(err)
+	}
+
+	other := filepath.Join(kdir, "build.md")
+	ofi, err := os.Stat(other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated := `---
+title: 构建命令新版
+type: reference
+tags: [build]
+summary: 常用构建命令
+---
+
+go build ./... && go test ./...。
+`
+	if err := os.WriteFile(other, []byte(updated), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	olater := ofi.ModTime().Add(2 * time.Second)
+	if err := os.Chtimes(other, olater, olater); err != nil {
+		t.Fatal(err)
+	}
+
+	err = db.Sync(kdir, fakeEmbedder{})
+	var corrupt *CorruptEntriesError
+	if !errors.As(err, &corrupt) {
+		t.Fatalf("expected *CorruptEntriesError, got %v", err)
+	}
+	if len(corrupt.Files) != 1 || corrupt.Files[0] != "git.md" {
+		t.Fatalf("CorruptEntriesError.Files = %v", corrupt.Files)
+	}
+
+	// 正常更新的条目新内容已入库
+	hits, err := db.Query(retrieve.Terms("构建命令新版"), nil, config.Retrieve{Alpha: 1, Beta: 1, TopN: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) == 0 || hits[0].Title != "构建命令新版" {
+		t.Fatalf("valid changed entry not synced: %+v", hits)
+	}
+	// 坏文件的旧行保留：旧标题仍在 INDEX.md 与检索结果中
+	data, err := os.ReadFile(filepath.Join(filepath.Dir(kdir), "INDEX.md"))
+	if err != nil || !strings.Contains(string(data), "Git 提交规范") {
+		t.Fatalf("old row of corrupt entry lost from INDEX.md: %v %q", err, data)
+	}
+	hits, err = db.Query(retrieve.Terms("git 提交规范"), nil, config.Retrieve{Alpha: 1, Beta: 1, TopN: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) == 0 || hits[0].Title != "Git 提交规范" {
+		t.Fatalf("old row of corrupt entry lost from index: %+v", hits)
+	}
+	if n, _ := db.Count(); n != 3 {
+		t.Fatalf("count=%d", n)
+	}
+}
+
+// 新增条目损坏：跳过且无旧行可留（不入库），其余条目不受影响，
+// 返回 *CorruptEntriesError。
+func TestSyncCorruptNewFileSkipped(t *testing.T) {
+	db, kdir := setupDB(t)
+	if err := db.Sync(kdir, fakeEmbedder{}); err != nil {
+		t.Fatal(err)
+	}
+	writeEntryFile(t, kdir, "broken.md", "no frontmatter at all")
+
+	err := db.Sync(kdir, fakeEmbedder{})
+	var corrupt *CorruptEntriesError
+	if !errors.As(err, &corrupt) {
+		t.Fatalf("expected *CorruptEntriesError, got %v", err)
+	}
+	if len(corrupt.Files) != 1 || corrupt.Files[0] != "broken.md" {
+		t.Fatalf("CorruptEntriesError.Files = %v", corrupt.Files)
+	}
+	if n, _ := db.Count(); n != 3 {
+		t.Fatalf("corrupt new entry must not be indexed, count=%d", n)
+	}
+	hits, err := db.Query(retrieve.Terms("git 提交规范"), nil, config.Retrieve{Alpha: 1, Beta: 1, TopN: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) == 0 || hits[0].Title != "Git 提交规范" {
+		t.Fatalf("existing entries damaged by corrupt sibling: %+v", hits)
 	}
 }
