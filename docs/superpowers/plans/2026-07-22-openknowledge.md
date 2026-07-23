@@ -3946,3 +3946,378 @@ Expected: 全部 PASS
 git add internal/ cmd/ docs/changelogs/
 git commit -m "feat: global config merge and interactive embedding setup"
 ```
+
+---
+
+## v1.3 特性（2026-07-23 用户追加需求：万级条目快速检索）
+
+目标：检索从"按次扫描全部 Markdown"改为"预建索引查询"，1 万条目单次查询
+（不含 embedding API 调用）< 50ms。引擎：SQLite + FTS5（`modernc.org/sqlite`
+纯 Go 无 CGO，可用 `GOPROXY=https://goproxy.cn,direct go get modernc.org/sqlite`
+获取，允许作为第 4 个第三方依赖）。
+
+### Task 14: internal/index — SQLite 索引包
+
+**Files:**
+- Create: `internal/index/db.go`（打开/建表/迁移 vectors.json）
+- Create: `internal/index/sync.go`（Markdown → DB 增量同步 + INDEX.md 重建）
+- Create: `internal/index/query.go`（FTS5 BM25 + 余弦混合查询、Mandatory、IndexRows）
+- Test: `internal/index/index_test.go`
+
+**Interfaces:**
+- Consumes: `entry.Entry`（LoadTolerant/EmbedText/FileName）、`retrieve.Terms`、`embed.Client/Cosine`、`config.Retrieve`、`store.Store 路径`
+- Produces（Task 15 依赖的确切签名）:
+  - `index.Open(path string) (*DB, error)` — 打开/建库建表；若同目录存在 `vectors.json` 且库为空则导入并改名 `.bak`
+  - `(db *DB) Close() error`
+  - `(db *DB) Sync(dir string, client embed.Client) error` — dir=knowledge 目录；按 filename+mtime 增量 upsert/delete；client!=nil 时为变化条目重算向量（EmbedText）；同步后重建 `<KnowledgeDir>/../INDEX.md`
+  - `(db *DB) Query(terms []string, queryVec []float32, cfg config.Retrieve) ([]Hit, error)`
+  - `index.Hit{Filename, Title, Type, Body string; Score float64}`
+  - `(db *DB) Mandatory() ([]Hit, error)` — mandatory 条目（用于基础注入）
+  - `(db *DB) Count() (int, error)`
+
+**Schema（db.go 内常量）:**
+
+```sql
+CREATE TABLE IF NOT EXISTS entries(
+  filename TEXT PRIMARY KEY,
+  title TEXT NOT NULL, type TEXT NOT NULL,
+  tags TEXT NOT NULL DEFAULT '', summary TEXT NOT NULL DEFAULT '',
+  body TEXT NOT NULL DEFAULT '',
+  mandatory INTEGER NOT NULL DEFAULT 0,
+  mtime INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS vectors(
+  filename TEXT PRIMARY KEY,
+  dim INTEGER NOT NULL, blob BLOB NOT NULL
+);
+CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
+  title, tags, summary, body,
+  content='entries', content_rowid='rowid'
+);
+CREATE TRIGGER IF NOT EXISTS entries_ai AFTER INSERT ON entries BEGIN
+  INSERT INTO entries_fts(rowid,title,tags,summary,body)
+  VALUES (new.rowid,new.title,new.tags,new.summary,new.body); END;
+CREATE TRIGGER IF NOT EXISTS entries_ad AFTER DELETE ON entries BEGIN
+  INSERT INTO entries_fts(entries_fts,rowid,title,tags,summary,body)
+  VALUES('delete',old.rowid,old.title,old.tags,old.summary,old.body); END;
+CREATE TRIGGER IF NOT EXISTS entries_au AFTER UPDATE ON entries BEGIN
+  INSERT INTO entries_fts(entries_fts,rowid,title,tags,summary,body)
+  VALUES('delete',old.rowid,old.title,old.tags,old.summary,old.body);
+  INSERT INTO entries_fts(rowid,title,tags,summary,body)
+  VALUES (new.rowid,new.title,new.tags,new.summary,new.body); END;
+```
+
+**关键实现决策（已定，勿改）:**
+- CJK 处理：入库与查询文本统一经 `ftsText(s)`（复用 `retrieve.Terms` 的结果
+  以空格连接）切分为二元组分隔文本；FTS 表存切分后文本，MATCH 查询同样用
+  `retrieve.Terms(query)` 的词元以 `OR` 连接（每个词元双引号包裹防注入）。
+- BM25 归一化：SQLite `bm25(entries_fts, 10.0, 8.0, 3.0, 1.0)` 返回负值（越小越好），
+  取 `kw = -rank`，归一 `kw/(kw+6)`。
+- 向量：float32 小端 blob；查询时全量读入内存算余弦（万条毫秒级）。
+- 混合分：`α·归一BM25 + β·余弦`，score>0，降序，同分标题升序，截 top_n；
+  仅命中行回表取 body（ entries 表本来就带 body，SELECT 直接带出来）。
+
+- [ ] **Step 1: go get 依赖**
+
+```bash
+GOPROXY=https://goproxy.cn,direct go get modernc.org/sqlite@latest
+```
+
+- [ ] **Step 2: 写失败的测试** `internal/index/index_test.go`
+
+```go
+package index
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"openknowledge/internal/config"
+	"openknowledge/internal/entry"
+	"openknowledge/internal/retrieve"
+)
+
+const e1 = `---
+title: Git 提交规范
+type: note
+tags: [git]
+summary: 提交信息格式
+---
+
+使用 Conventional Commits。
+`
+
+const e2 = `---
+title: 变更日志强制规则
+type: rule
+mandatory: true
+summary: 改代码必须写日志
+---
+
+改完代码先写日志。
+`
+
+const e3 = `---
+title: 构建命令速查
+type: reference
+tags: [build]
+summary: 常用构建命令
+---
+
+go build ./... 即可。
+`
+
+func writeEntryFile(t *testing.T, dir, name, content string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// fakeEmbedder 返回确定性向量，避免真实网络。
+type fakeEmbedder struct{}
+
+func (fakeEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
+	// 含 "git" 的文本给 [1,0]，其余给 [0,1]
+	if strings.Contains(strings.ToLower(text), "git") {
+		return []float32{1, 0}, nil
+	}
+	return []float32{0, 1}, nil
+}
+
+func setupDB(t *testing.T) (*DB, string) {
+	t.Helper()
+	root := t.TempDir()
+	kdir := filepath.Join(root, "knowledge")
+	writeEntryFile(t, kdir, "git.md", e1)
+	writeEntryFile(t, kdir, "rule.md", e2)
+	writeEntryFile(t, kdir, "build.md", e3)
+	db, err := Open(filepath.Join(root, "kb.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	return db, kdir
+}
+
+func TestSyncAndCount(t *testing.T) {
+	db, kdir := setupDB(t)
+	if err := db.Sync(kdir, fakeEmbedder{}); err != nil {
+		t.Fatal(err)
+	}
+	n, err := db.Count()
+	if err != nil || n != 3 {
+		t.Fatalf("count=%d err=%v", n, err)
+	}
+	// INDEX.md 已重建
+	data, err := os.ReadFile(filepath.Join(filepath.Dir(kdir), "INDEX.md"))
+	if err != nil || !strings.Contains(string(data), "Git 提交规范") {
+		t.Fatalf("INDEX.md not rebuilt: %v %q", err, data)
+	}
+	// 幂等：mtime 未变时再次 Sync 不报错且数量不变
+	if err := db.Sync(kdir, fakeEmbedder{}); err != nil {
+		t.Fatal(err)
+	}
+	// 删除一个文件后同步应删除对应行
+	if err := os.Remove(filepath.Join(kdir, "build.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Sync(kdir, fakeEmbedder{}); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := db.Count(); n != 2 {
+		t.Fatalf("after delete count=%d", n)
+	}
+}
+
+func TestQueryKeywordAndHybrid(t *testing.T) {
+	db, kdir := setupDB(t)
+	if err := db.Sync(kdir, fakeEmbedder{}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Retrieve{Alpha: 1, Beta: 1, TopN: 3}
+	// 关键词命中 git 条目
+	hits, err := db.Query(retrieve.Terms("git 提交规范"), nil, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) == 0 || hits[0].Title != "Git 提交规范" {
+		t.Fatalf("keyword query wrong: %+v", hits)
+	}
+	if hits[0].Body == "" {
+		t.Fatal("hit should carry body for injection")
+	}
+	// mandatory 条目不出现在检索结果
+	for _, h := range hits {
+		if h.Title == "变更日志强制规则" {
+			t.Fatal("mandatory entry must be excluded from query")
+		}
+	}
+	// 语义通道：queryVec=[1,0] 与 git 条目向量同向 → 即使关键词不命中也能召回
+	hits, err = db.Query(retrieve.Terms("zzz"), []float32{1, 0}, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) == 0 || hits[0].Title != "Git 提交规范" {
+		t.Fatalf("semantic recall wrong: %+v", hits)
+	}
+}
+
+func TestMandatory(t *testing.T) {
+	db, kdir := setupDB(t)
+	if err := db.Sync(kdir, fakeEmbedder{}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.Mandatory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Title != "变更日志强制规则" || rows[0].Body == "" {
+		t.Fatalf("mandatory wrong: %+v", rows)
+	}
+}
+
+func TestVectorsJSONMigration(t *testing.T) {
+	root := t.TempDir()
+	kdir := filepath.Join(root, "knowledge")
+	writeEntryFile(t, kdir, "git.md", e1)
+	// 造一个旧版 vectors.json（格式与 embed.VectorSet 相同）
+	vj := `{"vectors":{"git.md":{"mod_time":1,"vector":[1,0]}}}`
+	if err := os.WriteFile(filepath.Join(root, "vectors.json"), []byte(vj), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	db, err := Open(filepath.Join(root, "kb.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := os.Stat(filepath.Join(root, "vectors.json.bak")); err != nil {
+		t.Fatalf("vectors.json should be renamed to .bak: %v", err)
+	}
+}
+
+func TestManyEntriesQuery(t *testing.T) {
+	root := t.TempDir()
+	kdir := filepath.Join(root, "knowledge")
+	writeEntryFile(t, kdir, "git.md", e1)
+	for i := 0; i < 2000; i++ {
+		body := "---\ntitle: 噪音条目" + strings.Repeat("x", 1) + string(rune('a'+i%26)) +
+			"\ntype: note\nsummary: 噪音\n---\n\n噪音正文\n"
+		writeEntryFile(t, kdir, "noise"+strings.Repeat("a", i%7+1)+string(rune('a'+i%26))+".md", body)
+	}
+	db, err := Open(filepath.Join(root, "kb.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := db.Sync(kdir, fakeEmbedder{}); err != nil {
+		t.Fatal(err)
+	}
+	hits, err := db.Query(retrieve.Terms("git 提交"), nil, config.Retrieve{Alpha: 1, Beta: 1, TopN: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) == 0 || hits[0].Title != "Git 提交规范" {
+		t.Fatalf("2k entries query wrong: %+v", hits)
+	}
+}
+```
+
+- [ ] **Step 3: 运行测试确认失败**
+
+Run: `go test ./internal/index/`
+Expected: 编译失败，`undefined: Open` 等
+
+- [ ] **Step 4: 实现**（三个文件，结构如上 Interfaces/Schema/决策所述）
+
+实现要点：
+- `db.go`：`Open` 用 `sql.Open("sqlite", path)`（driver 名 `"sqlite"`，import
+  `_ "modernc.org/sqlite"`），执行 Schema 常量；`vectors.json` 迁移（解析旧 JSON
+  `{"vectors":{name:{"mod_time":N,"vector":[...]}}}`，仅在 vectors 表为空时导入，
+  随后改名为 `.bak`）。float32 blob 编码用小端 `binary.LittleEndian`。
+- `sync.go`：`entry.LoadTolerant(dir)` 扫描；与 entries 表按 filename 对比
+  mtime：新增/变化 → upsert（FTS 触发器自动维护，FTS 列为 ftsText 切分文本），
+  client!=nil 时对这些条目重算向量写 vectors 表；表中多余 filename → delete；
+  最后重写 `<dir>/../INDEX.md`（复用 store.IndexContent 格式：标题+类型+tags+摘要）。
+  注意 entries 表存**原文**（title/summary/body 原文，供注入与 INDEX），
+  FTS 虚表经触发器同步的是同一份原文——因此 ftsText 切分必须在写入 entries
+  之前完成：entries 表的 title/tags/summary/body 列存原文，另建
+  `entries_fts` 的 content 不是外部内容模式，改为**独立内容表**：
+  同步代码显式维护 entries_fts（delete+insert 切分文本），不用触发器。
+  （修正：放弃 external-content+触发器方案，改为手动维护，schema 中
+  entries_fts 为 `USING fts5(title,tags,summary,body)` 独立表，
+  行与 entries 以 filename 关联——fts 表加一列 filename UNINDEXED。）
+- `query.go`：`SELECT e.filename,e.title,e.type,e.body, bm25(entries_fts,10.0,8.0,3.0,1.0) AS r
+  FROM entries_fts f JOIN entries e ON e.filename=f.filename
+  WHERE entries_fts MATCH ?`；MATCH 串为 terms 双引号包裹后 ` OR ` 连接；
+  无 terms 且无向量 → 空结果；mandatory 行在混合时过滤；向量全量读内存算余弦。
+
+- [ ] **Step 5: 运行测试确认通过**
+
+Run: `go test ./internal/index/ -v`
+Expected: 5 个测试全部 PASS
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add go.mod go.sum internal/index/
+git commit -m "feat: SQLite+FTS5 index package for scalable retrieval"
+```
+
+---
+
+### Task 15: hook/cli 换线到索引 + 清理退役代码 + 文档
+
+**Files:**
+- Modify: `internal/hook/hook.go`（HandlePrompt 改用 index）
+- Modify: `internal/cli/cli.go`（afterAdd/Search/Index 改用 index；List 可用 DB Count 或保持文件扫描）
+- Modify: `internal/retrieve/retrieve.go`（删除 Rank/KeywordScore/Scored，保留 Terms）
+- Delete: `internal/embed/vectors.go`（被 index 取代）与其测试中 VectorSet 部分
+- Modify: `internal/embed/embed_test.go`（移除 VectorSet 测试，保留客户端/Cosine 测试）
+- Modify: `internal/retrieve/retrieve_test.go`（只留 Terms 测试）
+- Modify: `cmd/ok/integration_test.go`（行为应不变，全量回归）
+- Modify: `docs/ARCHITECTURE.md`（5.5/5.6/6.1/8/10/16 节同步索引化）
+- Create: `docs/changelogs/2026-07-23-sqlite-index.md`
+
+**Interfaces:**
+- Consumes: Task 14 的 `index.Open/Sync/Query/Mandatory/Close`、`retrieve.Terms`
+- Produces: 无新接口；`retrieve` 只剩 `Terms(s string) []string`
+
+- [ ] **Step 1: 改测试** — integration_test 增加：手改条目文件后（不改 INDEX）
+  下一次 hook prompt 仍命中新内容（验证 hook 查询前的增量同步生效）
+
+- [ ] **Step 2: 运行确认失败**（当前 hook 不读索引）
+
+- [ ] **Step 3: 实现**
+  - `HandlePrompt`：`index.Open(Store 根目录/kb.db)` → `Sync(KnowledgeDir(), embedClientOrNil)` →
+    首次提问基础注入（`Mandatory()` + INDEX.md 文件内容，逻辑不变）→
+    `Query(retrieve.Terms(promptText), queryVec, cfg.Retrieve)` → 注入。
+    全程 fail-open；打开/同步失败记 ok.log 后 exit 0。
+  - `afterAdd`：改为 `index.Open` + `Sync`（client 为 embeddingClient(pc)，可 nil）。
+  - `Search`：同样走 `index.Query`，输出格式不变（score/title/filename）。
+  - `Index`（CLI 命令）：`Sync` 后打印条目数（来自 `Count()`）。
+  - 删除 `retrieve.Rank/KeywordScore/Scored`、`embed/vectors.go` 及对应测试。
+
+- [ ] **Step 4: 全量回归**
+
+Run: `go build ./... && go test ./... -v`
+Expected: 全部 PASS
+
+- [ ] **Step 5: 文档同步**
+  - `docs/ARCHITECTURE.md`：5.5 改为向量存于 kb.db、5.6 改为索引化检索
+    （FTS5+BM25+余弦混合）、6.1 注入链路加"查询前增量同步"、8 存储层加 kb.db、
+    16 去掉已解决的"VectorSet nil map"建议并更新检索相关描述。
+  - `docs/changelogs/2026-07-23-sqlite-index.md`：记录本次架构变更。
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add -A
+git commit -m "feat: route retrieval through SQLite index; retire file-scan path"
+```

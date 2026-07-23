@@ -130,6 +130,20 @@ summary: 每次代码修改必须立即记录变更日志
 
 取 top-N（默认 3）注入全文；`mandatory` 条目已在上下文中，不重复注入。
 
+### 索引化检索（v1.3，万级条目）
+
+检索路径**不再按次扫描 Markdown 文件**，而是查询预建的 SQLite 索引
+（`projects/<名>/kb.db`，纯 Go 的 `modernc.org/sqlite`，无 CGO）：
+
+- **同步**：Markdown 文件仍是唯一真相源；`ok add`/`ok index` 及 hook 查询前
+  按 filename+mtime 做增量同步（变化才重写；FTS 由触发器自动维护）。
+  旧 `vectors.json` 在首次打开时自动导入并改名为 `.bak`。
+- **关键词**：FTS5 虚表（title/tags/summary/body 四列，bm25 列权 10/8/3/1），
+  CJK 文本入库与查询同口径二元组预切分；BM25 分归一化 `s/(s+6)` 到 [0,1)。
+- **语义**：向量 blob 存库，查询时一次读入内存算余弦（万条约 60MB、毫秒级）。
+- **混合**：`α·归一BM25 + β·余弦`，score>0，降序取 top-N，仅 top-N 回库取正文。
+- **规模目标**：1 万条目单次查询（不含 embedding API 调用）< 50ms。
+
 约束：
 
 - embedding 请求独立超时（默认 5s），失败或超时**降级为纯关键词检索**。
