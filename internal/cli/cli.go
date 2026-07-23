@@ -113,6 +113,7 @@ func Init(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stdout, "已注册项目 %q → %s\n知识库目录: %s\n", name, cwd, st.Root)
 	fmt.Fprint(stdout, hooksBlock+"\n")
+	fmt.Fprintln(stdout, "或直接运行 ok setup 自动写入 hooks 配置并安装技能（推荐）")
 	return 0
 }
 
@@ -314,6 +315,15 @@ func Doctor(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	fmt.Fprintf(stdout, "注册表: %d 个项目\n", len(reg.Projects))
+	if data, err := os.ReadFile(filepath.Join(kimiHome(), "config.toml")); err != nil || !strings.Contains(string(data), markerBegin) {
+		fmt.Fprintln(stdout, "hooks 未安装（运行 ok setup）")
+		healthy = false
+	} else {
+		fmt.Fprintln(stdout, "hooks 已安装")
+	}
+	if registry.HooksDisabled() {
+		fmt.Fprintln(stdout, "hooks 当前为关闭状态（ok on 开启）")
+	}
 	for _, p := range reg.Projects {
 		st := store.New(filepath.Join(registry.Home(), "projects", p.Name))
 		if _, err := os.Stat(st.KnowledgeDir()); err != nil {

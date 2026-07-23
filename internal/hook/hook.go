@@ -93,6 +93,9 @@ func logErr(format string, args ...any) {
 // HandlePrompt 基础注入（每会话首次：mandatory 全文 + 索引）+ 检索注入（每次）。
 // embedding 失败降级为关键词检索；任何内部错误 fail-open。
 func HandlePrompt(r io.Reader, w io.Writer) int {
+	if registry.HooksDisabled() {
+		return 0
+	}
 	ev, err := ParseEvent(r)
 	if err != nil {
 		logErr("prompt parse: %v", err)
@@ -163,6 +166,9 @@ func HandlePrompt(r io.Reader, w io.Writer) int {
 
 // HandlePostTool 记录触碰的文件（相对项目根、小写、"/" 分隔）。
 func HandlePostTool(r io.Reader) int {
+	if registry.HooksDisabled() {
+		return 0
+	}
 	ev, err := ParseEvent(r)
 	if err != nil {
 		return 0
@@ -200,6 +206,9 @@ func relativize(pc *project.Context, abs string) string {
 
 // HandleStop 评估 enforce 规则，需要时以 exit 2 阻断。
 func HandleStop(r io.Reader, stderr io.Writer) int {
+	if registry.HooksDisabled() {
+		return 0
+	}
 	ev, err := ParseEvent(r)
 	if err != nil {
 		return 0

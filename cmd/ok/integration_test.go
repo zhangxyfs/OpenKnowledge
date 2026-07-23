@@ -140,4 +140,21 @@ func TestEndToEnd(t *testing.T) {
 	if !strings.Contains(stdout, "demo") {
 		t.Fatalf("doctor: out=%q", stdout)
 	}
+
+	// 全局开关：off 后 prompt 无输出，on 后恢复
+	if _, _, code = runOK(t, home, proj, "", "off"); code != 0 {
+		t.Fatalf("off: code=%d", code)
+	}
+	ev = fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":[{"type":"text","text":"git 提交规范"}]}`, proj)
+	stdout, _, code = runOK(t, home, proj, ev, "hook", "prompt")
+	if code != 0 || stdout != "" {
+		t.Fatalf("disabled prompt should be silent: code=%d out=%q", code, stdout)
+	}
+	if _, _, code = runOK(t, home, proj, "", "on"); code != 0 {
+		t.Fatalf("on: code=%d", code)
+	}
+	stdout, _, code = runOK(t, home, proj, ev, "hook", "prompt")
+	if code != 0 || !strings.Contains(stdout, "Conventional Commits") {
+		t.Fatalf("re-enabled prompt: code=%d out=%q", code, stdout)
+	}
 }

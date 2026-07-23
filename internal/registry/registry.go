@@ -94,3 +94,9 @@ func (r *Registry) AddProject(name, path string) error {
 	r.Projects = append(r.Projects, Project{Name: name, Paths: []string{path}})
 	return nil
 }
+
+// HooksDisabled 报告 hooks 全局开关是否关闭（标志文件存在）。
+func HooksDisabled() bool {
+	_, err := os.Stat(filepath.Join(Home(), "hooks-disabled"))
+	return err == nil
+}

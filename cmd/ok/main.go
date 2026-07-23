@@ -20,6 +20,8 @@ func run(argv []string) int {
 	switch argv[1] {
 	case "hook":
 		return runHook(argv[2:])
+	case "setup":
+		return cli.Setup(argv[2:], os.Stdout, os.Stderr)
 	case "init":
 		return cli.Init(argv[2:], os.Stdout, os.Stderr)
 	case "add":
@@ -32,6 +34,10 @@ func run(argv []string) int {
 		return cli.List(argv[2:], os.Stdout, os.Stderr)
 	case "doctor":
 		return cli.Doctor(argv[2:], os.Stdout, os.Stderr)
+	case "on":
+		return cli.On(argv[2:], os.Stdout, os.Stderr)
+	case "off":
+		return cli.Off(argv[2:], os.Stdout, os.Stderr)
 	default:
 		usage()
 		return 1
@@ -60,5 +66,5 @@ func runHook(args []string) (code int) {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "用法: ok <init|add|search|index|list|doctor|hook> ...")
+	fmt.Fprintln(os.Stderr, "用法: ok <setup|init|add|search|index|list|doctor|on|off|hook> ...")
 }

@@ -214,3 +214,36 @@ func TestStopWithoutEnforceRulesPass(t *testing.T) {
 		t.Fatalf("expected 0 without enforce rules, got %d", code)
 	}
 }
+
+func TestHooksDisabledStopsAll(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	cfg := `
+[[enforce]]
+type = "changelog_required"
+code_globs = ["**/*.go"]
+changelog_glob = "docs/changelogs/**"
+message = "请补变更日志"
+`
+	if err := os.WriteFile(filepath.Join(kbRoot, "config.toml"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// 关闭全局开关
+	if err := os.WriteFile(filepath.Join(registry.Home(), "hooks-disabled"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	in := fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":[{"type":"text","text":"git 提交"}]}`, projDir)
+	var out bytes.Buffer
+	if code := HandlePrompt(strings.NewReader(in), &out); code != 0 || out.Len() != 0 {
+		t.Fatalf("disabled prompt: code=%d out=%q", code, out.String())
+	}
+	codeFile := filepath.Join(projDir, "main.go")
+	post := fmt.Sprintf(`{"hook_event_name":"PostToolUse","session_id":"s9","cwd":%q,"tool_name":"Write","tool_input":{"path":%q}}`, projDir, codeFile)
+	if code := HandlePostTool(strings.NewReader(post)); code != 0 {
+		t.Fatalf("disabled post-tool exit %d", code)
+	}
+	stop := fmt.Sprintf(`{"hook_event_name":"Stop","session_id":"s9","cwd":%q}`, projDir)
+	var stderr bytes.Buffer
+	if code := HandleStop(strings.NewReader(stop), &stderr); code != 0 {
+		t.Fatalf("disabled stop should pass, got %d (%q)", code, stderr.String())
+	}
+}
