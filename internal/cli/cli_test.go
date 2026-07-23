@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"openknowledge/internal/entry"
+	"openknowledge/internal/registry"
 )
 
 // chdir 切换工作目录并在结束时还原。
@@ -92,6 +93,31 @@ func TestAddOutsideProjectFails(t *testing.T) {
 	var out, errBuf bytes.Buffer
 	if code := Add([]string{"--title", "X", "--type", "note"}, &out, &errBuf); code == 0 {
 		t.Fatal("expected failure outside registered project")
+	}
+}
+
+// ok init 不带参数时应以当前目录基名作为项目名。
+func TestInitDefaultsToDirBaseName(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("OK_HOME", home)
+	proj := filepath.Join(home, "myproj")
+	if err := os.MkdirAll(proj, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	chdir(t, proj)
+	var out, errBuf bytes.Buffer
+	if code := Init(nil, &out, &errBuf); code != 0 {
+		t.Fatalf("init code=%d err=%q", code, errBuf.String())
+	}
+	reg, err := registry.Load(registry.DefaultPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reg.Projects) != 1 || reg.Projects[0].Name != "myproj" {
+		t.Fatalf("expected basename-derived project, got %+v", reg.Projects)
+	}
+	if _, err := os.Stat(filepath.Join(home, "projects", "myproj", "knowledge")); err != nil {
+		t.Fatalf("KB skeleton missing: %v", err)
 	}
 }
 

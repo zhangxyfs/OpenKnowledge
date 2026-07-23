@@ -77,15 +77,18 @@ func Init(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(args); err != nil {
 		return 1
 	}
-	if fs.NArg() != 1 {
-		fmt.Fprintln(stderr, "用法: ok init <项目名>")
+	if fs.NArg() > 1 {
+		fmt.Fprintln(stderr, "用法: ok init [项目名]（缺省取当前目录名）")
 		return 1
 	}
-	name := fs.Arg(0)
 	cwd, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
+	}
+	name := filepath.Base(cwd)
+	if fs.NArg() == 1 {
+		name = fs.Arg(0)
 	}
 	reg, err := registry.Load(registry.DefaultPath())
 	if err != nil {

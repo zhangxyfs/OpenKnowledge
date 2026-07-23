@@ -158,7 +158,7 @@ PostToolUse 会记录，下次 Stop 自然放行。无 enforce 配置时 Stop �
 
 | 命令 | 作用 |
 |---|---|
-| `ok init <name>` | 在当前目录注册项目（写 registry），创建 KB 骨架，并打印需追加到 `~/.kimi-code/config.toml` 的 hooks 配置块 |
+| `ok init [name]` | 在当前目录注册项目（写 registry），创建 KB 骨架；name 缺省取当前目录基名。并打印 hooks 配置提示 |
 | `ok add` | 按模板新建知识条目（flags: `--title --type --tags --mandatory --file`；`--file` 指定正文来源文件，不带时生成模板文件供手动编辑），自动重建 INDEX、增量更新向量 |
 | `ok search <query>` | 命令行跑一遍混合检索，预览注入效果（调试用） |
 | `ok index` | 全量重建 vectors.json |
