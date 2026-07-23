@@ -25,6 +25,8 @@ v1 只支持 Kimi Code，调用方式只用 hooks。
 - UserPromptSubmit 混合检索注入（关键词 + 向量语义）
 - PostToolUse + Stop 强制检查（v1 规则类型：`changelog_required`）
 - OpenAI 兼容 API 的 embedding
+- `ok setup` 首次引导（自动写入 hooks 配置、安装 kimi 技能）
+- hooks 全局开关（`ok on` / `ok off`，默认开启，持续到手动切换）
 
 ### 非目标（v1 不做）
 
@@ -161,7 +163,9 @@ PostToolUse 会记录，下次 Stop 自然放行。无 enforce 配置时 Stop �
 | `ok search <query>` | 命令行跑一遍混合检索，预览注入效果（调试用） |
 | `ok index` | 全量重建 vectors.json |
 | `ok list` | 列出项目与条目 |
-| `ok doctor` | 检查注册表、配置、embedding API 连通性 |
+| `ok doctor` | 检查注册表、配置、embedding API 连通性、hooks 安装状态、开关状态 |
+| `ok setup` | 首次引导：备份并以标记块幂等写入 hooks 配置到 `~/.kimi-code/config.toml`（命令用自身 exe 绝对路径），安装 kimi 技能到 `~/.agents/skills/`（openknowledge-init / on / off），打印使用引导 |
+| `ok on` / `ok off` | hooks 全局开关：删除/创建 `~/.openknowledge/hooks-disabled` 标志文件 |
 | `ok hook prompt` | UserPromptSubmit 入口（基础注入 + 检索注入） |
 | `ok hook stop` | Stop 入口 |
 | `ok hook post-tool` | PostToolUse 入口 |
@@ -203,6 +207,25 @@ alpha = 1.0              # 关键词分权重
 beta = 1.0               # 语义分权重
 top_n = 3                # UserPromptSubmit 注入条数
 ```
+
+### 8.1 首次引导与全局开关
+
+**`ok setup`** 做的事（全部幂等，可重复执行）：
+
+1. 取自身 exe 绝对路径（`os.Executable`），hooks command 不再需要手动填路径。
+2. 备份 `~/.kimi-code/config.toml` 到 `config.toml.bak-openknowledge`，然后以
+   标记块 `# >>> openknowledge hooks >>>` / `# <<< openknowledge hooks <<<`
+   写入三条 hook；已存在标记块则原位替换，否则追加到文件末尾；文件不存在则
+   新建。kimi 主目录优先取 `KIMI_CODE_HOME` 环境变量。
+3. 安装三个用户技能到 `~/.agents/skills/`（可用 `OK_SKILLS_HOME` 覆盖）：
+   `openknowledge-init`（在项目目录执行 `ok init`）、`openknowledge-on`、
+   `openknowledge-off`。技能内容里烧入 exe 绝对路径，不依赖 PATH。
+4. 打印使用引导（init → add → 新会话生效）。
+
+**全局开关**：`ok off` 创建 `~/.openknowledge/hooks-disabled` 标志文件，
+`ok on` 删除之。三个 hook 入口在处理任何逻辑前先检查该文件，存在即静默
+exit 0（HandleStop 也放行）。默认状态为开启（文件不存在），关闭持续到
+手动 `ok on`，不分会话。`ok doctor` 报告开关状态与 hooks 安装状态。
 
 ## 9. 错误处理
 

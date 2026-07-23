@@ -3129,3 +3129,469 @@ git commit -m "fix: parse real kimi hook payloads and move base injection to fir
 **验收（控制器执行，非本任务）**：更新 `~/.kimi-code/config.toml` 为三条 hook，
 真实 kimi 会话复验：首次提问上下文含 mandatory+索引；PostToolUse 记录生效；
 改代码后 Stop 阻断。
+
+---
+
+## v1.1 特性（2026-07-22 用户追加需求）
+
+### Task 12: ok setup 首次引导 + kimi 技能安装 + hooks 全局开关
+
+**Files:**
+- Create: `internal/cli/setup.go`（Setup/kimiHome/skillsHome/hooksBlockFor/upsertHooksBlock/installSkills/skillTemplates/guideText）
+- Create: `internal/cli/toggle.go`（On/Off/disabledFlagPath）
+- Modify: `internal/registry/registry.go`（加 `HooksDisabled()`）
+- Modify: `internal/hook/hook.go`（三个 handler 顶部加开关检查）
+- Modify: `internal/cli/cli.go`（Doctor 增加 hooks 安装/开关状态报告；Init 末尾提示 ok setup）
+- Modify: `cmd/ok/main.go`（setup/on/off 分支 + usage）
+- Create: `docs/changelogs/2026-07-22-v1.1-setup-toggle.md`（强制变更日志规则要求）
+- Test: `internal/cli/setup_test.go`、`internal/cli/toggle_test.go`、`internal/hook/hook_test.go`（追加）、`cmd/ok/integration_test.go`（追加开关流程）
+
+**Interfaces:**
+- Consumes: 现有全部包接口
+- Produces:
+  - `cli.Setup(args []string, stdout, stderr io.Writer) int`
+  - `cli.On(args []string, stdout, stderr io.Writer) int` / `cli.Off(args []string, stdout, stderr io.Writer) int`
+  - `registry.HooksDisabled() bool` — `~/.openknowledge/hooks-disabled` 存在即 true
+  - cli 内部：`kimiHome()`（KIMI_CODE_HOME 优先）、`skillsHome()`（OK_SKILLS_HOME 优先，默认 ~/.agents/skills）、`upsertHooksBlock(configPath, block string) error`、`hooksBlockFor(exe string) string`、`installSkills(exe string) error`、常量 `markerBegin`/`markerEnd`
+
+- [ ] **Step 1: 写失败的测试**
+
+`internal/cli/setup_test.go`
+
+```go
+package cli
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestUpsertHooksBlockAppendAndReplace(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(cfg, []byte("default_model = \"kimi\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := upsertHooksBlock(cfg, "BLOCK_V1\n"); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(cfg)
+	got := string(data)
+	if !strings.Contains(got, "default_model") || !strings.Contains(got, "BLOCK_V1") {
+		t.Fatalf("append failed: %q", got)
+	}
+	if err := upsertHooksBlock(cfg, "BLOCK_V2\n"); err != nil {
+		t.Fatal(err)
+	}
+	data, _ = os.ReadFile(cfg)
+	got = string(data)
+	if strings.Contains(got, "BLOCK_V1") || !strings.Contains(got, "BLOCK_V2") {
+		t.Fatalf("replace failed: %q", got)
+	}
+	if strings.Count(got, markerBegin) != 1 {
+		t.Fatalf("duplicate marker block: %q", got)
+	}
+}
+
+func TestUpsertHooksBlockNewFile(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "sub", "config.toml")
+	if err := upsertHooksBlock(cfg, "BLOCK\n"); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(cfg)
+	if !strings.Contains(string(data), "BLOCK") {
+		t.Fatalf("unexpected %q", data)
+	}
+}
+
+func TestUpsertHooksBlockCorruptMarker(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(cfg, []byte(markerBegin+"\nno end"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := upsertHooksBlock(cfg, "X\n"); err == nil {
+		t.Fatal("expected corrupt marker error")
+	}
+}
+
+func TestInstallSkills(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("OK_SKILLS_HOME", dir)
+	if err := installSkills(`D:\bin\ok.exe`); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"openknowledge-init", "openknowledge-on", "openknowledge-off"} {
+		data, err := os.ReadFile(filepath.Join(dir, name, "SKILL.md"))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !strings.Contains(string(data), "D:/bin/ok.exe") {
+			t.Fatalf("%s missing baked exe path: %q", name, data)
+		}
+	}
+}
+```
+
+`internal/cli/toggle_test.go`
+
+```go
+package cli
+
+import (
+	"bytes"
+	"testing"
+
+	"openknowledge/internal/registry"
+)
+
+func TestOffOnToggle(t *testing.T) {
+	t.Setenv("OK_HOME", t.TempDir())
+	var out, errBuf bytes.Buffer
+	if registry.HooksDisabled() {
+		t.Fatal("default should be enabled")
+	}
+	if code := Off(nil, &out, &errBuf); code != 0 {
+		t.Fatalf("off code=%d err=%q", code, errBuf.String())
+	}
+	if !registry.HooksDisabled() {
+		t.Fatal("expected disabled after ok off")
+	}
+	if code := On(nil, &out, &errBuf); code != 0 {
+		t.Fatalf("on code=%d", code)
+	}
+	if registry.HooksDisabled() {
+		t.Fatal("expected enabled after ok on")
+	}
+	// On 幂等（无标志文件也成功）
+	if code := On(nil, &out, &errBuf); code != 0 {
+		t.Fatalf("on idempotent code=%d", code)
+	}
+}
+```
+
+`internal/hook/hook_test.go` 追加
+
+```go
+func TestHooksDisabledStopsAll(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	cfg := `
+[[enforce]]
+type = "changelog_required"
+code_globs = ["**/*.go"]
+changelog_glob = "docs/changelogs/**"
+message = "请补变更日志"
+`
+	if err := os.WriteFile(filepath.Join(kbRoot, "config.toml"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// 关闭全局开关
+	if err := os.WriteFile(filepath.Join(registry.Home(), "hooks-disabled"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	in := fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":[{"type":"text","text":"git 提交"}]}`, projDir)
+	var out bytes.Buffer
+	if code := HandlePrompt(strings.NewReader(in), &out); code != 0 || out.Len() != 0 {
+		t.Fatalf("disabled prompt: code=%d out=%q", code, out.String())
+	}
+	codeFile := filepath.Join(projDir, "main.go")
+	post := fmt.Sprintf(`{"hook_event_name":"PostToolUse","session_id":"s9","cwd":%q,"tool_name":"Write","tool_input":{"path":%q}}`, projDir, codeFile)
+	if code := HandlePostTool(strings.NewReader(post)); code != 0 {
+		t.Fatalf("disabled post-tool exit %d", code)
+	}
+	stop := fmt.Sprintf(`{"hook_event_name":"Stop","session_id":"s9","cwd":%q}`, projDir)
+	var stderr bytes.Buffer
+	if code := HandleStop(strings.NewReader(stop), &stderr); code != 0 {
+		t.Fatalf("disabled stop should pass, got %d (%q)", code, stderr.String())
+	}
+}
+```
+
+（hook_test.go 需要给 imports 加 `"openknowledge/internal/registry"`。）
+
+`cmd/ok/integration_test.go` 在 TestEndToEnd 末尾（list/doctor 冒烟之后）追加开关流程：
+
+```go
+	// 全局开关：off 后 prompt 无输出，on 后恢复
+	if _, _, code = runOK(t, home, proj, "", "off"); code != 0 {
+		t.Fatalf("off: code=%d", code)
+	}
+	ev = fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":[{"type":"text","text":"git 提交规范"}]}`, proj)
+	stdout, _, code = runOK(t, home, proj, ev, "hook", "prompt")
+	if code != 0 || stdout != "" {
+		t.Fatalf("disabled prompt should be silent: code=%d out=%q", code, stdout)
+	}
+	if _, _, code = runOK(t, home, proj, "", "on"); code != 0 {
+		t.Fatalf("on: code=%d", code)
+	}
+	stdout, _, code = runOK(t, home, proj, ev, "hook", "prompt")
+	if code != 0 || !strings.Contains(stdout, "Conventional Commits") {
+		t.Fatalf("re-enabled prompt: code=%d out=%q", code, stdout)
+	}
+```
+
+- [ ] **Step 2: 运行测试确认失败**
+
+Run: `go test ./internal/cli/ ./internal/hook/ ./cmd/ok/`
+Expected: 编译失败，`undefined: upsertHooksBlock` / `Off` / `registry.HooksDisabled` 等
+
+- [ ] **Step 3: 实现**
+
+`internal/registry/registry.go` 追加：
+
+```go
+// HooksDisabled 报告 hooks 全局开关是否关闭（标志文件存在）。
+func HooksDisabled() bool {
+	_, err := os.Stat(filepath.Join(Home(), "hooks-disabled"))
+	return err == nil
+}
+```
+
+`internal/cli/toggle.go`
+
+```go
+package cli
+
+import (
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"time"
+
+	"openknowledge/internal/registry"
+)
+
+func disabledFlagPath() string { return filepath.Join(registry.Home(), "hooks-disabled") }
+
+// Off: ok off —— 关闭 hooks 全局开关（持续到 ok on）
+func Off(args []string, stdout, stderr io.Writer) int {
+	content := fmt.Sprintf("disabled at %s\nrun `ok on` to re-enable\n", time.Now().Format(time.RFC3339))
+	if err := os.MkdirAll(registry.Home(), 0o755); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if err := os.WriteFile(disabledFlagPath(), []byte(content), 0o644); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	fmt.Fprintln(stdout, "hooks 已全局关闭（ok on 重新开启）")
+	return 0
+}
+
+// On: ok on —— 开启 hooks 全局开关
+func On(args []string, stdout, stderr io.Writer) int {
+	if err := os.Remove(disabledFlagPath()); err != nil && !os.IsNotExist(err) {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	fmt.Fprintln(stdout, "hooks 已开启")
+	return 0
+}
+```
+
+`internal/cli/setup.go`
+
+```go
+package cli
+
+import (
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+const markerBegin = "# >>> openknowledge hooks >>>"
+const markerEnd = "# <<< openknowledge hooks <<<"
+
+// Setup: ok setup —— 首次引导：写入 hooks 配置、安装技能、打印引导
+func Setup(args []string, stdout, stderr io.Writer) int {
+	exe, err := os.Executable()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+	cfgPath := filepath.Join(kimiHome(), "config.toml")
+	if data, err := os.ReadFile(cfgPath); err == nil {
+		_ = os.WriteFile(cfgPath+".bak-openknowledge", data, 0o644)
+	}
+	if err := upsertHooksBlock(cfgPath, hooksBlockFor(exe)); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "hooks 配置已写入 %s\n", cfgPath)
+	if err := installSkills(exe); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "技能已安装到 %s (openknowledge-init/on/off)\n", skillsHome())
+	fmt.Fprintln(stdout, guideText)
+	return 0
+}
+
+func kimiHome() string {
+	if h := os.Getenv("KIMI_CODE_HOME"); h != "" {
+		return h
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".kimi-code")
+}
+
+func skillsHome() string {
+	if h := os.Getenv("OK_SKILLS_HOME"); h != "" {
+		return h
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".agents", "skills")
+}
+
+func hooksBlockFor(exe string) string {
+	exe = filepath.ToSlash(exe)
+	return fmt.Sprintf(`[[hooks]]
+event = "UserPromptSubmit"
+command = "%s hook prompt"
+timeout = 10
+
+[[hooks]]
+event = "PostToolUse"
+matcher = "Write|Edit"
+command = "%s hook post-tool"
+timeout = 5
+
+[[hooks]]
+event = "Stop"
+command = "%s hook stop"
+timeout = 5
+`, exe, exe, exe)
+}
+
+// upsertHooksBlock 以标记块幂等写入 hooks 配置：已存在标记块则原位替换，否则追加。
+func upsertHooksBlock(configPath, block string) error {
+	data, err := os.ReadFile(configPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	content := string(data)
+	wrapped := markerBegin + "\n" + block + markerEnd + "\n"
+	i := strings.Index(content, markerBegin)
+	j := strings.Index(content, markerEnd)
+	var out string
+	switch {
+	case i >= 0 && j > i:
+		tail := strings.TrimPrefix(content[j+len(markerEnd):], "\n")
+		out = content[:i] + wrapped + tail
+	case i >= 0:
+		return fmt.Errorf("hooks 标记块损坏（缺少结束标记）: %s", configPath)
+	default:
+		sep := ""
+		if len(content) > 0 && !strings.HasSuffix(content, "\n") {
+			sep = "\n"
+		}
+		out = content + sep + "\n" + wrapped
+	}
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(configPath, []byte(out), 0o644)
+}
+
+func installSkills(exe string) error {
+	for name, tpl := range skillTemplates {
+		dir := filepath.Join(skillsHome(), name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+		content := strings.ReplaceAll(tpl, "{{EXE}}", filepath.ToSlash(exe))
+		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+var skillTemplates = map[string]string{
+	"openknowledge-init": "---\nname: openknowledge-init\ndescription: 在当前项目目录初始化 OpenKnowledge 知识库（ok init）。当用户要求\"初始化知识库\"或\"把本项目注册到知识库\"时使用。\n---\n\n# openknowledge-init\n\n用 Bash 工具在当前工作目录执行（<目录名> 用当前目录的基名）：\n\n    \"{{EXE}}\" init <目录名>\n\n把输出的知识库路径汇报给用户；若提示重复注册，告知用户该项目已初始化过。\n",
+	"openknowledge-on":   "---\nname: openknowledge-on\ndescription: 开启 OpenKnowledge 知识库 hooks 全局开关。当用户要求\"开启知识库\"\"启用知识库 hooks\"时使用。\n---\n\n# openknowledge-on\n\n用 Bash 工具执行：\n\n    \"{{EXE}}\" on\n\n把输出汇报给用户。\n",
+	"openknowledge-off":  "---\nname: openknowledge-off\ndescription: 关闭 OpenKnowledge 知识库 hooks 全局开关（持续到手动开启）。当用户要求\"关闭知识库\"\"停用知识库 hooks\"时使用。\n---\n\n# openknowledge-off\n\n用 Bash 工具执行：\n\n    \"{{EXE}}\" off\n\n把输出汇报给用户，并说明：关闭后所有项目的知识库注入与强制检查都会暂停，直到执行 ok on。\n",
+}
+
+const guideText = `
+下一步：
+  1. 在需要知识库的项目目录运行 ok init <项目名>（或在 kimi 中说"初始化知识库"）
+  2. 用 ok add 添加知识条目
+  3. 新开 kimi 会话即可生效；ok off / ok on 可随时全局开关
+`
+```
+
+`internal/hook/hook.go`：在 `HandlePrompt`、`HandlePostTool`、`HandleStop` 三个函数
+体的第一行（ParseEvent 之前）加：
+
+```go
+	if registry.HooksDisabled() {
+		return 0
+	}
+```
+
+`internal/cli/cli.go` 修改：
+- `Doctor` 在注册表项目循环之前加：
+
+```go
+	if data, err := os.ReadFile(filepath.Join(kimiHome(), "config.toml")); err != nil || !strings.Contains(string(data), markerBegin) {
+		fmt.Fprintln(stdout, "hooks 未安装（运行 ok setup）")
+		healthy = false
+	} else {
+		fmt.Fprintln(stdout, "hooks 已安装")
+	}
+	if registry.HooksDisabled() {
+		fmt.Fprintln(stdout, "hooks 当前为关闭状态（ok on 开启）")
+	}
+```
+
+- `Init` 末尾打印 hooksBlock 之后追加一行：
+
+```go
+	fmt.Fprintln(stdout, "或直接运行 ok setup 自动写入 hooks 配置并安装技能（推荐）")
+```
+
+`cmd/ok/main.go`：switch 加三个 case，usage 文本同步：
+
+```go
+	case "setup":
+		return cli.Setup(argv[2:], os.Stdout, os.Stderr)
+	case "on":
+		return cli.On(argv[2:], os.Stdout, os.Stderr)
+	case "off":
+		return cli.Off(argv[2:], os.Stdout, os.Stderr)
+```
+
+`fmt.Fprintln(os.Stderr, "用法: ok <setup|init|add|search|index|list|doctor|on|off|hook> ...")`
+
+`docs/changelogs/2026-07-22-v1.1-setup-toggle.md`（强制变更日志规则要求，内容）：
+
+```markdown
+# v1.1：ok setup 首次引导 + kimi 技能 + hooks 全局开关
+
+- 新增 `ok setup`：以标记块幂等写入 hooks 配置（命令用自身 exe 绝对路径），
+  备份原配置，安装 openknowledge-init/on/off 三个用户技能到 ~/.agents/skills/。
+- 新增 `ok on` / `ok off`：hooks 全局开关（~/.openknowledge/hooks-disabled
+  标志文件），默认开启，关闭持续到手动恢复。
+- 三个 hook 入口在处理前检查全局开关；ok doctor 增加 hooks 安装与开关状态报告。
+```
+
+- [ ] **Step 4: 运行测试确认通过**
+
+Run: `go build ./... && go test ./... -v`
+Expected: 全部 PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add internal/ cmd/ docs/changelogs/
+git commit -m "feat: first-run setup wizard, kimi skills install, and global hooks toggle"
+```
