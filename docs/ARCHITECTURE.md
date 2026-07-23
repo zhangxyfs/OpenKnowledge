@@ -516,7 +516,7 @@ go build ./...         # 编译检查
 检查：
 - 全局 `~/.openknowledge/config.toml` 的 `[embedding]` 是否有 `api_key`
 - 项目 config.toml 是否覆盖了全局（项目级配置优先级最高，旧模板可能有写死的 embedding 段）
-- 切换过 embedding 模型后必须 `ok index` 同步（旧向量维度不匹配会使余弦分静默归零；重建需删除 kb.db 或改动条目文件触发重算）
+- 切换过 embedding 模型后必须删除 kb.db 再运行 `ok index` 重建向量（增量同步不会重算未变化条目；维度不匹配时余弦静默为 0）
 
 ### 15.4 强制检查不触发
 

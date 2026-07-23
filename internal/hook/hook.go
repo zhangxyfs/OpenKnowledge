@@ -126,8 +126,16 @@ func HandlePrompt(r io.Reader, w io.Writer) int {
 	}
 	defer db.Close()
 	if err := db.Sync(pc.Store.KnowledgeDir(), client); err != nil {
-		logErr("prompt sync index: %v", err)
-		return 0
+		if client == nil {
+			logErr("prompt sync index: %v", err)
+			return 0
+		}
+		// embedding 失败：降级重试（仅同步 INDEX），保证基础注入与关键词检索不被阻断
+		logErr("prompt sync index with embedding: %v", err)
+		if err2 := db.Sync(pc.Store.KnowledgeDir(), nil); err2 != nil {
+			logErr("prompt sync index: %v", err2)
+			return 0
+		}
 	}
 	st := state.Load(pc.Store.StateDir(), ev.SessionID)
 	var b strings.Builder

@@ -123,6 +123,38 @@ func TestPromptKeywordFallback(t *testing.T) {
 	}
 }
 
+func TestPromptSurvivesEmbedOutage(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	writeEntry(t, kbRoot, "rule.md", mandatoryEntry)
+	writeEntry(t, kbRoot, "git.md", gitEntry)
+	// 配置一个必然失败的 embedding 服务 + 提供 key，使 client 非 nil
+	cfg := `
+[embedding]
+base_url = "http://127.0.0.1:1"
+api_key_env = "OK_TEST_EMBED_KEY"
+model = "m"
+timeout_sec = 1
+`
+	if err := os.WriteFile(filepath.Join(kbRoot, "config.toml"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OK_TEST_EMBED_KEY", "dummy")
+	in := fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":[{"type":"text","text":"git 提交"}]}`, projDir)
+	var out bytes.Buffer
+	code := HandlePrompt(strings.NewReader(in), &out)
+	if code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	// 即使 embedding 全挂，基础注入与关键词检索也必须到场
+	got := out.String()
+	if !strings.Contains(got, "改完代码先写日志。") {
+		t.Fatalf("base injection suppressed by embed outage: %q", got)
+	}
+	if !strings.Contains(got, "Conventional Commits") {
+		t.Fatalf("keyword retrieval suppressed by embed outage: %q", got)
+	}
+}
+
 func TestFirstPromptSkipsBadEntry(t *testing.T) {
 	projDir, kbRoot := setupProject(t)
 	writeEntry(t, kbRoot, "rule.md", mandatoryEntry)
