@@ -155,7 +155,7 @@ timeout_sec = 1
 	}
 }
 
-func TestFirstPromptSkipsBadEntry(t *testing.T) {
+func TestFirstPromptBadEntryFailsOpen(t *testing.T) {
 	projDir, kbRoot := setupProject(t)
 	writeEntry(t, kbRoot, "rule.md", mandatoryEntry)
 	writeEntry(t, kbRoot, "broken.md", "no frontmatter at all")
@@ -164,15 +164,28 @@ func TestFirstPromptSkipsBadEntry(t *testing.T) {
 	}
 	in := fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":[{"type":"text","text":"随便问问"}]}`, projDir)
 	var out bytes.Buffer
+	// Sync 对损坏条目中止并回滚：hook fail-open（退出 0、不注入、不崩溃），
+	// 已索引内容不被破坏
+	if code := HandlePrompt(strings.NewReader(in), &out); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if strings.Contains(out.String(), "改完代码先写日志。") {
+		t.Fatalf("corrupt sync must suppress injection, got %q", out.String())
+	}
+	// 移除损坏文件后下一次提问恢复注入（回滚没有毁掉索引）
+	if err := os.Remove(filepath.Join(kbRoot, "knowledge", "broken.md")); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
 	if code := HandlePrompt(strings.NewReader(in), &out); code != 0 {
 		t.Fatalf("exit %d", code)
 	}
 	if !strings.Contains(out.String(), "改完代码先写日志。") {
-		t.Fatalf("mandatory entry should survive a corrupt sibling, got %q", out.String())
+		t.Fatalf("injection should recover after bad entry removed, got %q", out.String())
 	}
 }
 
-func TestPromptSkipsBadEntry(t *testing.T) {
+func TestPromptBadEntryFailsOpen(t *testing.T) {
 	projDir, kbRoot := setupProject(t)
 	writeEntry(t, kbRoot, "git.md", gitEntry)
 	writeEntry(t, kbRoot, "broken.md", "---\ntitle: x\ntype: bogus\n---\n")
@@ -181,8 +194,19 @@ func TestPromptSkipsBadEntry(t *testing.T) {
 	if code := HandlePrompt(strings.NewReader(in), &out); code != 0 {
 		t.Fatalf("exit %d", code)
 	}
+	if strings.Contains(out.String(), "Conventional Commits") {
+		t.Fatalf("corrupt sync must suppress injection, got %q", out.String())
+	}
+	// 修复坏文件后恢复注入
+	if err := os.Remove(filepath.Join(kbRoot, "knowledge", "broken.md")); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if code := HandlePrompt(strings.NewReader(in), &out); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
 	if !strings.Contains(out.String(), "Conventional Commits") {
-		t.Fatalf("expected git entry injected despite corrupt sibling, got %q", out.String())
+		t.Fatalf("injection should recover after bad entry removed, got %q", out.String())
 	}
 }
 
