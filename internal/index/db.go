@@ -5,14 +5,13 @@ package index
 import (
 	"database/sql"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"math"
 	"os"
 	"path/filepath"
 
 	_ "modernc.org/sqlite"
-
-	"openknowledge/internal/embed"
 )
 
 // schema 建表语句。entries 存原文（供注入与 INDEX.md）；
@@ -72,7 +71,14 @@ func (db *DB) Count() (int, error) {
 	return n, err
 }
 
-// migrateVectorsJSON 导入旧版 vectors.json（格式与 embed.VectorSet 相同）。
+// legacyVectors 是旧版 vectors.json 的格式（v1.2 embed.VectorSet），仅用于迁移导入。
+type legacyVectors struct {
+	Vectors map[string]struct {
+		Vector []float32 `json:"vector"`
+	} `json:"vectors"`
+}
+
+// migrateVectorsJSON 导入旧版 vectors.json。
 func (db *DB) migrateVectorsJSON(dbPath string) error {
 	vj := filepath.Join(filepath.Dir(dbPath), "vectors.json")
 	if _, err := os.Stat(vj); err != nil {
@@ -88,8 +94,12 @@ func (db *DB) migrateVectorsJSON(dbPath string) error {
 	if n > 0 {
 		return nil
 	}
-	vs, err := embed.LoadVectors(vj)
+	data, err := os.ReadFile(vj)
 	if err != nil {
+		return err
+	}
+	var vs legacyVectors
+	if err := json.Unmarshal(data, &vs); err != nil {
 		return err
 	}
 	tx, err := db.sql.Begin()

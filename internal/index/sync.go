@@ -18,8 +18,8 @@ func ftsText(s string) string { return strings.Join(retrieve.Terms(s), " ") }
 
 // Sync 将 dir（knowledge 目录）下的 Markdown 条目增量同步进索引库：
 // 按 filename+mtime 对比，新增/变化的条目 upsert（entries 存原文，
-// entries_fts 存 ftsText 切分文本），client!=nil 时为变化条目重算向量；
-// 库中多余的 filename 删除；最后重建 <dir>/../INDEX.md。
+// entries_fts 存 ftsText 切分文本），client!=nil 时为变化条目重算向量、
+// 并为缺向量的未变化条目补齐向量；库中多余的 filename 删除；最后重建 <dir>/../INDEX.md。
 func (db *DB) Sync(dir string, client embed.Client) error {
 	entries, _ := entry.LoadTolerant(dir)
 
@@ -43,6 +43,25 @@ func (db *DB) Sync(dir string, client embed.Client) error {
 	}
 	_ = rows.Close()
 
+	hasVector := map[string]bool{}
+	vrows, err := db.sql.Query(`SELECT filename FROM vectors`)
+	if err != nil {
+		return err
+	}
+	for vrows.Next() {
+		var name string
+		if err := vrows.Scan(&name); err != nil {
+			_ = vrows.Close()
+			return err
+		}
+		hasVector[name] = true
+	}
+	if err := vrows.Err(); err != nil {
+		_ = vrows.Close()
+		return err
+	}
+	_ = vrows.Close()
+
 	tx, err := db.sql.Begin()
 	if err != nil {
 		return err
@@ -62,6 +81,17 @@ func (db *DB) Sync(dir string, client embed.Client) error {
 		}
 		mtime := fi.ModTime().Unix()
 		if old, ok := existing[name]; ok && old == mtime {
+			// 未变化条目不重算向量；仅在缺向量（曾无 key 同步）且有 key 时补齐
+			if client != nil && !hasVector[name] {
+				vec, err := client.Embed(context.Background(), e.EmbedText())
+				if err != nil {
+					return rollback(err)
+				}
+				if _, err := tx.Exec(`INSERT OR REPLACE INTO vectors(filename,dim,blob) VALUES(?,?,?)`,
+					name, len(vec), encodeVector(vec)); err != nil {
+					return rollback(err)
+				}
+			}
 			continue
 		}
 		tags := strings.Join(e.Tags, ", ")
@@ -115,7 +145,7 @@ func (db *DB) Sync(dir string, client embed.Client) error {
 	return db.rebuildIndex(dir)
 }
 
-// rebuildIndex 从 entries 表重写 <dir>/../INDEX.md（与 store.IndexContent 相同的行格式）。
+// rebuildIndex 从 entries 表重写 <dir>/../INDEX.md（标题+类型+tags+摘要的固定行格式）。
 func (db *DB) rebuildIndex(dir string) error {
 	rows, err := db.sql.Query(`SELECT title, type, tags, summary FROM entries ORDER BY filename`)
 	if err != nil {

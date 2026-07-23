@@ -1,13 +1,9 @@
 package store
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"unicode/utf8"
-
-	"openknowledge/internal/entry"
 )
 
 type Store struct{ Root string }
@@ -16,7 +12,7 @@ func New(root string) *Store { return &Store{Root: root} }
 
 func (s *Store) KnowledgeDir() string { return filepath.Join(s.Root, "knowledge") }
 func (s *Store) IndexPath() string    { return filepath.Join(s.Root, "INDEX.md") }
-func (s *Store) VectorsPath() string  { return filepath.Join(s.Root, "vectors.json") }
+func (s *Store) KbPath() string       { return filepath.Join(s.Root, "kb.db") }
 func (s *Store) StateDir() string     { return filepath.Join(s.Root, "state") }
 func (s *Store) ConfigPath() string   { return filepath.Join(s.Root, "config.toml") }
 
@@ -27,20 +23,6 @@ func (s *Store) EnsureDirs() error {
 		}
 	}
 	return nil
-}
-
-// IndexContent 生成轻量索引文本（标题+类型+tags+摘要）。
-func IndexContent(entries []*entry.Entry) string {
-	var b strings.Builder
-	b.WriteString("# 知识索引\n\n")
-	for _, e := range entries {
-		fmt.Fprintf(&b, "- **%s** (%s) [%s] — %s\n", e.Title, e.Type, strings.Join(e.Tags, ", "), e.Summary)
-	}
-	return b.String()
-}
-
-func (s *Store) RebuildIndex(entries []*entry.Entry) error {
-	return os.WriteFile(s.IndexPath(), []byte(IndexContent(entries)), 0o644)
 }
 
 // EstimateTokens 按字符数 ÷ 2 保守估算 token 数。

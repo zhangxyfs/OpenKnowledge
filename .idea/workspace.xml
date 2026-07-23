@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="NONE" />
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="dea127f9-5681-436e-ad97-e887e18052cd" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/internal/cli/cli_test.go" beforeDir="false" afterPath="$PROJECT_DIR$/internal/cli/cli_test.go" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/entry/entry.go" beforeDir="false" afterPath="$PROJECT_DIR$/internal/entry/entry.go" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/entry/entry_test.go" beforeDir="false" afterPath="$PROJECT_DIR$/internal/entry/entry_test.go" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/hook/hook_test.go" beforeDir="false" afterPath="$PROJECT_DIR$/internal/hook/hook_test.go" afterDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="ClangdSettings">
+    <option name="formatViaClangd" value="false" />
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="ProjectColorInfo"><![CDATA[{
+  "associatedIndex": 4
+}]]></component>
+  <component name="ProjectId" id="3GrXXcMsiBW29m0mSu4t9no3x82" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.cidr.known.project.marker": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "RunOnceActivity.readMode.enableVisualFormatting": "true",
+    "cf.first.check.clang-format": "false",
+    "cidr.known.project.marker": "true",
+    "git-widget-placeholder": "feature/openknowledge",
+    "kotlin-language-version-configured": "true",
+    "last_opened_file_path": "D:/develop/OpenKnowledge",
+    "settings.editor.selected.configurable": "AndroidSdkUpdater"
+  }
+}]]></component>
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="dea127f9-5681-436e-ad97-e887e18052cd" name="Changes" comment="" />
+      <created>1784730702087</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1784730702087</updated>
+    </task>
+    <servers />
+  </component>
+</project>

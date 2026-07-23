@@ -5,12 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
-
-	"openknowledge/internal/entry"
 )
 
 func newFakeServer(t *testing.T, vec []float32) *httptest.Server {
@@ -55,43 +51,5 @@ func TestCosine(t *testing.T) {
 	}
 	if got := Cosine([]float32{}, []float32{}); got != 0 {
 		t.Fatalf("got %v", got)
-	}
-}
-
-func TestVectorSetUpdate(t *testing.T) {
-	srv := newFakeServer(t, []float32{0.5, 0.5})
-	defer srv.Close()
-	c := &OpenAIClient{BaseURL: srv.URL, Model: "m"}
-
-	dir := t.TempDir()
-	p := filepath.Join(dir, "a.md")
-	if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	e := &entry.Entry{Title: "A", Path: p}
-	vs := &VectorSet{Vectors: map[string]*EntryVector{}}
-	if err := vs.Update(context.Background(), c, []*entry.Entry{e}); err != nil {
-		t.Fatal(err)
-	}
-	if len(vs.Vectors) != 1 {
-		t.Fatalf("expected 1 vector, got %d", len(vs.Vectors))
-	}
-	// 再次调用应命中缓存（mtime 未变）
-	if err := vs.Update(context.Background(), c, []*entry.Entry{e}); err != nil {
-		t.Fatal(err)
-	}
-	// 条目删除后向量被清理
-	if err := vs.Update(context.Background(), c, nil); err != nil {
-		t.Fatal(err)
-	}
-	if len(vs.Vectors) != 0 {
-		t.Fatal("expected cleanup")
-	}
-}
-
-func TestLoadVectorsMissing(t *testing.T) {
-	vs, err := LoadVectors(filepath.Join(t.TempDir(), "none.json"))
-	if err != nil || len(vs.Vectors) != 0 {
-		t.Fatalf("got %+v err=%v", vs, err)
 	}
 }

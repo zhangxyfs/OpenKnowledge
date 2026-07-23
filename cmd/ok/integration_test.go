@@ -98,6 +98,24 @@ func TestEndToEnd(t *testing.T) {
 		t.Fatalf("second prompt: code=%d out=%q", code, stdout)
 	}
 
+	// 手工写入新条目（不运行 ok add，INDEX 已过期）：
+	// 下一次 hook prompt 应先增量同步索引，再命中新条目并重建 INDEX.md
+	kbDir := filepath.Join(home, "projects", "demo")
+	manual := "---\ntitle: 部署清单\ntype: note\nsummary: 上线步骤\n---\n\n上线前先跑回归测试套件。\n"
+	if err := os.WriteFile(filepath.Join(kbDir, "knowledge", "deploy.md"), []byte(manual), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(filepath.Join(kbDir, "INDEX.md")); err != nil || strings.Contains(string(data), "部署清单") {
+		t.Fatalf("precondition: INDEX should exist and be stale: %v %q", err, data)
+	}
+	stdout, _, code = runOK(t, home, proj, mkPrompt("部署清单"), "hook", "prompt")
+	if code != 0 || !strings.Contains(stdout, "上线前先跑回归测试套件。") {
+		t.Fatalf("prompt after manual edit: code=%d out=%q", code, stdout)
+	}
+	if data, err := os.ReadFile(filepath.Join(kbDir, "INDEX.md")); err != nil || !strings.Contains(string(data), "部署清单") {
+		t.Fatalf("query-time sync should rebuild INDEX: %v %q", err, data)
+	}
+
 	// 配置强制规则
 	cfgPath := filepath.Join(home, "projects", "demo", "config.toml")
 	cfg, err := os.ReadFile(cfgPath)

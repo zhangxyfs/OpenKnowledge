@@ -12,6 +12,7 @@ import (
 
 	"openknowledge/internal/embed"
 	"openknowledge/internal/entry"
+	"openknowledge/internal/index"
 	"openknowledge/internal/project"
 	"openknowledge/internal/registry"
 	"openknowledge/internal/retrieve"
@@ -157,34 +158,34 @@ func Add(args []string, stdout, stderr io.Writer) int {
 	return afterAdd(pc, stdout, stderr)
 }
 
-// afterAdd 重建 INDEX 并（有 API key 时）增量更新向量。
+// afterAdd 增量同步索引库（重建 INDEX.md；有 API key 时为变化条目重算向量）。
 func afterAdd(pc *project.Context, stdout, stderr io.Writer) int {
-	entries, err := entry.Load(pc.Store.KnowledgeDir())
+	db, err := index.Open(pc.Store.KbPath())
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	if err := pc.Store.RebuildIndex(entries); err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
+	defer db.Close()
+	var client embed.Client
+	if c := embeddingClient(pc); c != nil {
+		client = c
 	}
-	client := embeddingClient(pc)
+	if err := db.Sync(pc.Store.KnowledgeDir(), client); err != nil {
+		if client == nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		// embedding 失败：降级为只同步 INDEX，向量稍后 ok index 补齐
+		if err2 := db.Sync(pc.Store.KnowledgeDir(), nil); err2 != nil {
+			fmt.Fprintln(stderr, err2)
+			return 1
+		}
+		fmt.Fprintf(stdout, "INDEX 已更新；向量更新失败（可稍后 ok index 重试）: %v\n", err)
+		return 0
+	}
 	if client == nil {
-		fmt.Fprintln(stdout, "未配置 embedding API key，跳过向量更新（稍后运行 ok index）")
+		fmt.Fprintln(stdout, "INDEX 已更新；未配置 embedding API key，向量跳过（稍后运行 ok index）")
 		return 0
-	}
-	vs, err := embed.LoadVectors(pc.Store.VectorsPath())
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	if err := vs.Update(context.Background(), client, entries); err != nil {
-		fmt.Fprintf(stderr, "向量更新失败（可稍后 ok index 重试）: %v\n", err)
-		return 0
-	}
-	if err := vs.Save(pc.Store.VectorsPath()); err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
 	}
 	fmt.Fprintln(stdout, "INDEX 与向量已更新")
 	return 0
@@ -220,12 +221,12 @@ func Search(args []string, stdout, stderr io.Writer) int {
 	if pc == nil {
 		return code
 	}
-	entries, err := entry.Load(pc.Store.KnowledgeDir())
+	db, err := index.Open(pc.Store.KbPath())
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	vs, _ := embed.LoadVectors(pc.Store.VectorsPath())
+	defer db.Close()
 	var queryVec []float32
 	if client := embeddingClient(pc); client != nil {
 		if vec, err := client.Embed(context.Background(), query); err != nil {
@@ -234,42 +235,47 @@ func Search(args []string, stdout, stderr io.Writer) int {
 			queryVec = vec
 		}
 	}
-	for _, s := range retrieve.Rank(entries, query, queryVec, vs, pc.Config.Retrieve) {
-		fmt.Fprintf(stdout, "%.2f\t%s (%s)\n", s.Score, s.Entry.Title, s.Entry.FileName())
+	hits, err := db.Query(retrieve.Terms(query), queryVec, pc.Config.Retrieve)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	for _, h := range hits {
+		fmt.Fprintf(stdout, "%.2f\t%s (%s)\n", h.Score, h.Title, h.Filename)
 	}
 	return 0
 }
 
-// Index: ok index —— 重建 INDEX.md 并全量重建向量
+// Index: ok index —— 增量同步索引库（INDEX.md + 条目与向量）
 func Index(args []string, stdout, stderr io.Writer) int {
 	pc, code := resolveFromCwd(stderr)
 	if pc == nil {
 		return code
 	}
-	entries, err := entry.Load(pc.Store.KnowledgeDir())
+	db, err := index.Open(pc.Store.KbPath())
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	if err := pc.Store.RebuildIndex(entries); err != nil {
+	defer db.Close()
+	var client embed.Client
+	if c := embeddingClient(pc); c != nil {
+		client = c
+	}
+	if err := db.Sync(pc.Store.KnowledgeDir(), client); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	client := embeddingClient(pc)
+	n, err := db.Count()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
 	if client == nil {
-		fmt.Fprintln(stderr, "INDEX 已重建；未配置 embedding API key，跳过向量重建")
+		fmt.Fprintf(stderr, "INDEX 已重建（%d 条）；未配置 embedding API key，跳过向量重建\n", n)
 		return 1
 	}
-	vs := &embed.VectorSet{Vectors: map[string]*embed.EntryVector{}}
-	if err := vs.Update(context.Background(), client, entries); err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	if err := vs.Save(pc.Store.VectorsPath()); err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	fmt.Fprintf(stdout, "INDEX 已重建；已重建 %d 条向量\n", len(vs.Vectors))
+	fmt.Fprintf(stdout, "INDEX 已重建；索引共 %d 条\n", n)
 	return 0
 }
 

@@ -46,27 +46,26 @@
 
 | 类别 | 技术/版本 |
 |------|-----------|
-| 语言 | **Go**（go.mod 声明 `go 1.23.8`，要求 ≥ 1.22） |
-| 构建 | Go 标准工具链，单二进制产出，无 CGO |
+| 语言 | **Go**（go.mod 声明 `go 1.25.0`） |
+| 构建 | Go 标准工具链，单二进制产出，无 CGO（SQLite 用纯 Go 的 modernc.org/sqlite） |
 | CLI 解析 | 标准库 `flag`（刻意不引 cobra） |
 | HTTP | 标准库 `net/http`（embedding API 调用） |
 | 测试 | 标准库 `testing` + `net/http/httptest` |
 
-**表格 B — 第三方依赖清单**（全部，仅 3 个，与 `go.mod` 一致）：
+**表格 B — 第三方依赖清单**（全部，仅 4 个，与 `go.mod` 一致）：
 
 | 依赖 | 版本 | 用途 |
 |------|------|------|
 | `github.com/BurntSushi/toml` | v1.6.0 | registry.toml 与各层 config.toml 解析 |
 | `gopkg.in/yaml.v3` | v3.0.1 | 知识条目 frontmatter 解析 |
 | `github.com/bmatcuk/doublestar/v4` | v4.10.0 | 强制规则的 `**` glob 匹配 |
-
-> 注：go.mod 中三个依赖仍带 `// indirect` 标记（历史遗留），实际均为直接依赖；`go mod tidy` 可清理。
+| `modernc.org/sqlite` | v1.54.0 | kb.db 索引库（FTS5 全文检索 + 向量存储），纯 Go 无 CGO |
 
 ---
 
 ## 3. 模块架构
 
-单 module（`openknowledge`），12 个包，严格单向依赖、无环：
+单 module（`openknowledge`），13 个包，严格单向依赖、无环：
 
 ```
 ┌─────────────────────────────────────────────┐
@@ -83,19 +82,18 @@
    ┌────▼───────────────────────▼───────────────────┐
    │ 基础层（被上层直接组合）                         │
    │ registry · entry · config · store · embed ·    │
-   │ retrieve · state · enforce                     │
+   │ index · retrieve · state · enforce             │
    └────────────────────────────────────────────────┘
 ```
 
 **依赖关系**（→ 表示 import）：
 
 - `cmd/ok` → `cli`、`hook`
-- `cli` → `registry`、`entry`、`store`、`embed`、`retrieve`、`project`、`config`
-- `hook` → `project`、`registry`、`entry`、`store`、`embed`、`retrieve`、`state`、`enforce`
+- `cli` → `registry`、`entry`、`store`、`embed`、`index`、`retrieve`、`project`、`config`
+- `hook` → `project`、`registry`、`store`、`embed`、`index`、`retrieve`、`state`、`enforce`
 - `project` → `registry`、`config`、`store`
-- `retrieve` → `entry`、`embed`、`config`
-- `embed` → `entry`
-- `store` → `entry`
+- `index` → `entry`、`embed`、`retrieve`、`config`（+ modernc.org/sqlite）
+- `retrieve` / `embed` / `store` → 仅标准库
 - `enforce` → `config`、`state`（+ doublestar）
 - `registry` → BurntSushi/toml；`entry` → yaml.v3；`config` → BurntSushi/toml
 - `state` → 仅标准库
@@ -108,7 +106,7 @@
 
 ```
 OpenKnowledge/
-├── go.mod / go.sum                # 模块定义（3 个第三方依赖）
+├── go.mod / go.sum                # 模块定义（4 个第三方依赖）
 ├── cmd/ok/
 │   ├── main.go                    # 入口：子命令调度，hook 路径 panic-recover 兜底
 │   └── integration_test.go        # 端到端测试（编译真实二进制驱动）
@@ -123,14 +121,18 @@ OpenKnowledge/
 │   │   ├── config.go              #   Config 各节、Default、Load/LoadMerged、ResolvedAPIKey
 │   │   └── config_test.go
 │   ├── store/                     # KB 存储布局
-│   │   ├── store.go               #   目录路径、INDEX.md 生成、token 预算截断
+│   │   ├── store.go               #   目录路径、token 预算截断
 │   │   └── store_test.go
 │   ├── embed/                     # 向量
 │   │   ├── embed.go               #   Client 接口、OpenAI 兼容客户端、Cosine
-│   │   ├── vectors.go             #   vectors.json 缓存（mtime 增量更新）
 │   │   └── embed_test.go
-│   ├── retrieve/                  # ★ 混合检索
-│   │   ├── retrieve.go            #   Terms（CJK 二元组）、KeywordScore、Rank
+│   ├── index/                     # ★ SQLite+FTS5 索引库（kb.db）
+│   │   ├── db.go                  #   Open/Close/Count、旧版 vectors.json 迁移
+│   │   ├── sync.go                #   增量同步（filename+mtime）、INDEX.md 重建
+│   │   ├── query.go               #   FTS5 BM25 + 余弦混合查询、Mandatory
+│   │   └── index_test.go
+│   ├── retrieve/                  # 检索分词
+│   │   ├── retrieve.go            #   Terms（CJK 二元组）
 │   │   └── retrieve_test.go
 │   ├── state/                     # 会话状态
 │   │   ├── state.go               #   Session（触碰文件/已阻断规则/已基础注入）、Clean
@@ -195,25 +197,23 @@ func LoadMerged(projectPath, globalPath string) (Config, error)
 func (e Embedding) ResolvedAPIKey() string  // api_key 字段 > api_key_env 环境变量 > ""
 ```
 
-### 5.4 store — KB 存储布局（57 行）
+### 5.4 store — KB 存储布局（39 行）
 
-纯路径计算层：`KnowledgeDir()/IndexPath()/VectorsPath()/StateDir()/ConfigPath()`。另两个职责：`IndexContent` 生成轻量索引（标题+类型+tags+摘要，机器生成禁止手改）；`TruncateToBudget` 按"字符数(rune) ÷ 2"保守估算 token 并截断注入文本。
+纯路径计算层：`KnowledgeDir()/IndexPath()/KbPath()/StateDir()/ConfigPath()`；另有 `TruncateToBudget` 按"字符数(rune) ÷ 2"保守估算 token 并截断注入文本。INDEX.md 的生成已移交给 `index` 包。
 
-### 5.5 embed — 向量客户端与缓存（embed.go 90 行 + vectors.go 74 行）
+### 5.5 embed — 向量客户端（90 行）
 
 - `Client` 接口隔离 HTTP 细节，测试用 `httptest` fake server，不碰真实网络
 - `OpenAIClient` 实现 OpenAI 兼容协议：`POST {base_url}/embeddings`，`Authorization: Bearer <key>`，带 context 超时
-- `VectorSet` 是 `vectors.json` 缓存：`Update` 按**文件 mtime** 增量重算、清理已删条目；hook 路径上从不为条目算向量（只为提问算一次），这是 hook 低延迟的关键
+- 条目向量不再存 vectors.json，而是存于 kb.db 的 `vectors` 表（float32 小端 blob，见 5.6）；旧版 vectors.json 在首次打开 kb.db 时自动导入并改名为 `.bak`
 
-### 5.6 retrieve — 混合检索（111 行）
+### 5.6 index/retrieve — 索引化混合检索（db.go 138 + sync.go 168 + query.go 138 + retrieve.go 44 行）
 
-```
-score = α·关键词分 + β·余弦语义分
-```
+检索不再逐文件扫描 Markdown，而是查询 SQLite 索引库 `kb.db`（位于各项目 KB 根目录）：
 
-- `Terms`：自研分词——小写拉丁/数字词（≥2 字符）+ **CJK 二元组**（`unicode.Han`），解决中文无空格分词问题
-- `KeywordScore`：tag 命中 +3 / title +2 / summary +1
-- `Rank`：mandatory 条目不参与（已在基础注入中）；只留 score>0；分数降序、同分标题升序；截 top_n；`queryVec=nil` 时自动退化为纯关键词（embedding 失败降级路径）
+- **同步**（`Sync`）：按 filename+mtime 增量——新增/变化条目 upsert 进 `entries`（原文）与 `entries_fts`（FTS5 表，存 Terms 切分文本），client!=nil 时为变化条目重算向量、并为缺向量的未变化条目补齐；已删条目连带清理；最后重建 INDEX.md。hook 与 CLI 共用这一条路径
+- **查询**（`Query`）：`score = α·归一BM25 + β·余弦`。关键词通道走 FTS5 `bm25()`（列权重 title>tags>summary>body），语义通道全量读向量算余弦（万条毫秒级）；mandatory 条目不参与（已在基础注入中）；只留 score>0，分数降序、同分标题升序，截 top_n；`queryVec=nil` 时自动退化为纯关键词（embedding 失败降级路径）
+- `Mandatory()` 返回 mandatory 条目供基础注入；`retrieve.Terms` 是自研分词器——小写拉丁/数字词（≥2 字符）+ **CJK 二元组**（`unicode.Han`），FTS 入库与 MATCH 查询共用同一切分保证词元一致
 
 ### 5.7 state — 会话状态（96 行）
 
@@ -223,19 +223,19 @@ score = α·关键词分 + β·余弦语义分
 
 v1 仅 `changelog_required`：触碰文件中存在匹配 `code_globs` 的 且 不存在匹配 `changelog_glob` 的 → 阻断并返回用户配置的 message。用 doublestar 做 `**` glob 匹配（`**/*.go` 可匹配根目录文件）。刻意**不理解**变更日志的细则——细则写在知识条目里由注入教给 AI，hook 只做机械检查。
 
-### 5.9 hook — hooks 事件处理（238 行，全项目最大文件）
+### 5.9 hook — hooks 事件处理（247 行，全项目最大文件）
 
 三个 handler 共享同一套防御结构：**第一行检查全局开关 → 解析事件 → 路由项目 → 各自逻辑 → 任何错误只记 ok.log 并 exit 0**。
 
 - `Event` 的 `Prompt` 是 `json.RawMessage`，`PromptText()` 兼容两种真实载荷形态（字符串 / `[{"type":"text","text":"..."}]` 数组）
 - `FilePath()` 取 `tool_input.path`（kimi 实际字段），兼容 `file_path`
-- `HandlePrompt`：每会话首次提问先做基础注入（mandatory 全文 + INDEX.md，标记 `BaseInjected` 且仅当内容非空才置位），然后每次提问做混合检索注入；embedding 失败降级纯关键词
+- `HandlePrompt`：打开 kb.db → **查询前增量同步**（`Sync`，无 key 时跳过向量）→ 每会话首次提问做基础注入（`Mandatory()` 全文 + INDEX.md，标记 `BaseInjected` 且仅当内容非空才置位）→ 每次提问 `Query` 混合检索注入；embedding 失败降级纯关键词
 - `HandlePostTool`：记录触碰文件（经 `relativize` 转项目相对、小写、`/` 分隔）
 - `HandleStop`：评估 enforce 规则，命中即 `MarkBlocked` → 保存状态 → stderr 输出 message → **exit 2**（全项目唯一非零出口）
 
-### 5.10 cli — 管理命令（cli.go 348 行 + setup.go 210 行 + toggle.go 38 行）
+### 5.10 cli — 管理命令（cli.go 354 行 + setup.go 210 行 + toggle.go 38 行）
 
-- `cli.go`：`Init`（项目名缺省取目录基名）、`Add`（重复条目拒绝；后接 INDEX 重建 + 向量增量）、`Search`（检索预览）、`Index`（INDEX + 向量全量重建）、`List`、`Doctor`（注册表/配置/embedding 连通性/hooks 安装状态/开关状态）
+- `cli.go`：`Init`（项目名缺省取目录基名）、`Add`（重复条目拒绝；后接索引库同步）、`Search`（检索预览，走 `index.Query`）、`Index`（索引库增量同步并打印条目数）、`List`（文件扫描，人用命令开销可忽略）、`Doctor`（注册表/配置/embedding 连通性/hooks 安装状态/开关状态）
 - `setup.go`：见第 6.4 节
 - `toggle.go`：`On`/`Off` 即删除/创建 `~/.openknowledge/hooks-disabled` 标志文件
 
@@ -249,9 +249,9 @@ v1 仅 `changelog_required`：触碰文件中存在匹配 `code_globs` 的 且 �
 用户发消息
   → kimi 触发 UserPromptSubmit
   → 执行 "ok.exe hook prompt"，stdin 喂事件 JSON
-  → ok：开关检查 → 项目路由 → LoadTolerant 加载条目
+  → ok：开关检查 → 项目路由 → 打开 kb.db → 查询前增量同步（filename+mtime）
   → 首次提问？→ 输出 mandatory 全文 + INDEX.md（置 BaseInjected）
-  → 每次提问 → embed 提问(失败降级) → Rank 混合打分 → top-N 全文
+  → 每次提问 → embed 提问(失败降级) → index.Query 混合打分 → top-N 全文
   → TruncateToBudget 截断 → stdout
   → kimi 把 stdout 追加进模型上下文
 ```
@@ -277,8 +277,8 @@ AI 回合结束
 
 ```
 ok init [名字]   → registry 注册 + KB 骨架（项目名缺省取目录基名）
-ok add --title … → 写条目 → 重建 INDEX.md → 有 key 则增量更新向量
-手工编辑条目     → ok index 重新同步 INDEX + 向量
+ok add --title … → 写条目 → 同步索引库（INDEX.md + 有 key 则为变化条目算向量）
+手工编辑条目     → 下次提问时 hook 查询前自动增量同步；或 ok index 手动同步
 ok search <词>   → 命令行预览检索效果（调试注入质量）
 ```
 
@@ -308,10 +308,10 @@ ok setup
  │──────────►│ UserPromptSubmit     │                      │
  │           │────stdin JSON───────►│                      │
  │           │                      │──读 registry.toml────►│
- │           │                      │──LoadTolerant────────►│
+ │           │                      │──打开 kb.db 并 Sync───►│
  │           │                      │──(首次)读 INDEX.md────►│
  │           │                      │──(可选)embedding API──►│ (OpenAI 兼容服务)
- │           │                      │──Rank/截断             │
+ │           │                      │──Query/截断            │
  │           │◄──stdout 注入文本────│                      │
  │           │──追加进上下文────────►│                      │
  │           │───────调用 LLM──────►│                      │
@@ -345,14 +345,14 @@ ok setup
 └── projects/<项目名>/
     ├── config.toml         # 项目配置（覆盖全局；[[enforce]] 仅这里有）
     ├── knowledge/*.md      # 知识条目（一文件一条，frontmatter + 正文）
-    ├── INDEX.md            # 机器生成的轻量索引（标题+类型+tags+摘要）
-    ├── vectors.json        # 条目向量缓存：{文件名: {mod_time, vector}}
+    ├── INDEX.md            # 机器生成的轻量索引（标题+类型+tags+摘要，由 index.Sync 重建）
+    ├── kb.db               # SQLite 索引库：entries（原文）+ entries_fts（FTS5）+ vectors（向量 blob）
     └── state/session-*.json # 会话状态（Touched/BlockedRules/BaseInjected）
 ```
 
-**写入纪律**：INDEX.md 与 vectors.json 由工具维护，不手改；knowledge/ 是人工维护区；config.toml 项目级手写（模板含注释示例）。
+**写入纪律**：INDEX.md 与 kb.db 由工具维护，不手改；knowledge/ 是人工维护区；config.toml 项目级手写（模板含注释示例）。旧版 vectors.json 首次打开 kb.db 时自动导入并改名为 `.bak`。
 
-**一致性策略**：全部 JSON/TOML 读取对"文件不存在"宽容（视为空）；损坏文件按层处理——entry 在 hook 路径跳过单文件、CLI 路径整体报错；state 损坏回退空状态（最坏情况是重复阻断一次，fail-safe 方向正确）。
+**一致性策略**：全部 JSON/TOML 读取对"文件不存在"宽容（视为空）；损坏文件按层处理——entry 解析失败在 Sync（LoadTolerant）中跳过单文件；state 损坏回退空状态（最坏情况是重复阻断一次，fail-safe 方向正确）；kb.db 损坏/打开失败时 hook 记 ok.log 后静默放行（fail-open）。
 
 ---
 
@@ -381,7 +381,7 @@ ok setup
 | 优化项 | 位置 | 说明 |
 |--------|------|------|
 | **单二进制 + 进程内无状态** | 全项目 | hook 冷启动 ~10ms；无 daemon、无 IPC |
-| **mtime 增量向量缓存** | `embed/vectors.go` | hook 路径从不为条目算向量，每次调用最多为提问算 1 次 embedding |
+| **SQLite 索引 + mtime 增量同步** | `index` | 检索不逐文件扫描 Markdown；未变化条目不重算向量，每次调用最多为提问算 1 次 embedding |
 | **embedding 失败降级** | `hook.HandlePrompt` | 超时/失败自动退化为纯关键词检索，注入永不缺席 |
 | **token 预算截断** | `store.TruncateToBudget` | 注入文本按 `inject.max_tokens` 截断（字符数÷2 保守估算） |
 | **全面 fail-open** | 所有 hook handler | 任何内部错误 → ok.log + exit 0；`main.runHook` 还有 panic-recover 兜底 |
@@ -403,29 +403,30 @@ ok setup
           ┌───┴───┐       ┌───┴────┐
           │  cli  │       │  hook  │
           └───┬───┘       └───┬────┘
-              │           ┌───┴─────────────────────┐
-              ▼           ▼                         │
-          ┌───┴────────┐  │                         │
-          │  project   │◄─┘                         │
-          └───┬────────┘  │                         │
-   ┌──────────┼───────────┼──────────┐              │
-   ▼          ▼           ▼          ▼              ▼
-┌──────┐  ┌──────┐   ┌───────┐  ┌────────┐   ┌──────────┐
-│registry│  │config│   │ store │  │retrieve│   │ enforce  │
-└──┬───┘  └──┬───┘   └───┬───┘  └───┬────┘   └────┬─────┘
-   │         │           │          │             │
-   ▼         │           ▼          ▼             ▼
-[toml]      │        ┌───────┐  ┌────────┐   ┌───────┐
-            └───────►│ entry │◄─┤ embed  │   │ state │
-                     └───────┘  └────────┘   └───────┘
-                       │            │
-                       ▼            ▼
-                   [yaml.v3]   (vectors.json)
-                                  │
-                              [doublestar] ◄── enforce 也使用
+              └───────┬───────┘
+                      ▼
+                 ┌─────────┐
+                 │ project │
+                 └────┬────┘
+        ┌─────────────┼──────────────┬──────────┐
+        ▼             ▼              ▼          ▼
+   ┌─────────┐   ┌────────┐    ┌─────────┐ ┌────────┐
+   │registry │   │ config │    │  index  │ │ enforce│
+   └───┬─────┘   └────────┘    └────┬────┘ └───┬────┘
+       │                            │          │
+       ▼           ┌────────────────┤          ▼
+     [toml]        ▼                ▼     ┌───────┐
+               ┌───────┐       ┌────────┐ │ state │
+               │ entry │       │ embed  │ └───────┘
+               └───┬───┘       └────────┘
+                   ▼                │
+               [yaml.v3]            ▼
+                          [modernc.org/sqlite]（index）
+                          [doublestar]（enforce）
 ```
 
-第三方库：`toml`（registry/config）、`yaml.v3`（entry）、`doublestar`（enforce）。
+第三方库：`toml`（registry/config）、`yaml.v3`（entry）、`doublestar`（enforce）、`modernc.org/sqlite`（index）。
+注：`index` 还依赖 `retrieve`（Terms 分词）与 `config`（检索权重）；`retrieve`/`embed`/`store`/`state` 无内部依赖。
 
 ---
 
@@ -438,12 +439,12 @@ go build -o ok.exe ./cmd/ok   # Windows
 go build -o ok ./cmd/ok       # Linux/macOS
 ```
 
-无构建标签、无代码生成、无资源嵌入；`go.mod` 声明 `go 1.23.8`（≥ 1.22 即可编译）。
+无构建标签、无代码生成、无资源嵌入；`go.mod` 声明 `go 1.25.0`。
 
 ### 12.2 常用开发命令
 
 ```bash
-go test ./...          # 全部测试（12 包）
+go test ./...          # 全部测试（13 包）
 go vet ./...           # 静态检查
 go build ./...         # 编译检查
 ```
@@ -460,9 +461,9 @@ go build ./...         # 编译检查
 |------|------|----------|
 | `ok setup` | 首次引导 | 写 hooks 配置（标记块幂等）+ 装 3 个 kimi 技能 + 交互配 embedding + 连通性验证 |
 | `ok init [名字]` | 注册当前项目 | 名字缺省取目录基名；建 KB 骨架；打印 hooks 提示 |
-| `ok add --title …` | 新建条目 | `--type/--tags/--mandatory/--file`；自动重建 INDEX + 增量向量 |
+| `ok add --title …` | 新建条目 | `--type/--tags/--mandatory/--file`；自动同步索引库（无 key 时向量跳过） |
 | `ok search <词>` | 检索预览 | 命令行输出打分排序（调试用） |
-| `ok index` | 全量重建 | INDEX.md + vectors.json（无 key 时 INDEX 仍重建，向量跳过） |
+| `ok index` | 同步索引库 | 增量同步 kb.db 并重建 INDEX.md、打印条目数（无 key 时向量跳过，退出码 1） |
 | `ok list` | 列出项目与条目 | `*` 标记 mandatory |
 | `ok doctor` | 体检 | 注册表/配置/embedding 连通性/hooks 安装状态/开关状态 |
 | `ok on` / `ok off` | 全局开关 | 删除/创建 hooks-disabled 标志文件 |
@@ -478,11 +479,11 @@ go build ./...         # 编译检查
 
 ### 14.1 自动化测试
 
-- **单元测试**（每包一个 `*_test.go`，共 11 个文件）：registry 路由、entry 解析（含 CRLF/BOM）、config 三层合并、store 截断、embed（httptest fake server）、retrieve 打分、state 持久化、enforce 全分支、project 解析、hook 三入口、cli 各命令、setup 幂等写入
-- **端到端测试**（`cmd/ok/integration_test.go`）：`TestMain` 编译真实二进制，驱动完整流程——init → add → 首次提问基础注入 → 二次提问不重复 → enforce 阻断一次后放行 → 未注册目录静默 → 开关 off/on
+- **单元测试**（每包一个 `*_test.go`，共 11 个文件）：registry 路由、entry 解析（含 CRLF/BOM）、config 三层合并、store 截断、embed（httptest fake server）、index（同步/查询/mandatory/迁移/2k 条目）、retrieve 分词、state 持久化、enforce 全分支、project 解析、hook 三入口、cli 各命令、setup 幂等写入
+- **端到端测试**（`cmd/ok/integration_test.go`）：`TestMain` 编译真实二进制，驱动完整流程——init → add → 首次提问基础注入 → 二次提问不重复 → 手改条目后 hook 查询前增量同步命中并重建 INDEX → enforce 阻断一次后放行 → 未注册目录静默 → 开关 off/on
 - **隔离保证**：`OK_HOME` + `KIMI_CODE_HOME` + `OK_SKILLS_HOME` 指向 `t.TempDir()`，`OPENAI_API_KEY` 置空，全程零网络
 
-运行：`go test ./... -v`（12 包全绿）；`go vet ./...` 干净。
+运行：`go test ./... -v`（13 包全绿）；`go vet ./...` 干净。
 
 ### 14.2 真实环境验证（曾执行的手动验收）
 
@@ -508,14 +509,14 @@ go build ./...         # 编译检查
 检查：
 - `ok search <关键词>` 命令行复现打分，确认是检索问题还是注入问题
 - 条目 tags/summary 是否覆盖该关键词（关键词分依赖它们）
-- 语义分是否为 0：embedding 未配置或失败（`ok doctor` 验证连通性）；vectors.json 是否过期（`ok index` 重建）
+- 语义分是否为 0：embedding 未配置或失败（`ok doctor` 验证连通性）；kb.db 向量是否过期（`ok index` 同步补齐）
 
 ### 15.3 语义检索不生效
 
 检查：
 - 全局 `~/.openknowledge/config.toml` 的 `[embedding]` 是否有 `api_key`
 - 项目 config.toml 是否覆盖了全局（项目级配置优先级最高，旧模板可能有写死的 embedding 段）
-- 切换过 embedding 模型后必须 `ok index` 全量重建（旧向量维度不匹配会静默归零）
+- 切换过 embedding 模型后必须 `ok index` 同步（旧向量维度不匹配会使余弦分静默归零；重建需删除 kb.db 或改动条目文件触发重算）
 
 ### 15.4 强制检查不触发
 
@@ -536,12 +537,12 @@ go build ./...         # 编译检查
 
 ## 16. 后续维护建议
 
-1. **清理 go.mod 标记**：执行 `go mod tidy` 去掉三个依赖上过期的 `// indirect` 标记。
+1. **清理 go.mod 标记**：执行 `go mod tidy` 去掉间接依赖上过期的 `// indirect` 标记。
 2. **防御性钳制**：`config.Load` 对 `max_tokens < 0`、`top_n < 0` 做钳制（当前手改配置为负数时 `TruncateToBudget` 会 panic——hook 路径虽有 recover 兜底，CLI 路径没有）。
-3. **VectorSet nil map 防御**：`VectorSet.Update` 开头加 `if vs.Vectors == nil { vs.Vectors = make(...) }`，防手改 `{"vectors":null}` 后 panic。
-4. **写盘原子化**：vectors.json / state / registry 改为临时文件 + rename，避免崩溃半截文件。
-5. **ok.log 治理**：当前只增不减且会写入 embedding 错误响应体（≤512B），建议只记状态码并加大小滚动。
-6. **embedding 模型漂移检测**：`ok doctor` 对比 vectors.json 向量维度与当前模型维度，不一致时提示 `ok index`。
+3. **写盘原子化**：INDEX.md / state / registry 改为临时文件 + rename，避免崩溃半截文件。
+4. **ok.log 治理**：当前只增不减且会写入 embedding 错误响应体（≤512B），建议只记状态码并加大小滚动。
+5. **embedding 模型漂移检测**：`ok doctor` 对比 kb.db 中向量维度与当前模型维度，不一致时提示重建索引。
+6. **ok index 强制重算开关**：当前 Sync 按 mtime 增量，换模型后需删 kb.db 才能全量重算向量；可加 `--force` 标志。
 7. **Doctor 校验 enforce glob**：用 doublestar 预编译用户配置的 glob，格式错误提前暴露（当前 malformed glob 静默不生效）。
 8. **CRLF 归一**：仓库在 Windows 下全量 CRLF，`gofmt -l` 全报未格式化；建议加 `.gitattributes`（`* text=auto eol=lf`）统一为 LF。
 9. **v2 候选方向**（当前为非目标，勿提前实现）：hooks 自动沉淀经验、其他 AI 工具适配、本地 embedding、知识库远程同步。
