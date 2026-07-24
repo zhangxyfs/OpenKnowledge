@@ -88,3 +88,24 @@ func TestResolvedAPIKey(t *testing.T) {
 		t.Fatalf("expected empty, got %q", got)
 	}
 }
+
+func TestCaptureDefaults(t *testing.T) {
+	cfg := Default()
+	if cfg.Capture.Mode != "propose" || cfg.Capture.TurnInterval != 5 {
+		t.Fatalf("capture defaults %+v", cfg.Capture)
+	}
+}
+
+func TestCaptureLoad(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("[capture]\nmode = \"auto\"\nturn_interval = 9\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Capture.Mode != "auto" || cfg.Capture.TurnInterval != 9 {
+		t.Fatalf("capture load %+v", cfg.Capture)
+	}
+}

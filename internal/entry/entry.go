@@ -16,6 +16,7 @@ type Entry struct {
 	Type      string   `yaml:"type"`
 	Tags      []string `yaml:"tags"`
 	Mandatory bool     `yaml:"mandatory"`
+	Draft     bool     `yaml:"draft"` // 草稿不参与检索注入，INDEX.md 标【草稿】
 	Summary   string   `yaml:"summary"`
 	Body      string   `yaml:"-"`
 	Path      string   `yaml:"-"`

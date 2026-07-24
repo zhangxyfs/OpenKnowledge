@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS entries(
   tags TEXT NOT NULL DEFAULT '', summary TEXT NOT NULL DEFAULT '',
   body TEXT NOT NULL DEFAULT '',
   mandatory INTEGER NOT NULL DEFAULT 0,
+  draft INTEGER NOT NULL DEFAULT 0,
   mtime INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS vectors(
@@ -54,11 +55,48 @@ func Open(path string) (*DB, error) {
 		return nil, err
 	}
 	db := &DB{sql: sqldb}
+	if err := db.migrateDraftColumn(); err != nil {
+		_ = sqldb.Close()
+		return nil, err
+	}
 	if err := db.migrateVectorsJSON(path); err != nil {
 		_ = sqldb.Close()
 		return nil, err
 	}
 	return db, nil
+}
+
+// migrateDraftColumn 为 v2.0 及更早的库补 entries.draft 列
+// （CREATE TABLE IF NOT EXISTS 不会改动已存在的表）。
+func (db *DB) migrateDraftColumn() error {
+	rows, err := db.sql.Query(`PRAGMA table_info(entries)`)
+	if err != nil {
+		return err
+	}
+	has := false
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull, pk int
+		var dflt sql.RawBytes
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		if name == "draft" {
+			has = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	_ = rows.Close()
+	if has {
+		return nil
+	}
+	_, err = db.sql.Exec(`ALTER TABLE entries ADD COLUMN draft INTEGER NOT NULL DEFAULT 0`)
+	return err
 }
 
 // Close 关闭索引库。

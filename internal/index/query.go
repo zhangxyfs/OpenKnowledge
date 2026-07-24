@@ -29,7 +29,7 @@ func buildMatch(terms []string) string {
 	return strings.Join(quoted, " OR ")
 }
 
-// Query 混合检索：score = α·归一BM25 + β·余弦。mandatory 条目不参与；
+// Query 混合检索：score = α·归一BM25 + β·余弦。mandatory 与 draft 条目不参与；
 // 仅返回 score>0 的命中，按分数降序、同分标题升序，截 top_n。
 // terms 与 queryVec 均为空时返回空结果。
 func (db *DB) Query(terms []string, queryVec []float32, cfg config.Retrieve) ([]Hit, error) {
@@ -45,7 +45,7 @@ func (db *DB) Query(terms []string, queryVec []float32, cfg config.Retrieve) ([]
 			`SELECT e.filename, e.title, e.type, e.body,
 				bm25(entries_fts, 10.0, 8.0, 3.0, 1.0) AS r
 			FROM entries_fts JOIN entries e ON e.filename = entries_fts.filename
-			WHERE entries_fts MATCH ? AND e.mandatory = 0`, match)
+			WHERE entries_fts MATCH ? AND e.mandatory = 0 AND e.draft = 0`, match)
 		if err != nil {
 			return nil, err
 		}
@@ -72,7 +72,7 @@ func (db *DB) Query(terms []string, queryVec []float32, cfg config.Retrieve) ([]
 		rows, err := db.sql.Query(
 			`SELECT e.filename, e.title, e.type, e.body, v.blob
 			FROM vectors v JOIN entries e ON e.filename = v.filename
-			WHERE e.mandatory = 0`)
+			WHERE e.mandatory = 0 AND e.draft = 0`)
 		if err != nil {
 			return nil, err
 		}
@@ -118,10 +118,10 @@ func (db *DB) Query(terms []string, queryVec []float32, cfg config.Retrieve) ([]
 	return out, nil
 }
 
-// Mandatory 返回全部 mandatory 条目（用于基础注入）。
+// Mandatory 返回全部 mandatory 条目（用于基础注入）；草稿即使带 mandatory 标记也不注入。
 func (db *DB) Mandatory() ([]Hit, error) {
 	rows, err := db.sql.Query(
-		`SELECT filename, title, type, body FROM entries WHERE mandatory = 1 ORDER BY filename`)
+		`SELECT filename, title, type, body FROM entries WHERE mandatory = 1 AND draft = 0 ORDER BY filename`)
 	if err != nil {
 		return nil, err
 	}

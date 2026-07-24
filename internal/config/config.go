@@ -44,11 +44,19 @@ type EnforceRule struct {
 	Message       string   `toml:"message"`
 }
 
+// Capture 是知识捕获模式配置：propose（AI 提议草稿，人批准）或
+// auto（自动捕获）；TurnInterval 为自动捕获的轮次间隔。
+type Capture struct {
+	Mode         string `toml:"mode"`
+	TurnInterval int    `toml:"turn_interval"`
+}
+
 type Config struct {
 	Embedding Embedding     `toml:"embedding"`
 	Inject    Inject        `toml:"inject"`
 	Retrieve  Retrieve      `toml:"retrieve"`
 	Enforce   []EnforceRule `toml:"enforce"`
+	Capture   Capture       `toml:"capture"`
 }
 
 func Default() Config {
@@ -56,6 +64,7 @@ func Default() Config {
 		Embedding: Embedding{TimeoutSec: 5},
 		Inject:    Inject{MaxTokens: 1500},
 		Retrieve:  Retrieve{Alpha: 1.0, Beta: 1.0, TopN: 3},
+		Capture:   Capture{Mode: "propose", TurnInterval: 5},
 	}
 }
 

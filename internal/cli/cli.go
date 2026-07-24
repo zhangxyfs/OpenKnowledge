@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -367,4 +368,204 @@ func Doctor(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintln(stdout, "一切正常")
 	return 0
+}
+
+// Propose: ok propose --title T [--type note] [--tags a,b] [--summary S] [--file f | --body text]
+// AI 面向的草稿写入：条目带 draft:true（mandatory 恒为 false），只同步 INDEX
+// 不算向量，待 ok approve 批准后才参与检索。
+func Propose(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("propose", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	title := fs.String("title", "", "条目标题（必填）")
+	typ := fs.String("type", "note", "rule|pitfall|note|reference")
+	tags := fs.String("tags", "", "逗号分隔")
+	summary := fs.String("summary", "", "一句话摘要（缺省取标题）")
+	file := fs.String("file", "", "正文来源文件（与 --body 二选一）")
+	body := fs.String("body", "", "内联正文（与 --file 二选一）")
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+	if *title == "" || !entry.ValidType(*typ) || (*file != "" && *body != "") {
+		fmt.Fprintln(stderr, "用法: ok propose --title <标题> [--type <rule|pitfall|note|reference>] [--tags a,b] [--summary 摘要] [--file 正文.md | --body 正文]")
+		return 1
+	}
+	pc, code := resolveFromCwd(stderr)
+	if pc == nil {
+		return code
+	}
+	content := "TODO: 在此填写正文（frontmatter 中的 summary 也请补充）"
+	switch {
+	case *file != "":
+		data, err := os.ReadFile(*file)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		content = string(data)
+	case *body != "":
+		content = *body
+	}
+	sum := *summary
+	if sum == "" {
+		sum = *title
+	}
+	e := &entry.Entry{Title: *title, Type: *typ, Draft: true, Summary: sum, Body: strings.TrimSpace(content)}
+	if *tags != "" {
+		for _, t := range strings.Split(*tags, ",") {
+			e.Tags = append(e.Tags, strings.TrimSpace(t))
+		}
+	}
+	path := filepath.Join(pc.Store.KnowledgeDir(), entry.Slug(*title)+".md")
+	if _, err := os.Stat(path); err == nil {
+		fmt.Fprintf(stderr, "条目已存在: %s\n", path)
+		return 1
+	}
+	if err := os.WriteFile(path, e.Serialize(), 0o644); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "已创建 %s（已记为草稿，待批准）\n", path)
+	// 草稿只同步 INDEX，不算向量（nil client）
+	db, err := index.Open(pc.Store.KbPath())
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	defer db.Close()
+	if err := db.Sync(pc.Store.KnowledgeDir(), nil); err != nil {
+		var corrupt *index.CorruptEntriesError
+		if errors.As(err, &corrupt) {
+			// 损坏条目已跳过、INDEX 已重建：警告到 stderr，成功流程继续
+			fmt.Fprintln(stderr, err)
+		} else {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+	}
+	fmt.Fprintln(stdout, "INDEX 已更新（草稿不参与检索与向量）")
+	return 0
+}
+
+// Approve: ok approve <file> —— 将草稿条目转正（draft=false，其余字段原样保留），
+// 同步 INDEX 并（有 API key 时）计算向量。
+func Approve(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("approve", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintln(stderr, "用法: ok approve <条目文件>")
+		return 1
+	}
+	pc, code := resolveFromCwd(stderr)
+	if pc == nil {
+		return code
+	}
+	path := fs.Arg(0)
+	if _, err := os.Stat(path); err != nil {
+		// 裸文件名按 knowledge 目录解析
+		path = filepath.Join(pc.Store.KnowledgeDir(), filepath.Base(path))
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintf(stderr, "条目不存在: %v\n", err)
+		return 1
+	}
+	e, err := entry.Parse(data)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if !e.Draft {
+		fmt.Fprintf(stderr, "不是草稿条目: %s\n", path)
+		return 1
+	}
+	e.Draft = false
+	// Sync 的 diff 按秒级 mtime 判断变化；propose 后同一秒内 approve 会被误判为
+	// 未变化而跳过重建，此时手动把 mtime 推进一秒。
+	oldInfo, statErr := os.Stat(path)
+	if err := os.WriteFile(path, e.Serialize(), 0o644); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if statErr == nil {
+		if newInfo, err := os.Stat(path); err == nil && newInfo.ModTime().Unix() == oldInfo.ModTime().Unix() {
+			t := oldInfo.ModTime().Add(time.Second)
+			_ = os.Chtimes(path, t, t)
+		}
+	}
+	fmt.Fprintf(stdout, "已批准 %s\n", path)
+	return afterAdd(pc, stdout, stderr)
+}
+
+// CaptureCmd: ok capture —— 打印当前捕获模式与 turn_interval；
+// ok capture propose|auto 写入项目 config.toml 的 [capture] 小节。
+func CaptureCmd(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("capture", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+	pc, code := resolveFromCwd(stderr)
+	if pc == nil {
+		return code
+	}
+	if fs.NArg() == 0 {
+		fmt.Fprintf(stdout, "capture 模式: %s（turn_interval=%d）\n", pc.Config.Capture.Mode, pc.Config.Capture.TurnInterval)
+		return 0
+	}
+	mode := fs.Arg(0)
+	if fs.NArg() != 1 || (mode != "propose" && mode != "auto") {
+		fmt.Fprintln(stderr, "用法: ok capture [propose|auto]")
+		return 1
+	}
+	if err := setCaptureMode(pc.Store.ConfigPath(), mode); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "capture 模式已设为 %s（%s）\n", mode, pc.Store.ConfigPath())
+	return 0
+}
+
+// setCaptureMode 重写项目 config.toml 的 [capture] 小节：已存在则整段替换
+// （到下一个 [section] 或文件尾），不存在则在文件尾追加；其余内容（含注释）原样保留。
+func setCaptureMode(path, mode string) error {
+	block := "[capture]\nmode = " + strconv.Quote(mode) + "\n"
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return os.WriteFile(path, []byte(defaultProjectConfig+"\n"+block), 0o644)
+	}
+	if err != nil {
+		return err
+	}
+	lines := strings.Split(string(data), "\n")
+	start, end := -1, len(lines)
+	for i, l := range lines {
+		t := strings.TrimSpace(l)
+		if start < 0 {
+			if t == "[capture]" {
+				start = i
+			}
+			continue
+		}
+		if strings.HasPrefix(t, "[") {
+			end = i
+			break
+		}
+	}
+	var out []string
+	if start >= 0 {
+		out = append(out, lines[:start]...)
+		out = append(out, strings.TrimSuffix(block, "\n"))
+		out = append(out, lines[end:]...)
+	} else {
+		out = append(out, lines...)
+		// 与上文保持空行分隔
+		if n := len(out); n > 0 && strings.TrimSpace(out[n-1]) != "" {
+			out = append(out, "")
+		}
+		out = append(out, strings.TrimSuffix(block, "\n"))
+	}
+	return os.WriteFile(path, []byte(strings.Join(out, "\n")), 0o644)
 }

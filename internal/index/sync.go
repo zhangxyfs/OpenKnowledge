@@ -158,13 +158,17 @@ func (db *DB) Sync(dir string, client embed.Client) error {
 		if e.Mandatory {
 			mandatory = 1
 		}
-		if _, err := tx.Exec(`INSERT INTO entries(filename,title,type,tags,summary,body,mandatory,mtime)
-			VALUES(?,?,?,?,?,?,?,?)
+		draft := 0
+		if e.Draft {
+			draft = 1
+		}
+		if _, err := tx.Exec(`INSERT INTO entries(filename,title,type,tags,summary,body,mandatory,draft,mtime)
+			VALUES(?,?,?,?,?,?,?,?,?)
 			ON CONFLICT(filename) DO UPDATE SET
 			title=excluded.title, type=excluded.type, tags=excluded.tags,
 			summary=excluded.summary, body=excluded.body,
-			mandatory=excluded.mandatory, mtime=excluded.mtime`,
-			name, e.Title, e.Type, tags, e.Summary, e.Body, mandatory, mtime); err != nil {
+			mandatory=excluded.mandatory, draft=excluded.draft, mtime=excluded.mtime`,
+			name, e.Title, e.Type, tags, e.Summary, e.Body, mandatory, draft, mtime); err != nil {
 			return rollback(err)
 		}
 		if _, err := tx.Exec(`DELETE FROM entries_fts WHERE filename=?`, name); err != nil {
@@ -217,9 +221,10 @@ func (db *DB) Sync(dir string, client embed.Client) error {
 	return nil
 }
 
-// rebuildIndex 从 entries 表重写 <dir>/../INDEX.md（标题+类型+tags+摘要的固定行格式）。
+// rebuildIndex 从 entries 表重写 <dir>/../INDEX.md（标题+类型+tags+摘要的固定行格式）；
+// 草稿行标题前加【草稿】前缀。
 func (db *DB) rebuildIndex(dir string) error {
-	rows, err := db.sql.Query(`SELECT title, type, tags, summary FROM entries ORDER BY filename`)
+	rows, err := db.sql.Query(`SELECT title, type, tags, summary, draft FROM entries ORDER BY filename`)
 	if err != nil {
 		return err
 	}
@@ -228,8 +233,12 @@ func (db *DB) rebuildIndex(dir string) error {
 	b.WriteString("# 知识索引\n\n")
 	for rows.Next() {
 		var title, typ, tags, summary string
-		if err := rows.Scan(&title, &typ, &tags, &summary); err != nil {
+		var draft int
+		if err := rows.Scan(&title, &typ, &tags, &summary, &draft); err != nil {
 			return err
+		}
+		if draft != 0 {
+			title = "【草稿】" + title
 		}
 		fmt.Fprintf(&b, "- **%s** (%s) [%s] — %s\n", title, typ, tags, summary)
 	}

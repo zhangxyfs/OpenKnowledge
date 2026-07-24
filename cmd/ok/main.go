@@ -32,6 +32,12 @@ func run(argv []string) int {
 		return cli.Init(argv[2:], os.Stdout, os.Stderr)
 	case "add":
 		return cli.Add(argv[2:], os.Stdout, os.Stderr)
+	case "propose":
+		return cli.Propose(argv[2:], os.Stdout, os.Stderr)
+	case "approve":
+		return cli.Approve(argv[2:], os.Stdout, os.Stderr)
+	case "capture":
+		return cli.CaptureCmd(argv[2:], os.Stdout, os.Stderr)
 	case "search":
 		return cli.Search(argv[2:], os.Stdout, os.Stderr)
 	case "index":
@@ -72,7 +78,7 @@ func runHook(args []string) (code int) {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "用法: ok [gui] <setup|init|add|search|index|list|doctor|on|off|hook> ...")
+	fmt.Fprintln(os.Stderr, "用法: ok [gui] <setup|init|add|propose|approve|capture|search|index|list|doctor|on|off|hook> ...")
 }
 
 // runGUI 定位 web 资源目录并启动 Web GUI。

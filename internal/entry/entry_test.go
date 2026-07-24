@@ -117,3 +117,26 @@ func TestLoadTolerant(t *testing.T) {
 		t.Fatalf("all-valid: entries=%d errs=%v", len(entries2), errs2)
 	}
 }
+
+func TestDraftRoundtrip(t *testing.T) {
+	e := &Entry{Title: "草稿条目", Type: "note", Summary: "s", Draft: true, Body: "正文"}
+	data := e.Serialize()
+	if !strings.Contains(string(data), "draft: true") {
+		t.Fatalf("serialized output should contain draft: true, got %q", data)
+	}
+	e2, err := Parse(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !e2.Draft {
+		t.Fatal("draft flag lost in roundtrip")
+	}
+	// 旧格式文件不含 draft 字段 → false（向后兼容）
+	e3, err := Parse([]byte(sample))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e3.Draft {
+		t.Fatal("draft should default to false")
+	}
+}
