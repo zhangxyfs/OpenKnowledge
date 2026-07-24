@@ -106,6 +106,7 @@
     state.project = this.value;
     loadEntries();
     runSearch();
+    refreshCapture();
   });
 
   // ---------- 管理页：条目列表 ----------
@@ -133,7 +134,7 @@
       var tr = document.createElement("tr");
       if (state.hitFiles && state.hitFiles[e.file]) tr.classList.add("hit-row");
       tr.innerHTML =
-        "<td>" + esc(e.title) + "</td>" +
+        "<td>" + esc(e.title) + (e.draft ? ' <span class="badge badge-draft">草稿</span>' : "") + "</td>" +
         "<td>" + esc(e.type) + "</td>" +
         "<td>" + esc((e.tags || []).join(", ")) + "</td>" +
         "<td>" + (e.mandatory ? "✓" : "") + "</td>" +
@@ -141,6 +142,7 @@
         '<td class="ops">' +
         '<button type="button" data-act="view">查看</button> ' +
         '<button type="button" data-act="edit">编辑</button> ' +
+        (e.draft ? '<button type="button" data-act="approve">采纳</button> ' : "") +
         '<button type="button" data-act="del" class="danger-link">删除</button>' +
         "</td>";
       tr.querySelectorAll("button").forEach(function (btn) {
@@ -148,6 +150,7 @@
           var act = btn.getAttribute("data-act");
           if (act === "view") openForm(e, true);
           else if (act === "edit") openForm(e, false);
+          else if (act === "approve") approveEntry(e);
           else delEntry(e);
         });
       });
@@ -269,6 +272,15 @@
       .catch(function (err) { showError(err.message); });
   }
 
+  // 采纳草稿：draft 翻正并同步索引与向量，随后刷新列表
+  function approveEntry(e) {
+    api("/api/approve", {
+      method: "POST",
+      body: { project: state.project, file: e.file }
+    }).then(loadEntries)
+      .catch(function (err) { showError(err.message); });
+  }
+
   // ---------- 引导页 ----------
 
   function setBadge(id, ok, okText, offText) {
@@ -284,7 +296,46 @@
     setBadge("badge-embedding", s.embeddingConfigured, "已配置", "未配置");
     setBadge("badge-toggle", !s.disabled, "已开启", "已关闭");
     $("btn-toggle").textContent = s.disabled ? "开启" : "关闭";
+    refreshCapture();
   }
+
+  // ---------- 引导页：经验沉淀卡片 ----------
+
+  // captureProject 取管理页当前选中项目，缺省取第一个项目。
+  function captureProject() {
+    if (state.project) return state.project;
+    var ps = state.status && state.status.projects;
+    return ps && ps.length > 0 ? ps[0].name : "";
+  }
+
+  function refreshCapture() {
+    var project = captureProject();
+    var statusEl = $("capture-status");
+    if (!project) {
+      statusEl.textContent = "当前模式：尚无已注册项目（先 ok init）";
+      return;
+    }
+    api("/api/capture?project=" + encodeURIComponent(project)).then(function (c) {
+      statusEl.textContent = "当前模式：" + c.mode +
+        "（turn_interval=" + c.turn_interval + "，项目 " + project + "）";
+    }).catch(function (err) { showError(err.message); });
+  }
+
+  function setCaptureMode(mode) {
+    var project = captureProject();
+    if (!project) {
+      showError("尚无已注册项目，请先 ok init");
+      return;
+    }
+    api("/api/capture", {
+      method: "POST",
+      body: { project: project, mode: mode }
+    }).then(refreshCapture)
+      .catch(function (err) { showError(err.message); });
+  }
+
+  $("btn-capture-propose").addEventListener("click", function () { setCaptureMode("propose"); });
+  $("btn-capture-auto").addEventListener("click", function () { setCaptureMode("auto"); });
 
   $("btn-hooks").addEventListener("click", function () {
     api("/api/setup/hooks", { method: "POST" })

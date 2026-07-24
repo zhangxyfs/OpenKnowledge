@@ -60,7 +60,7 @@ func TestInstallSkills(t *testing.T) {
 	if err := InstallSkills(`D:\bin\ok.exe`); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"openknowledge-init", "openknowledge-on", "openknowledge-off"} {
+	for _, name := range []string{"openknowledge-init", "openknowledge-on", "openknowledge-off", "openknowledge-propose", "openknowledge-capture"} {
 		data, err := os.ReadFile(filepath.Join(dir, name, "SKILL.md"))
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"openknowledge/internal/entry"
 	"openknowledge/internal/registry"
 	"openknowledge/internal/setupx"
 )
@@ -511,5 +512,166 @@ func TestProjects(t *testing.T) {
 	}
 	if len(projects) != 1 || projects[0].Name != "demo" || len(projects[0].Paths) != 1 {
 		t.Fatalf("unexpected projects: %s", data)
+	}
+}
+
+// writeDraft 在 demo 项目的 knowledge 目录手写一个草稿条目文件。
+func writeDraft(t *testing.T, okHome, title, body string) string {
+	t.Helper()
+	e := &entry.Entry{
+		Title:   title,
+		Type:    "pitfall",
+		Tags:    []string{"测试"},
+		Draft:   true,
+		Summary: title,
+		Body:    body,
+	}
+	file := entry.Slug(title) + ".md"
+	path := filepath.Join(okHome, "projects", "demo", "knowledge", file)
+	if err := os.WriteFile(path, e.Serialize(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return file
+}
+
+func TestApproveDraft(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	mkProject(t, okHome, "demo")
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	file := writeDraft(t, okHome, "测试坑", "Git Bash 下路径必须正斜杠。")
+
+	// 条目列表带 draft:true
+	code, data := do(t, "GET", srv.URL+"/api/entries?project=demo", testToken, nil)
+	if code != 200 {
+		t.Fatalf("list: status = %d, body %s", code, data)
+	}
+	var list []struct {
+		File  string `json:"file"`
+		Draft bool   `json:"draft"`
+	}
+	if err := json.Unmarshal(data, &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].File != file || !list[0].Draft {
+		t.Fatalf("expected draft entry in list, got %s", data)
+	}
+	// 详情也带 draft:true
+	code, data = do(t, "GET", srv.URL+"/api/entry?project=demo&file="+file, testToken, nil)
+	if code != 200 || !strings.Contains(string(data), `"draft":true`) {
+		t.Fatalf("detail should show draft:true: status = %d, body %s", code, data)
+	}
+	// 检索不命中草稿
+	code, data = do(t, "GET", srv.URL+"/api/search?project=demo&q=测试坑", testToken, nil)
+	if code != 200 || strings.Contains(string(data), "测试坑") {
+		t.Fatalf("draft must not be searchable: status = %d, body %s", code, data)
+	}
+
+	// approve → draft:false，检索可命中
+	code, data = do(t, "POST", srv.URL+"/api/approve", testToken,
+		map[string]any{"project": "demo", "file": file})
+	if code != 200 {
+		t.Fatalf("approve: status = %d, body %s", code, data)
+	}
+	if strings.Contains(string(data), `"draft":true`) {
+		t.Fatalf("approve response should show draft:false: %s", data)
+	}
+	disk, err := os.ReadFile(filepath.Join(okHome, "projects", "demo", "knowledge", file))
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, err := entry.Parse(disk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.Draft || e.Title != "测试坑" || e.Body != "Git Bash 下路径必须正斜杠。" {
+		t.Fatalf("approve must flip draft and preserve fields, got %+v", e)
+	}
+	code, data = do(t, "GET", srv.URL+"/api/search?project=demo&q=测试坑", testToken, nil)
+	if code != 200 || !strings.Contains(string(data), "测试坑") {
+		t.Fatalf("approved entry should be searchable: status = %d, body %s", code, data)
+	}
+
+	// 重复 approve（非草稿）→ 400
+	code, _ = do(t, "POST", srv.URL+"/api/approve", testToken,
+		map[string]any{"project": "demo", "file": file})
+	if code != 400 {
+		t.Fatalf("re-approve non-draft: status = %d, want 400", code)
+	}
+	// approve 不存在的文件 → 400
+	code, _ = do(t, "POST", srv.URL+"/api/approve", testToken,
+		map[string]any{"project": "demo", "file": "nope.md"})
+	if code != 400 {
+		t.Fatalf("approve missing file: status = %d, want 400", code)
+	}
+	// approve 路径穿越 → 400
+	code, _ = do(t, "POST", srv.URL+"/api/approve", testToken,
+		map[string]any{"project": "demo", "file": "../x.md"})
+	if code != 400 {
+		t.Fatalf("approve traversal: status = %d, want 400", code)
+	}
+}
+
+func TestCaptureRoundTrip(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	mkProject(t, okHome, "demo")
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	// 默认 GET：propose / turn_interval 5
+	code, data := do(t, "GET", srv.URL+"/api/capture?project=demo", testToken, nil)
+	if code != 200 {
+		t.Fatalf("capture get: status = %d, body %s", code, data)
+	}
+	var cap1 struct {
+		Mode         string `json:"mode"`
+		TurnInterval int    `json:"turn_interval"`
+	}
+	if err := json.Unmarshal(data, &cap1); err != nil {
+		t.Fatal(err)
+	}
+	if cap1.Mode != "propose" || cap1.TurnInterval != 5 {
+		t.Fatalf("unexpected defaults: %s", data)
+	}
+
+	// 非法模式 → 400
+	code, _ = do(t, "POST", srv.URL+"/api/capture", testToken,
+		map[string]any{"project": "demo", "mode": "bogus"})
+	if code != 400 {
+		t.Fatalf("invalid mode: status = %d, want 400", code)
+	}
+
+	// 设 auto → 项目 config.toml 出现 [capture]；GET 反映新模式
+	code, data = do(t, "POST", srv.URL+"/api/capture", testToken,
+		map[string]any{"project": "demo", "mode": "auto"})
+	if code != 200 {
+		t.Fatalf("capture set: status = %d, body %s", code, data)
+	}
+	cfgPath := filepath.Join(okHome, "projects", "demo", "config.toml")
+	cfgData, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("project config not written: %v", err)
+	}
+	if !strings.Contains(string(cfgData), "[capture]") || !strings.Contains(string(cfgData), `mode = "auto"`) {
+		t.Fatalf("config should contain capture section: %q", cfgData)
+	}
+	code, data = do(t, "GET", srv.URL+"/api/capture?project=demo", testToken, nil)
+	if code != 200 || !strings.Contains(string(data), `"mode":"auto"`) {
+		t.Fatalf("capture should read auto after set: status = %d, body %s", code, data)
+	}
+
+	// 再设回 propose → 替换而非重复追加
+	code, data = do(t, "POST", srv.URL+"/api/capture", testToken,
+		map[string]any{"project": "demo", "mode": "propose"})
+	if code != 200 {
+		t.Fatalf("capture set propose: status = %d, body %s", code, data)
+	}
+	cfgData, err = os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(cfgData), "[capture]") != 1 {
+		t.Fatalf("capture section should not be duplicated: %q", cfgData)
 	}
 }

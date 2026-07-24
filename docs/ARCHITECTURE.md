@@ -225,7 +225,7 @@ func (e Embedding) ResolvedAPIKey() string  // api_key 字段 > api_key_env 环�
 
 ### 5.6 index/retrieve — 索引化混合检索（db.go 138 + sync.go 240 + query.go 138 + retrieve.go 44 行）
 
-检索不再逐文件扫描 Markdown，而是查询 SQLite 索引库 `kb.db`（位于各项目 KB 根目录）。同步按 filename+mtime 增量（枚举优先、只解析变化文件）；查询为 `score = α·归一BM25 + β·余弦` 的混合打分。**算法实现细节（分词、BM25、归一化、混合、降级矩阵、实测性能）见第 17 章**，配置参数见第 18 章。
+检索不再逐文件扫描 Markdown，而是查询 SQLite 索引库 `kb.db`（位于各项目 KB 根目录）。同步按 filename+mtime 增量（枚举优先、只解析变化文件）；查询为 `score = α·归一BM25 + β·余弦` 的混合打分。**草稿条目（frontmatter `draft: true`，由 `ok propose` 写入）不进 FTS 与向量，检索与注入一律排除；INDEX.md 中以【草稿】标记，批准（`ok approve` / GUI 采纳）后才参与检索**。**算法实现细节（分词、BM25、归一化、混合、降级矩阵、实测性能）见第 17 章**，配置参数见第 18 章。
 
 ### 5.7 state — 会话状态（96 行）
 
@@ -243,11 +243,11 @@ v1 仅 `changelog_required`：触碰文件中存在匹配 `code_globs` 的 且 �
 - `FilePath()` 取 `tool_input.path`（kimi 实际字段），兼容 `file_path`
 - `HandlePrompt`：打开 kb.db → **查询前增量同步**（`Sync`，无 key 时跳过向量；返回 `*CorruptEntriesError` 时记 ok.log 后继续注入）→ 每会话首次提问做基础注入（`Mandatory()` 全文 + INDEX.md，标记 `BaseInjected` 且仅当内容非空才置位）→ 每次提问 `Query` 混合检索注入；embedding 失败降级纯关键词
 - `HandlePostTool`：记录触碰文件（经 `relativize` 转项目相对、小写、`/` 分隔）
-- `HandleStop`：评估 enforce 规则，命中即 `MarkBlocked` → 保存状态 → stderr 输出 message → **exit 2**（全项目唯一非零出口）
+- `HandleStop`：先按 `[capture]` 配置评估 **auto 自省**——`mode = "auto"` 且本轮有触碰文件、距上次提醒满 `turn_interval` 个 Stop 时，输出自省提醒并以 exit 2 阻断一次（强制 AI 复盘本轮经验、值得沉淀则当场 `ok propose` 草稿）；随后评估 enforce 规则，命中即 `MarkBlocked` → 保存状态 → stderr 输出 message → **exit 2**（全项目唯一非零出口）
 
 ### 5.10 cli — 管理命令（cli.go 369 行 + setup.go 210 行 + toggle.go 38 行）
 
-- `cli.go`：`Init`（项目名缺省取目录基名）、`Add`（重复条目拒绝；后接索引库同步）、`Search`（检索预览，走 `index.Query`）、`Index`（索引库增量同步并打印条目数）、`List`（文件扫描，人用命令开销可忽略）、`Doctor`（注册表/配置/embedding 连通性/hooks 安装状态/开关状态）
+- `cli.go`：`Init`（项目名缺省取目录基名）、`Add`（重复条目拒绝；后接索引库同步）、`Propose`（AI 面向的草稿写入：`draft:true`、只同步 INDEX 不算向量）、`Approve`（草稿转正，同步 INDEX 并补算向量；同一秒内 mtime 不变时手动推进一秒防 diff 漏判）、`CaptureCmd`（打印或设置项目 `[capture]` 模式，整段替换幂等写入）、`Search`（检索预览，走 `index.Query`）、`Index`（索引库增量同步并打印条目数）、`List`（文件扫描，人用命令开销可忽略）、`Doctor`（注册表/配置/embedding 连通性/hooks 安装状态/开关状态）
 - `setup.go`：见第 6.4 节
 - `toggle.go`：`On`/`Off` 即删除/创建 `~/.openknowledge/hooks-disabled` 标志文件
 
@@ -270,14 +270,17 @@ API 一览：
 | PUT | `/api/entry` | 编辑条目 → 同步索引 |
 | DELETE | `/api/entry?project=&file=` | 删除条目 → 同步索引 |
 | GET | `/api/search?project=&q=` | 检索预览（走 `index.Query`，无 embedding 客户端） |
+| POST | `/api/approve` | `{"project","file"}` 草稿转正（等价 `ok approve`；缺文件/非草稿 400）→ 同步索引与向量 |
+| GET | `/api/capture?project=` | 当前捕获模式 `{mode, turn_interval}`（合并配置） |
+| POST | `/api/capture` | `{"project","mode"}` 写项目 `[capture]` 小节（等价 `ok capture <mode>`；非法模式 400） |
 | POST | `/api/setup/hooks` | 等价 `ok setup` 的 hooks 步骤（备份 + 标记块幂等写入） |
-| POST | `/api/setup/skills` | 安装三个 kimi 技能 |
+| POST | `/api/setup/skills` | 安装五个 kimi 技能 |
 | POST | `/api/setup/embedding` | 保存 embedding 配置并当场连通性验证（`{"ok":bool,"error":…}`） |
 | POST | `/api/toggle` | `{"on":bool}` 全局开关（等价 `ok on`/`ok off`） |
 | POST | `/api/heartbeat` | 页面心跳（204） |
 | POST | `/api/shutdown` | 停服 |
 
-前端 `web/`（零依赖原生 HTML/JS/CSS）：「管理」标签页（项目/条目列表、新建/编辑/删除、检索预览带命中高亮、全局开关）+「引导」标签页（hooks/技能/embedding 三步一键完成）。hooks 未安装时「管理」页隐藏，「引导」为默认页。
+前端 `web/`（零依赖原生 HTML/JS/CSS）：「管理」标签页（项目/条目列表、新建/编辑/删除、检索预览带命中高亮、草稿条目带「草稿」徽标与「采纳」按钮、全局开关）+「引导」标签页（hooks/技能/embedding 三步一键完成、「经验沉淀」卡片查看/切换 capture 模式）。hooks 未安装时「管理」页隐藏，「引导」为默认页。
 
 ---
 
@@ -500,10 +503,13 @@ go build ./...         # 编译检查
 
 | 命令 | 作用 | 关键行为 |
 |------|------|----------|
-| `ok setup` | 首次引导 | 写 hooks 配置（标记块幂等）+ 装 3 个 kimi 技能 + 交互配 embedding + 连通性验证 |
+| `ok setup` | 首次引导 | 写 hooks 配置（标记块幂等）+ 装 5 个 kimi 技能 + 交互配 embedding + 连通性验证 |
 | `ok gui` | 启动 Web 管理界面 | 无参数运行同效；127.0.0.1 随机端口 + 令牌鉴权，自动开浏览器，30s 无心跳自动停服 |
 | `ok init [名字]` | 注册当前项目 | 名字缺省取目录基名；建 KB 骨架；打印 hooks 提示 |
 | `ok add --title …` | 新建条目 | `--type/--tags/--mandatory/--file`；自动同步索引库（无 key 时向量跳过） |
+| `ok propose --title …` | AI 提议草稿条目 | `--type/--tags/--summary/--file|--body`；写 `draft:true`，只同步 INDEX 不算向量，不参与检索 |
+| `ok approve <文件>` | 批准草稿转正 | draft=false 并同步 INDEX 与向量；非草稿/缺文件报错 |
+| `ok capture [propose\|auto]` | 查看/切换沉淀模式 | 无参打印当前模式与 turn_interval；带参写项目 `[capture]` 小节（幂等替换） |
 | `ok search <词>` | 检索预览 | 命令行输出打分排序（调试用） |
 | `ok index` | 同步索引库 | 增量同步 kb.db 并重建 INDEX.md、打印条目数（无 key 时向量跳过，退出码 1） |
 | `ok list` | 列出项目与条目 | `*` 标记 mandatory |
@@ -721,6 +727,7 @@ os.ReadDir(knowledge/)                # 只拿文件名，不读内容
 | 条目缺向量（未 index） | 该条目语义分为 0，仍可被关键词命中 |
 | 切换 embedding 模型未重建 | 维度不匹配余弦为 0；需删 kb.db 后 `ok index` |
 | 单个条目文件损坏 | 跳过并保留其旧索引（`CorruptEntriesError` 警告），其余正常 |
+| 草稿条目（draft: true） | 不进 FTS 与向量：同步只写入 INDEX.md（标【草稿】），检索与注入排除；批准后正常参与 |
 | kb.db 损坏/丢失 | hook 记 ok.log 后 exit 0（fail-open）；`ok index` 可重建 |
 
 ### 17.8 实测性能（本机，1 万条目）
@@ -770,6 +777,8 @@ os.ReadDir(knowledge/)                # 只拿文件名，不读内容
 
 | 参数 | 说明 |
 |------|------|
+| `capture.mode` | 经验沉淀模式：`propose`（默认，AI 主动提议草稿人批准）或 `auto`（Stop hook 周期阻断强制自省）；`ok capture <mode>` 或 GUI 沉淀卡写入 |
+| `capture.turn_interval` | auto 模式的自省间隔（Stop 次数，默认 5）；仅项目/全局配置手改 |
 | `[[enforce]].type` | 规则类型，v1 仅 `changelog_required` |
 | `[[enforce]].code_globs` | "算改代码"的 glob 列表。**一律小写**；doublestar 语法，`**/*.go` 可匹配根目录文件 |
 | `[[enforce]].changelog_glob` | "算写日志"的 glob，如 `docs/changelogs/**` |

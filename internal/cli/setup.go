@@ -44,7 +44,7 @@ func Setup(args []string, in io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "技能已安装到 %s (openknowledge-init/on/off)\n", setupx.SkillsHome())
+	fmt.Fprintf(stdout, "技能已安装到 %s (openknowledge-init/on/off/propose/capture)\n", setupx.SkillsHome())
 	setupEmbedding(fs.NFlag() > 0, *baseURL, *model, *apiKey, in, stdout)
 	fmt.Fprint(stdout, guideText+"\n")
 	return 0

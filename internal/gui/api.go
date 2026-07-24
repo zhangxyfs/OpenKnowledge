@@ -7,10 +7,13 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"openknowledge/internal/config"
+	"openknowledge/internal/embed"
 	"openknowledge/internal/entry"
 	"openknowledge/internal/index"
 	"openknowledge/internal/registry"
@@ -49,6 +52,9 @@ func NewHandler(webDir, token string, beats chan<- struct{}) *Handler {
 	api("PUT /api/entry", h.apiEntryUpdate)
 	api("DELETE /api/entry", h.apiEntryDelete)
 	api("GET /api/search", h.apiSearch)
+	api("POST /api/approve", h.apiApprove)
+	api("GET /api/capture", h.apiCaptureGet)
+	api("POST /api/capture", h.apiCaptureSet)
 	api("POST /api/heartbeat", h.apiHeartbeat)
 	api("POST /api/shutdown", h.apiShutdown)
 	api("POST /api/setup/hooks", h.apiSetupHooks)
@@ -194,6 +200,7 @@ type entrySummaryJSON struct {
 	Type      string   `json:"type"`
 	Tags      []string `json:"tags"`
 	Mandatory bool     `json:"mandatory"`
+	Draft     bool     `json:"draft"`
 	Summary   string   `json:"summary"`
 }
 
@@ -224,6 +231,7 @@ func summaryOf(e *entry.Entry) entrySummaryJSON {
 		Type:      e.Type,
 		Tags:      tags,
 		Mandatory: e.Mandatory,
+		Draft:     e.Draft,
 		Summary:   e.Summary,
 	}
 }
@@ -253,7 +261,7 @@ func (h *Handler) apiStatus(w http.ResponseWriter, _ *http.Request) {
 		hooksInstalled = strings.Contains(string(data), setupx.MarkerBegin)
 	}
 	skillsInstalled := true
-	for _, name := range []string{"openknowledge-init", "openknowledge-on", "openknowledge-off"} {
+	for _, name := range []string{"openknowledge-init", "openknowledge-on", "openknowledge-off", "openknowledge-propose", "openknowledge-capture"} {
 		if _, err := os.Stat(filepath.Join(setupx.SkillsHome(), name, "SKILL.md")); err != nil {
 			skillsInstalled = false
 			break
@@ -477,6 +485,189 @@ func (h *Handler) apiSearch(w http.ResponseWriter, r *http.Request) {
 		out = append(out, hitJSON{File: hit.Filename, Title: hit.Title, Score: hit.Score})
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// ---------- 草稿批准与捕获模式 ----------
+
+// embeddingClientFor 按合并配置构建 embedding 客户端；未配置返回 nil。
+// 与 cli.embeddingClient 同语义，供 approve 批准草稿时补算向量。
+func embeddingClientFor(st *store.Store) embed.Client {
+	cfg, err := config.LoadMerged(st.ConfigPath(), filepath.Join(registry.Home(), "config.toml"))
+	if err != nil {
+		return nil
+	}
+	key := cfg.Embedding.ResolvedAPIKey()
+	if key == "" || cfg.Embedding.BaseURL == "" {
+		return nil
+	}
+	return &embed.OpenAIClient{
+		BaseURL: cfg.Embedding.BaseURL,
+		APIKey:  key,
+		Model:   cfg.Embedding.Model,
+		Timeout: time.Duration(cfg.Embedding.TimeoutSec) * time.Second,
+	}
+}
+
+// syncApprove 批准后的索引同步：带 embedding 客户端算向量，失败降级为只同步
+// INDEX（与 cli.afterAdd 同策略）；损坏条目警告不视为失败。
+func syncApprove(st *store.Store) error {
+	db, err := index.Open(st.KbPath())
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	client := embeddingClientFor(st)
+	if err := db.Sync(st.KnowledgeDir(), client); err != nil {
+		var corrupt *index.CorruptEntriesError
+		if errors.As(err, &corrupt) {
+			return nil
+		}
+		if client == nil {
+			return err
+		}
+		// embedding 失败：降级为只同步 INDEX，向量稍后 ok index 补齐
+		if err2 := db.Sync(st.KnowledgeDir(), nil); err2 != nil && !errors.As(err2, &corrupt) {
+			return err2
+		}
+	}
+	return nil
+}
+
+// apiApprove 等价 ok approve：草稿转正（draft=false）→ 同步索引与向量 → 返回更新后条目。
+func (h *Handler) apiApprove(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Project string `json:"project"`
+		File    string `json:"file"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	st := resolveProject(w, req.Project)
+	if st == nil {
+		return
+	}
+	path := entryPath(w, st, req.File)
+	if path == "" {
+		return
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, fmt.Sprintf("条目不存在: %s", req.File))
+		return
+	}
+	e, err := entry.Parse(data)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !e.Draft {
+		writeErr(w, http.StatusBadRequest, fmt.Sprintf("不是草稿条目: %s", req.File))
+		return
+	}
+	e.Draft = false
+	// Sync 的 diff 按秒级 mtime 判断变化；propose 后同一秒内 approve 会被误判为
+	// 未变化而跳过重建，此时手动把 mtime 推进一秒（同 cli.Approve）。
+	oldInfo, statErr := os.Stat(path)
+	if err := os.WriteFile(path, e.Serialize(), 0o644); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if statErr == nil {
+		if newInfo, err := os.Stat(path); err == nil && newInfo.ModTime().Unix() == oldInfo.ModTime().Unix() {
+			t := oldInfo.ModTime().Add(time.Second)
+			_ = os.Chtimes(path, t, t)
+		}
+	}
+	if err := syncApprove(st); err != nil {
+		writeErr(w, http.StatusInternalServerError, fmt.Sprintf("索引同步失败: %v", err))
+		return
+	}
+	e.Path = path
+	writeJSON(w, http.StatusOK, summaryOf(e))
+}
+
+// apiCaptureGet 返回项目合并配置中的捕获模式与 turn_interval。
+func (h *Handler) apiCaptureGet(w http.ResponseWriter, r *http.Request) {
+	st := resolveProject(w, r.URL.Query().Get("project"))
+	if st == nil {
+		return
+	}
+	cfg, err := config.LoadMerged(st.ConfigPath(), filepath.Join(registry.Home(), "config.toml"))
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"mode":          cfg.Capture.Mode,
+		"turn_interval": cfg.Capture.TurnInterval,
+	})
+}
+
+// apiCaptureSet 等价 ok capture <mode>：写项目 config.toml 的 [capture] 小节。
+func (h *Handler) apiCaptureSet(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Project string `json:"project"`
+		Mode    string `json:"mode"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	st := resolveProject(w, req.Project)
+	if st == nil {
+		return
+	}
+	if req.Mode != "propose" && req.Mode != "auto" {
+		writeErr(w, http.StatusBadRequest, fmt.Sprintf("非法 capture 模式 %q（propose|auto）", req.Mode))
+		return
+	}
+	if err := writeCaptureMode(st.ConfigPath(), req.Mode); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "mode": req.Mode})
+}
+
+// writeCaptureMode 重写项目 config.toml 的 [capture] 小节：已存在则整段替换
+// （到下一个 [section] 或文件尾），不存在则在文件尾追加；其余内容（含注释）
+// 原样保留。与 cli.setCaptureMode 同逻辑（cli 中未导出，此处复制最小实现）。
+func writeCaptureMode(path, mode string) error {
+	block := "[capture]\nmode = " + strconv.Quote(mode) + "\n"
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return os.WriteFile(path, []byte(block), 0o644)
+	}
+	if err != nil {
+		return err
+	}
+	lines := strings.Split(string(data), "\n")
+	start, end := -1, len(lines)
+	for i, l := range lines {
+		t := strings.TrimSpace(l)
+		if start < 0 {
+			if t == "[capture]" {
+				start = i
+			}
+			continue
+		}
+		if strings.HasPrefix(t, "[") {
+			end = i
+			break
+		}
+	}
+	var out []string
+	if start >= 0 {
+		out = append(out, lines[:start]...)
+		out = append(out, strings.TrimSuffix(block, "\n"))
+		out = append(out, lines[end:]...)
+	} else {
+		out = append(out, lines...)
+		// 与上文保持空行分隔
+		if n := len(out); n > 0 && strings.TrimSpace(out[n-1]) != "" {
+			out = append(out, "")
+		}
+		out = append(out, strings.TrimSuffix(block, "\n"))
+	}
+	return os.WriteFile(path, []byte(strings.Join(out, "\n")), 0o644)
 }
 
 // ---------- 心跳与停服 ----------

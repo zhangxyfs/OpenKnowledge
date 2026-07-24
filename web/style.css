@@ -215,6 +215,11 @@ input:focus, select:focus, textarea:focus {
 }
 .badge-on { background: var(--ok); }
 .badge-off { background: var(--off); }
+.badge-draft { background: #d97706; }
+
+.entries .badge-draft { padding: 1px 8px; vertical-align: 1px; }
+
+.capture-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
 .embedding-form { display: flex; flex-direction: column; gap: 8px; width: 100%; }
 .embedding-form .btn { align-self: flex-start; }
