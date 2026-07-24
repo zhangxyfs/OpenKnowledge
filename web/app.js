@@ -318,6 +318,10 @@
     api("/api/capture?project=" + encodeURIComponent(project)).then(function (c) {
       statusEl.textContent = "当前模式：" + c.mode +
         "（turn_interval=" + c.turn_interval + "，项目 " + project + "）";
+      $("capture-interval").value = c.turn_interval;
+      $("capture-mode-note").textContent = c.mode === "auto"
+        ? "auto 模式：每 " + c.turn_interval + " 个回合结束强制自省一次"
+        : "propose 模式：由 AI 自主判断，无轮次限制";
     }).catch(function (err) { showError(err.message); });
   }
 
@@ -336,6 +340,24 @@
 
   $("btn-capture-propose").addEventListener("click", function () { setCaptureMode("propose"); });
   $("btn-capture-auto").addEventListener("click", function () { setCaptureMode("auto"); });
+
+  $("btn-capture-interval").addEventListener("click", function () {
+    var project = captureProject();
+    if (!project) {
+      showError("尚无已注册项目，请先 ok init");
+      return;
+    }
+    var n = parseInt($("capture-interval").value, 10);
+    if (!n || n < 1 || n > 100) {
+      showError("轮次间隔必须是 1~100 的整数");
+      return;
+    }
+    api("/api/capture", {
+      method: "POST",
+      body: { project: project, turn_interval: n }
+    }).then(refreshCapture)
+      .catch(function (err) { showError(err.message); });
+  });
 
   $("btn-hooks").addEventListener("click", function () {
     api("/api/setup/hooks", { method: "POST" })

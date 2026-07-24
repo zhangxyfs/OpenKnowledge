@@ -190,3 +190,35 @@ func TestCapturePrintAndSet(t *testing.T) {
 		t.Fatalf("capture section should not be duplicated: %q", data)
 	}
 }
+
+func TestCaptureInterval(t *testing.T) {
+	_, kb := setupProject(t)
+	var out, errBuf bytes.Buffer
+	// 非法 interval
+	if code := CaptureCmd([]string{"interval", "0"}, &out, &errBuf); code == 0 {
+		t.Fatal("interval 0 should fail")
+	}
+	if code := CaptureCmd([]string{"interval", "abc"}, &out, &errBuf); code == 0 {
+		t.Fatal("non-numeric interval should fail")
+	}
+	// 设置 interval=10，模式保持
+	if code := CaptureCmd([]string{"interval", "10"}, &out, &errBuf); code != 0 {
+		t.Fatalf("capture interval code=%d err=%q", code, errBuf.String())
+	}
+	data, err := os.ReadFile(filepath.Join(kb, "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if !strings.Contains(got, "turn_interval = 10") || !strings.Contains(got, `mode = "propose"`) {
+		t.Fatalf("config should have interval 10 with mode preserved: %q", got)
+	}
+	// 打印反映新间隔
+	out.Reset()
+	if code := CaptureCmd(nil, &out, &errBuf); code != 0 {
+		t.Fatalf("capture print code=%d", code)
+	}
+	if !strings.Contains(out.String(), "10") {
+		t.Fatalf("capture should print interval 10: %q", out.String())
+	}
+}

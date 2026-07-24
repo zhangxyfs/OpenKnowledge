@@ -79,12 +79,18 @@
         <div class="card">
           <h3>经验沉淀</h3>
           <p id="capture-status" class="muted">当前模式：…</p>
+          <p id="capture-mode-note" class="muted"></p>
           <div class="capture-actions">
             <button id="btn-capture-propose" type="button" class="btn">AI 提议（默认）</button>
             <button id="btn-capture-auto" type="button" class="btn">Stop 自动提取</button>
           </div>
-          <p class="muted">AI 提议：AI 发现值得沉淀的经验时主动记为草稿，由人批准（采纳）后入库。
-            Stop 自动提取：每隔若干轮对话，会话结束时强制 AI 自省本轮经验并记为草稿。</p>
+          <div class="capture-actions">
+            <label for="capture-interval">轮次间隔（auto 模式生效）：</label>
+            <input id="capture-interval" type="number" min="1" max="100" value="5" style="width:4em">
+            <button id="btn-capture-interval" type="button" class="btn">保存</button>
+          </div>
+          <p class="muted">AI 提议：AI 觉得值得记录时主动记为草稿，无轮次限制，由人批准（采纳）后入库。
+            Stop 自动提取：每隔指定轮次，回合结束时强制 AI 自省本轮经验并记为草稿。</p>
         </div>
       </div>
       <div class="guide-text">

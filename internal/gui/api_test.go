@@ -674,4 +674,24 @@ func TestCaptureRoundTrip(t *testing.T) {
 	if strings.Count(string(cfgData), "[capture]") != 1 {
 		t.Fatalf("capture section should not be duplicated: %q", cfgData)
 	}
+
+	// 设置 turn_interval（模式保持）
+	code, data = do(t, "POST", srv.URL+"/api/capture", testToken,
+		map[string]any{"project": "demo", "turn_interval": 10})
+	if code != 200 {
+		t.Fatalf("capture interval: status = %d, body %s", code, data)
+	}
+	cfgData, err = os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(cfgData), "turn_interval = 10") || !strings.Contains(string(cfgData), `mode = "propose"`) {
+		t.Fatalf("config should have interval 10 with mode preserved: %q", cfgData)
+	}
+	// 非法 interval → 400
+	code, _ = do(t, "POST", srv.URL+"/api/capture", testToken,
+		map[string]any{"project": "demo", "turn_interval": 101})
+	if code != 400 {
+		t.Fatalf("invalid interval: status = %d, want 400", code)
+	}
 }

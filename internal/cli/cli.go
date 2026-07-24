@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"openknowledge/internal/config"
 	"openknowledge/internal/embed"
 	"openknowledge/internal/entry"
 	"openknowledge/internal/index"
@@ -500,7 +501,7 @@ func Approve(args []string, stdout, stderr io.Writer) int {
 }
 
 // CaptureCmd: ok capture —— 打印当前捕获模式与 turn_interval；
-// ok capture propose|auto 写入项目 config.toml 的 [capture] 小节。
+// ok capture propose|auto 设置模式；ok capture interval <n> 设置轮次间隔（auto 模式生效）。
 func CaptureCmd(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("capture", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -511,61 +512,43 @@ func CaptureCmd(args []string, stdout, stderr io.Writer) int {
 	if pc == nil {
 		return code
 	}
-	if fs.NArg() == 0 {
+	cfgPath := pc.Store.ConfigPath()
+	header := defaultProjectConfig + "\n"
+	switch fs.Arg(0) {
+	case "":
 		fmt.Fprintf(stdout, "capture 模式: %s（turn_interval=%d）\n", pc.Config.Capture.Mode, pc.Config.Capture.TurnInterval)
 		return 0
-	}
-	mode := fs.Arg(0)
-	if fs.NArg() != 1 || (mode != "propose" && mode != "auto") {
-		fmt.Fprintln(stderr, "用法: ok capture [propose|auto]")
+	case "propose", "auto":
+		if fs.NArg() != 1 {
+			fmt.Fprintln(stderr, "用法: ok capture [propose|auto|interval <n>]")
+			return 1
+		}
+		if err := config.SetCapture(cfgPath, fs.Arg(0), pc.Config.Capture.TurnInterval, header); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "capture 模式已设为 %s（%s）\n", fs.Arg(0), cfgPath)
+		return 0
+	case "interval":
+		if fs.NArg() != 2 {
+			fmt.Fprintln(stderr, "用法: ok capture interval <n>（n ≥ 1，auto 模式下每 n 回合自省一次）")
+			return 1
+		}
+		n, err := strconv.Atoi(fs.Arg(1))
+		if err != nil || n < 1 {
+			fmt.Fprintln(stderr, "interval 必须是 ≥1 的整数")
+			return 1
+		}
+		if err := config.SetCapture(cfgPath, pc.Config.Capture.Mode, n, header); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "turn_interval 已设为 %d（%s）\n", n, cfgPath)
+		return 0
+	default:
+		fmt.Fprintln(stderr, "用法: ok capture [propose|auto|interval <n>]")
 		return 1
 	}
-	if err := setCaptureMode(pc.Store.ConfigPath(), mode); err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	fmt.Fprintf(stdout, "capture 模式已设为 %s（%s）\n", mode, pc.Store.ConfigPath())
-	return 0
 }
 
-// setCaptureMode 重写项目 config.toml 的 [capture] 小节：已存在则整段替换
-// （到下一个 [section] 或文件尾），不存在则在文件尾追加；其余内容（含注释）原样保留。
-func setCaptureMode(path, mode string) error {
-	block := "[capture]\nmode = " + strconv.Quote(mode) + "\n"
-	data, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return os.WriteFile(path, []byte(defaultProjectConfig+"\n"+block), 0o644)
-	}
-	if err != nil {
-		return err
-	}
-	lines := strings.Split(string(data), "\n")
-	start, end := -1, len(lines)
-	for i, l := range lines {
-		t := strings.TrimSpace(l)
-		if start < 0 {
-			if t == "[capture]" {
-				start = i
-			}
-			continue
-		}
-		if strings.HasPrefix(t, "[") {
-			end = i
-			break
-		}
-	}
-	var out []string
-	if start >= 0 {
-		out = append(out, lines[:start]...)
-		out = append(out, strings.TrimSuffix(block, "\n"))
-		out = append(out, lines[end:]...)
-	} else {
-		out = append(out, lines...)
-		// 与上文保持空行分隔
-		if n := len(out); n > 0 && strings.TrimSpace(out[n-1]) != "" {
-			out = append(out, "")
-		}
-		out = append(out, strings.TrimSuffix(block, "\n"))
-	}
-	return os.WriteFile(path, []byte(strings.Join(out, "\n")), 0o644)
-}
+

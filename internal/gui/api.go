@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -603,11 +602,13 @@ func (h *Handler) apiCaptureGet(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// apiCaptureSet 等价 ok capture <mode>：写项目 config.toml 的 [capture] 小节。
+// apiCaptureSet 设置 capture 模式与轮次间隔：写项目 config.toml 的 [capture] 小节。
+// mode 为空表示保持不变；turn_interval 为 0 表示保持不变。
 func (h *Handler) apiCaptureSet(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Project string `json:"project"`
-		Mode    string `json:"mode"`
+		Project      string `json:"project"`
+		Mode         string `json:"mode"`
+		TurnInterval int    `json:"turn_interval"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
@@ -616,58 +617,32 @@ func (h *Handler) apiCaptureSet(w http.ResponseWriter, r *http.Request) {
 	if st == nil {
 		return
 	}
-	if req.Mode != "propose" && req.Mode != "auto" {
+	if req.Mode != "" && req.Mode != "propose" && req.Mode != "auto" {
 		writeErr(w, http.StatusBadRequest, fmt.Sprintf("非法 capture 模式 %q（propose|auto）", req.Mode))
 		return
 	}
-	if err := writeCaptureMode(st.ConfigPath(), req.Mode); err != nil {
+	if req.TurnInterval < 0 || req.TurnInterval > 100 {
+		writeErr(w, http.StatusBadRequest, "turn_interval 必须在 1~100 之间")
+		return
+	}
+	cfg, err := config.LoadMerged(st.ConfigPath(), filepath.Join(registry.Home(), "config.toml"))
+	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "mode": req.Mode})
-}
-
-// writeCaptureMode 重写项目 config.toml 的 [capture] 小节：已存在则整段替换
-// （到下一个 [section] 或文件尾），不存在则在文件尾追加；其余内容（含注释）
-// 原样保留。与 cli.setCaptureMode 同逻辑（cli 中未导出，此处复制最小实现）。
-func writeCaptureMode(path, mode string) error {
-	block := "[capture]\nmode = " + strconv.Quote(mode) + "\n"
-	data, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return os.WriteFile(path, []byte(block), 0o644)
+	mode := cfg.Capture.Mode
+	if req.Mode != "" {
+		mode = req.Mode
 	}
-	if err != nil {
-		return err
+	interval := cfg.Capture.TurnInterval
+	if req.TurnInterval > 0 {
+		interval = req.TurnInterval
 	}
-	lines := strings.Split(string(data), "\n")
-	start, end := -1, len(lines)
-	for i, l := range lines {
-		t := strings.TrimSpace(l)
-		if start < 0 {
-			if t == "[capture]" {
-				start = i
-			}
-			continue
-		}
-		if strings.HasPrefix(t, "[") {
-			end = i
-			break
-		}
+	if err := config.SetCapture(st.ConfigPath(), mode, interval, ""); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
 	}
-	var out []string
-	if start >= 0 {
-		out = append(out, lines[:start]...)
-		out = append(out, strings.TrimSuffix(block, "\n"))
-		out = append(out, lines[end:]...)
-	} else {
-		out = append(out, lines...)
-		// 与上文保持空行分隔
-		if n := len(out); n > 0 && strings.TrimSpace(out[n-1]) != "" {
-			out = append(out, "")
-		}
-		out = append(out, strings.TrimSuffix(block, "\n"))
-	}
-	return os.WriteFile(path, []byte(strings.Join(out, "\n")), 0o644)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "mode": mode, "turn_interval": interval})
 }
 
 // ---------- 心跳与停服 ----------

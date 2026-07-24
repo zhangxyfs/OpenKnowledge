@@ -81,7 +81,7 @@ summary: 每次代码修改必须立即记录变更日志
 
 数据存放在 `~/.openknowledge/`（集中存储，不污染项目仓库）。
 
-**草稿流程（AI 提议，人批准）**：AI 可通过 `ok propose` 把会话中沉淀的经验记为**草稿条目**（frontmatter `draft: true`）——草稿不参与检索与注入，只出现在 `ok list` 和 GUI 管理页（带「草稿」徽标）。人确认后用 `ok approve <文件>` 或 GUI 的「采纳」按钮转正。`ok capture propose|auto` 可切换沉淀模式：`propose` 为 AI 主动提议（默认），`auto` 则由 Stop hook 每隔若干轮强制 AI 自省提取经验。
+**草稿流程（AI 提议，人批准）**：AI 可通过 `ok propose` 把会话中沉淀的经验记为**草稿条目**（frontmatter `draft: true`）——草稿不参与检索与注入，只出现在 `ok list` 和 GUI 管理页（带「草稿」徽标）。人确认后用 `ok approve <文件>` 或 GUI 的「采纳」按钮转正。`ok capture propose|auto` 可切换沉淀模式：`propose` 为 AI 主动提议（默认，无轮次限制），`auto` 则由 Stop hook 每隔指定轮次强制 AI 自省提取经验；轮次间隔用 `ok capture interval <n>` 配置（仅 auto 生效）。
 
 ## 常用命令
 
@@ -93,7 +93,7 @@ summary: 每次代码修改必须立即记录变更日志
 | `ok add` | 新建知识条目（自动重建索引与向量） |
 | `ok propose` | AI 提议草稿条目（不参与检索，待人批准） |
 | `ok approve <文件>` | 批准草稿转正（同步索引与向量） |
-| `ok capture [propose\|auto]` | 查看/切换经验沉淀模式 |
+| `ok capture [propose\|auto\|interval <n>]` | 查看/切换经验沉淀模式，配置轮次间隔 |
 | `ok search <词>` | 命令行预览检索效果 |
 | `ok index` | 同步索引与向量（手改条目后执行；删除 kb.db 后执行 = 全量重建） |
 | `ok list` | 列出项目与条目 |
