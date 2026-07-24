@@ -67,32 +67,34 @@
 
 ## 3. 模块架构
 
-单 module（`openknowledge`），13 个包，严格单向依赖、无环：
+单 module（`openknowledge`），15 个包，严格单向依赖、无环：
 
 ```
-┌─────────────────────────────────────────────┐
-│ cmd/ok            （二进制入口 + 子命令调度） │
-└───────┬───────────────────────┬─────────────┘
-        │                       │
-┌───────▼────────┐      ┌───────▼───────────────┐
-│ internal/cli   │      │ internal/hook         │
-│ （人用的命令）  │      │ （kimi hooks 入口）   │
-└───────┬────────┘      └───────┬───────────────┘
-        │               ┌───────▼────────┐
-        │               │ internal/project│（cwd→项目）
-        │               └───────┬────────┘
-   ┌────▼───────────────────────▼───────────────────┐
-   │ 基础层（被上层直接组合）                         │
-   │ registry · entry · config · store · embed ·    │
-   │ index · retrieve · state · enforce             │
-   └────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────┐
+│ cmd/ok                （二进制入口 + 子命令调度）     │
+└───────┬───────────────────┬─────────────────┬───────┘
+        │                   │                 │
+┌───────▼────────┐  ┌───────▼────────┐  ┌─────▼─────────────┐
+│ internal/cli   │  │ internal/gui   │  │ internal/hook     │
+│ （人用的命令）  │  │ （Web GUI）    │  │ （kimi hooks 入口）│
+└───────┬────────┘  └───────┬────────┘  └─────┬─────────────┘
+        │                   │         ┌───────▼────────┐
+        │                   │         │ internal/project│（cwd→项目）
+        │                   │         └───────┬────────┘
+   ┌────▼───────────────────▼─────────────────▼───────────────────┐
+   │ 基础层（被上层直接组合）                                       │
+   │ registry · entry · config · store · embed · index ·          │
+   │ retrieve · state · enforce · setupx                          │
+   └───────────────────────────────────────────────────────────────┘
 ```
 
 **依赖关系**（→ 表示 import）：
 
-- `cmd/ok` → `cli`、`hook`
-- `cli` → `registry`、`entry`、`store`、`embed`、`index`、`retrieve`、`project`、`config`
+- `cmd/ok` → `cli`、`gui`、`hook`
+- `cli` → `registry`、`entry`、`store`、`embed`、`index`、`retrieve`、`project`、`config`、`setupx`
+- `gui` → `registry`、`entry`、`store`、`index`、`retrieve`、`config`、`setupx`
 - `hook` → `project`、`registry`、`store`、`embed`、`index`、`retrieve`、`state`、`enforce`
+- `setupx` → `registry`、`config`、`embed`（setup 引导共享逻辑，cli 与 gui 复用）
 - `project` → `registry`、`config`、`store`
 - `index` → `entry`、`embed`、`retrieve`、`config`（+ modernc.org/sqlite）
 - `retrieve` / `embed` / `store` → 仅标准库
@@ -100,7 +102,7 @@
 - `registry` → BurntSushi/toml；`entry` → yaml.v3；`config` → BurntSushi/toml
 - `state` → 仅标准库
 
-**分层原则**：`hook` 与 `cli` 是两个互不 import 的应用层；`project` 是它们共享的项目解析层；其余为单一职责的基础包。
+**分层原则**：`hook`、`cli`、`gui` 是三个互不 import 的应用层；`project` 是 hook 与 cli 共享的项目解析层；`setupx` 是 cli 与 gui 共享的引导逻辑层；其余为单一职责的基础包。
 
 ---
 
@@ -148,11 +150,25 @@ OpenKnowledge/
 │   ├── hook/                      # ★ hooks 事件处理
 │   │   ├── hook.go                #   Event 解析、HandlePrompt/HandlePostTool/HandleStop
 │   │   └── hook_test.go
-│   └── cli/                       # 管理命令
-│       ├── cli.go                 #   Init/Add/Search/Index/List/Doctor
-│       ├── setup.go               #   Setup 引导、hooks 块幂等写入、技能安装、embedding 配置
-│       ├── toggle.go              #   On/Off 全局开关
-│       └── *_test.go
+│   ├── cli/                       # 管理命令
+│   │   ├── cli.go                 #   Init/Add/Search/Index/List/Doctor
+│   │   ├── setup.go               #   Setup 引导（编排 setupx，交互收集 embedding）
+│   │   ├── toggle.go              #   On/Off 全局开关
+│   │   └── *_test.go
+│   ├── setupx/                    # setup 共享逻辑（cli 与 gui 复用）
+│   │   ├── setupx.go              #   HooksBlockFor/UpsertHooksBlock/InstallSkills/SaveEmbedding/TestEmbedding/Enable/Disable
+│   │   └── setupx_test.go
+│   └── gui/                       # ★ Web GUI（ok gui / 无参数启动）
+│       ├── server.go              #   127.0.0.1 随机端口服务、令牌生成、心跳看门狗、浏览器自动打开
+│       ├── api.go                 #   Handler 路由、令牌鉴权、管理 API（条目 CRUD/检索/setup/toggle）
+│       └── api_test.go
+├── web/                           # GUI 前端（零依赖原生 HTML/JS/CSS，双标签页：管理/引导）
+│   ├── index.html                 #   页面骨架（{{TOKEN}} 占位符由服务端注入令牌）
+│   ├── app.js                     #   条目 CRUD、检索预览、引导流程、心跳（5s）
+│   └── style.css
+├── scripts/
+│   └── build-dist.sh              # 发布构建：-ldflags "-s -w" 产出 dist/ok.exe + dist/web/
+├── dist/                          # 发布产物（.gitignore 忽略）：ok.exe + web/
 ├── docs/
 │   ├── ARCHITECTURE.md            # 本文档
 │   ├── changelogs/                # 变更日志（强制规则要求的落点）
@@ -234,6 +250,34 @@ v1 仅 `changelog_required`：触碰文件中存在匹配 `code_globs` 的 且 �
 - `cli.go`：`Init`（项目名缺省取目录基名）、`Add`（重复条目拒绝；后接索引库同步）、`Search`（检索预览，走 `index.Query`）、`Index`（索引库增量同步并打印条目数）、`List`（文件扫描，人用命令开销可忽略）、`Doctor`（注册表/配置/embedding 连通性/hooks 安装状态/开关状态）
 - `setup.go`：见第 6.4 节
 - `toggle.go`：`On`/`Off` 即删除/创建 `~/.openknowledge/hooks-disabled` 标志文件
+
+### 5.11 gui — Web 管理界面（server.go 98 行 + api.go 580 行）
+
+`ok gui` 或无参数运行（双击 exe）启动的本地 Web 管理界面，供不熟悉命令行的用户完成首次引导与日常知识维护。
+
+- **server.go**：`net.Listen("tcp", "127.0.0.1:0")` 随机端口、仅监听回环；16 字节随机 hex 令牌；启动后自动打开浏览器（Edge/Chrome 应用模式 → 默认浏览器，全失败只打印 URL）；**心跳看门狗**——页面每 5s `POST /api/heartbeat`，收到首个心跳后上膛，30s 无心跳（页面被关闭）自动停服；`POST /api/shutdown` 立即停服。web 资源目录由 `cmd/ok` 定位：`<exe目录>/web` 优先，其次 `<当前目录>/web`（`scripts/build-dist.sh` 产出的 dist/ 布局正好满足前者）。
+- **api.go**：`/api/*` 全部经 `X-Ok-Token` 头鉴权（缺失/错误 401）；`/` 返回注入令牌的 index.html（`{{TOKEN}}` 替换）；静态资源仅白名单 `app.js`/`style.css`；条目文件名参数必须是不含 `..` 与路径分隔符的 `.md` 基本名（防路径穿越）；写操作（POST/PUT/DELETE entry）落盘后自动 `index.Sync` 同步索引库。
+
+API 一览：
+
+| 方法 | 路径 | 作用 |
+|------|------|------|
+| GET | `/api/status` | 项目列表 + hooks/技能/embedding 安装状态 + 全局开关状态（前端据此决定默认标签页） |
+| GET | `/api/projects` | 注册表项目列表 |
+| GET | `/api/entries?project=` | 项目条目摘要列表 |
+| GET | `/api/entry?project=&file=` | 条目详情（含正文） |
+| POST | `/api/entry` | 新建条目（标题 slug 定文件名，重复 409）→ 同步索引 |
+| PUT | `/api/entry` | 编辑条目 → 同步索引 |
+| DELETE | `/api/entry?project=&file=` | 删除条目 → 同步索引 |
+| GET | `/api/search?project=&q=` | 检索预览（走 `index.Query`，无 embedding 客户端） |
+| POST | `/api/setup/hooks` | 等价 `ok setup` 的 hooks 步骤（备份 + 标记块幂等写入） |
+| POST | `/api/setup/skills` | 安装三个 kimi 技能 |
+| POST | `/api/setup/embedding` | 保存 embedding 配置并当场连通性验证（`{"ok":bool,"error":…}`） |
+| POST | `/api/toggle` | `{"on":bool}` 全局开关（等价 `ok on`/`ok off`） |
+| POST | `/api/heartbeat` | 页面心跳（204） |
+| POST | `/api/shutdown` | 停服 |
+
+前端 `web/`（零依赖原生 HTML/JS/CSS）：「管理」标签页（项目/条目列表、新建/编辑/删除、检索预览带命中高亮、全局开关）+「引导」标签页（hooks/技能/embedding 三步一键完成）。hooks 未安装时「管理」页隐藏，「引导」为默认页。
 
 ---
 
@@ -433,14 +477,15 @@ ok setup
 ```bash
 go build -o ok.exe ./cmd/ok   # Windows
 go build -o ok ./cmd/ok       # Linux/macOS
+bash scripts/build-dist.sh    # 发布构建：dist/ok.exe（-ldflags "-s -w"）+ dist/web/
 ```
 
-无构建标签、无代码生成、无资源嵌入；`go.mod` 声明 `go 1.25.0`。
+无构建标签、无代码生成、无资源嵌入；`go.mod` 声明 `go 1.25.0`。GUI 的 web 资源不内嵌，由 `dist/web/` 随二进制分发。
 
 ### 12.2 常用开发命令
 
 ```bash
-go test ./...          # 全部测试（13 包）
+go test ./...          # 全部测试（15 包）
 go vet ./...           # 静态检查
 go build ./...         # 编译检查
 ```
@@ -456,6 +501,7 @@ go build ./...         # 编译检查
 | 命令 | 作用 | 关键行为 |
 |------|------|----------|
 | `ok setup` | 首次引导 | 写 hooks 配置（标记块幂等）+ 装 3 个 kimi 技能 + 交互配 embedding + 连通性验证 |
+| `ok gui` | 启动 Web 管理界面 | 无参数运行同效；127.0.0.1 随机端口 + 令牌鉴权，自动开浏览器，30s 无心跳自动停服 |
 | `ok init [名字]` | 注册当前项目 | 名字缺省取目录基名；建 KB 骨架；打印 hooks 提示 |
 | `ok add --title …` | 新建条目 | `--type/--tags/--mandatory/--file`；自动同步索引库（无 key 时向量跳过） |
 | `ok search <词>` | 检索预览 | 命令行输出打分排序（调试用） |
@@ -479,7 +525,7 @@ go build ./...         # 编译检查
 - **端到端测试**（`cmd/ok/integration_test.go`）：`TestMain` 编译真实二进制，驱动完整流程——init → add → 首次提问基础注入 → 二次提问不重复 → 手改条目后 hook 查询前增量同步命中并重建 INDEX → enforce 阻断一次后放行 → 未注册目录静默 → 开关 off/on
 - **隔离保证**：`OK_HOME` + `KIMI_CODE_HOME` + `OK_SKILLS_HOME` 指向 `t.TempDir()`，`OPENAI_API_KEY` 置空，全程零网络
 
-运行：`go test ./... -v`（13 包全绿）；`go vet ./...` 干净。
+运行：`go test ./... -v`（15 包全绿）；`go vet ./...` 干净。
 
 ### 14.2 真实环境验证（曾执行的手动验收）
 
