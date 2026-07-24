@@ -113,9 +113,11 @@ message = "本次会话修改了代码但未更新变更日志，请先按规范
 
 Kimi Code 在三个时机调用 `ok`：
 
-- `UserPromptSubmit` → `ok hook prompt` → 注入知识到上下文
-- `PostToolUse(Write|Edit)` → `ok hook post-tool` → 记录改过的文件
-- `Stop` → `ok hook stop` → 检查强制规则，不满足则 exit 2 阻断
+| hook | 何时执行 | ok 内部放行条件 | 作用 |
+|------|----------|----------------|------|
+| `UserPromptSubmit` | 每条用户消息、模型调用之前 | 全局开关开 + 目录已注册 | 首次提问注入 mandatory+索引；每次提问检索注入 |
+| `PostToolUse`（matcher `Write\|Edit`） | AI 用 Write/Edit 成功改完文件后（失败不触发） | 开关 + 注册 + 能解析出项目相对路径 | 把改动文件记入会话状态 |
+| `Stop` | AI 每个回合即将结束时（Esc 中断不触发） | 开关 + 注册 + 配了 `[[enforce]]` + 满足规则条件 | 改了代码没写日志 → exit 2 阻断（同会话同规则只阻断一次） |
 
 所有 hook 路径 fail-open：任何内部错误只记日志（`~/.openknowledge/ok.log`），绝不影响正常会话。详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
