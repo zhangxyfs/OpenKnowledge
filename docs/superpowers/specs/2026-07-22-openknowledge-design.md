@@ -37,6 +37,19 @@ v1 只支持 Kimi Code，调用方式只用 hooks。
 - MCP server 形态
 - 多人协作与知识库远程同步
 
+## 2.1 v2.0 范围：Web GUI（ok gui）
+
+- 双击无参启动 = GUI：`ok gui` 或无参数启动本地 Web 服务（127.0.0.1 随机
+  端口 + 一次性令牌），并打开浏览器（优先 Edge/Chrome `--app=` 类窗口模式）；
+  页面心跳超时（30s）自动退出
+- 两个选项卡：**管理**（注册表为空时隐藏：项目切换、条目列表/搜索/查看/
+  新建/编辑/删除，写回 .md 并同步 kb.db）与**引导**（hooks/技能/embedding
+  状态与一键操作，等价于图形化的 `ok setup` + `ok on/off`）
+- 多文件发行：静态资源外置 `dist/web/`（index.html/app.js/style.css），
+  构建输出统一在 `dist/`；静态资源与 API 分离，API 需令牌
+- setup 核心逻辑（hooks 块写入、技能安装、embedding 配置、开关）抽为共享
+  包 `internal/setupx`，CLI 与 GUI 复用同一份
+
 ## 3. 总体架构
 
 单一 Go 二进制 `ok`，两类子命令：

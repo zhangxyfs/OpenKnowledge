@@ -4321,3 +4321,145 @@ Expected: 全部 PASS
 git add -A
 git commit -m "feat: route retrieval through SQLite index; retire file-scan path"
 ```
+
+---
+
+## v2.0 特性（2026-07-23 用户追加需求：Web GUI）
+
+目标：ok.exe 支持双击打开 GUI（内置 Web UI）。技术决策已定：内置 Web 服务
+（127.0.0.1 随机端口 + 一次性令牌 + 浏览器 `--app=` 模式），静态资源外置
+`dist/web/`，多文件发行，构建输出到 `dist/`。**v2.0 保持控制台子系统**
+（双击会带一个控制台窗口显示 URL；`-H windowsgui` 与 CLI 输出冲突，留待
+安装程序阶段再决定是否拆 ok-gui.exe）。
+
+### Task 16: setupx — setup 核心逻辑抽共享包（纯重构）
+
+**Files:**
+- Create: `internal/setupx/setupx.go`、`internal/setupx/setupx_test.go`
+- Modify: `internal/cli/setup.go`（改为薄封装）、`internal/cli/toggle.go`、
+  `internal/cli/cli.go`（Doctor 中的 kimiHome/markerBegin 引用）、`cmd/ok/main.go`
+- Delete: `internal/cli/setup_test.go`（测试迁往 setupx）
+
+**Interfaces:**
+- Produces（Task 17 依赖）：
+  - `setupx.KimiHome() string`、`setupx.SkillsHome() string`
+  - `setupx.HooksBlockFor(exe string) string`、`setupx.UpsertHooksBlock(configPath, block string) error`
+  - `setupx.InstallSkills(exe string) error`、`setupx.MarkerBegin/MarkerEnd`（导出常量）
+  - `setupx.SaveEmbedding(baseURL, model, apiKey string) error`（写全局配置 0600）
+  - `setupx.TestEmbedding(baseURL, model, apiKey string) error`（10s 连通性）
+  - `setupx.Disable() error`、`setupx.Enable() error`（移动 toggle.go 的核心）
+
+**要求:** 行为零变化；`cli.Setup/On/Off` 签名与输出不变；现有全部测试原样通过
+（断言文本如有包名差异可调）。commit: `refactor: extract setup logic into internal/setupx`
+
+---
+
+### Task 17: internal/gui — Web 服务与 API
+
+**Files:**
+- Create: `internal/gui/server.go`（Run/令牌/心跳/打开浏览器）
+- Create: `internal/gui/api.go`（路由与 handler）
+- Create: `internal/gui/api_test.go`
+- Modify: `cmd/ok/main.go`（无参数 → gui.Run；新增 `gui` 子命令）
+
+**Interfaces:**
+- Produces:
+  - `gui.Run(webDir string, stdout, stderr io.Writer) int`
+  - `gui.NewHandler(webDir, token string, beats <-chan struct{}) http.Handler`（测试用 httptest 驱动）
+
+**启动流程（Run）：**
+1. `net.Listen("tcp", "127.0.0.1:0")` 取随机端口；生成令牌（16 字节 hex）。
+2. 起 `http.Server`（mux 见下）；浏览器打开 `http://127.0.0.1:<port>/?token=<tok>`：
+   依次尝试 `cmd /c start msedge --app=<url>`、`cmd /c start chrome --app=<url>`、
+   `cmd /c start <url>`（默认浏览器），全失败则只在 stdout 打印 URL。
+3. 心跳看门狗：页面每 5s POST `/api/heartbeat`；超过 30s 无心跳 → Server.Shutdown。
+   `/api/shutdown` 立即退出。stdout 打印 URL 与"关闭此窗口退出"。
+
+**webDir 定位**：`<exeDir>/web` → `<cwd>/web`，都不存在则报错退出。
+
+**路由**（`/api/*` 一律校验 `X-Ok-Token` 头，失败 401；`/` 返回注入令牌的 index.html）：
+
+| 方法与路径 | 说明 |
+|---|---|
+| GET `/api/status` | `{projects:[{name,paths}], hooksInstalled, skillsInstalled, embeddingConfigured, disabled}` |
+| GET `/api/projects` | 注册表项目列表 |
+| GET `/api/entries?project=` | 条目数组 `[{file,title,type,tags,mandatory,summary}]` |
+| GET `/api/entry?project=&file=` | 单条 `{file,title,type,tags,mandatory,summary,body}` |
+| POST `/api/entry` | 新建 `{project,title,type,tags,mandatory,summary,body}`（重名 409） |
+| PUT `/api/entry` | 更新 `{project,file,title,type,tags,mandatory,summary,body}` |
+| DELETE `/api/entry?project=&file=` | 删除文件并同步 |
+| GET `/api/search?project=&q=` | 走 `index.Query`，返回 `[{file,title,score}]` |
+| POST `/api/heartbeat` | 心跳（204） |
+| POST `/api/shutdown` | 停服（200 后退出） |
+| POST `/api/setup/hooks` | 调用 setupx 写 hooks 块 |
+| POST `/api/setup/skills` | 调用 setupx 装技能 |
+| POST `/api/setup/embedding` | `{base_url,model,api_key}` → SaveEmbedding + TestEmbedding，返回 `{ok, error}` |
+| POST `/api/toggle` | `{on:true|false}` → Enable/Disable |
+
+**条目写操作**统一经：解析/校验 → 写 `knowledge/<slug>.md`（entry.Serialize）→
+`index.Sync`（client 可为 nil）→ 返回新列表项。删除同理（os.Remove + Sync）。
+
+**测试（httptest + 临时 OK_HOME/KIMI_CODE_HOME/OK_SKILLS_HOME）**：status 空注册表、
+条目 CRUD 全流程、重名 409、search 命中、toggle 生效、无令牌 401、
+setup/hooks 与 setup/skills 落盘、embedding 保存（坏服务返回 ok=false）。
+
+commit: `feat: web GUI server with token auth and management API`
+
+---
+
+### Task 18: web/ 前端（两选项卡 SPA）
+
+**Files:**
+- Create: `web/index.html`、`web/app.js`、`web/style.css`
+
+**结构契约（原生 JS，无框架无构建）：**
+
+- `index.html`：顶部两个 tab 按钮（`#tab-manage` 管理 / `#tab-guide` 引导）+
+  两个 `<section>`；内嵌 `<script>window.OK_TOKEN="{{TOKEN}}"</script>`（服务端替换）。
+- 启动流程：JS fetch `/api/status` →
+  `projects.length === 0` 时**隐藏管理 tab**（首次运行只见引导）。
+- **管理页**：项目下拉 → 拉 `/api/entries` 渲染表格（标题/类型/tags/mandatory/摘要/
+  操作）；搜索框（防抖 300ms → `/api/search`，命中高亮置顶）；"新建"与"编辑"
+  打开表单（title/type 下拉/tags 逗号分隔/mandatory 勾选/summary/body textarea），
+  保存走 POST/PUT；"删除"confirm 后 DELETE；每次写操作后刷新列表。
+- **引导页**：状态卡（hooks 已安装/技能已安装/embedding 已配置/开关状态）+ 按钮
+  （一键写入 hooks、安装技能、embedding 表单[base_url/model/api_key 密码框]+
+  "保存并测试"显示连通结果、开启/关闭切换按钮）+ 静态引导文案（同 guideText）。
+- 每 5s POST `/api/heartbeat`；页面提供"退出服务"按钮调 `/api/shutdown`。
+- 全部 fetch 带 `X-Ok-Token` 头；错误以顶部横幅展示。
+- 样式：简洁深色或浅色单一样式表，无外部资源（无 CDN）。
+
+**测试**：无单测；由 Task 19 的端到端冒烟 + 人工验收覆盖。
+
+commit: `feat: two-tab web UI for knowledge management and setup guide`
+
+---
+
+### Task 19: dist 构建 + 文档 + 端到端验证
+
+**Files:**
+- Create: `scripts/build-dist.sh`
+- Modify: `.gitignore`（加 `/dist/`）
+- Modify: `README.md`（GUI 章节）、`docs/ARCHITECTURE.md`（gui 包、dist 布局、API 表）
+- Create: `docs/changelogs/2026-07-23-web-gui.md`
+
+**build-dist.sh（Git Bash 执行）：**
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+go build -ldflags "-s -w" -o dist/ok.exe ./cmd/ok
+rm -rf dist/web
+cp -r web dist/web
+echo "dist/ built: ok.exe + web/"
+```
+
+**端到端验证（本任务内执行）：**
+1. `scripts/build-dist.sh` 产出 dist/ok.exe + dist/web/
+2. `dist/ok.exe gui` 启动 → curl 带令牌访问 `/api/status` 200、无令牌 401
+3. 临时 OK_HOME 下走一遍：setup/hooks → init 项目 → POST 条目 → search 命中 →
+   编辑 → 删除 → toggle off/on
+4. 汇报体积（ls -lh dist/ok.exe）
+
+commit: `feat: dist build script and GUI docs`
