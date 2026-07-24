@@ -3,8 +3,10 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"openknowledge/internal/cli"
+	"openknowledge/internal/gui"
 	"openknowledge/internal/hook"
 )
 
@@ -14,10 +16,12 @@ func main() {
 
 func run(argv []string) int {
 	if len(argv) < 2 {
-		usage()
-		return 1
+		// 无参数（双击 exe 场景）→ 启动 Web GUI
+		return runGUI()
 	}
 	switch argv[1] {
+	case "gui":
+		return runGUI()
 	case "hook":
 		return runHook(argv[2:])
 	case "setup":
@@ -66,5 +70,38 @@ func runHook(args []string) (code int) {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "用法: ok <setup|init|add|search|index|list|doctor|on|off|hook> ...")
+	fmt.Fprintln(os.Stderr, "用法: ok [gui] <setup|init|add|search|index|list|doctor|on|off|hook> ...")
+}
+
+// runGUI 定位 web 资源目录并启动 Web GUI。
+func runGUI() int {
+	webDir, err := findWebDir()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	return gui.Run(webDir, os.Stdout, os.Stderr)
+}
+
+// findWebDir 依次尝试 <exe目录>/web 与 <当前目录>/web。
+func findWebDir() (string, error) {
+	if exe, err := os.Executable(); err == nil {
+		if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+			exe = resolved
+		}
+		if dir := filepath.Join(filepath.Dir(exe), "web"); isDir(dir) {
+			return dir, nil
+		}
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		if dir := filepath.Join(cwd, "web"); isDir(dir) {
+			return dir, nil
+		}
+	}
+	return "", fmt.Errorf("未找到 web 资源目录（<exe目录>/web 或 <当前目录>/web）")
+}
+
+func isDir(p string) bool {
+	info, err := os.Stat(p)
+	return err == nil && info.IsDir()
 }
