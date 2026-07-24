@@ -268,14 +268,19 @@ func (h *Handler) apiStatus(w http.ResponseWriter, _ *http.Request) {
 		}
 	}
 	embeddingConfigured := false
+	embedding := map[string]any{"base_url": "", "model": "", "has_key": false}
 	if cfg, err := config.LoadMerged("", filepath.Join(registry.Home(), "config.toml")); err == nil {
 		embeddingConfigured = cfg.Embedding.BaseURL != "" && cfg.Embedding.ResolvedAPIKey() != ""
+		embedding["base_url"] = cfg.Embedding.BaseURL
+		embedding["model"] = cfg.Embedding.Model
+		embedding["has_key"] = cfg.Embedding.ResolvedAPIKey() != ""
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"projects":            projects,
 		"hooksInstalled":      hooksInstalled,
 		"skillsInstalled":     skillsInstalled,
 		"embeddingConfigured": embeddingConfigured,
+		"embedding":           embedding,
 		"disabled":            registry.HooksDisabled(),
 	})
 }
@@ -717,15 +722,21 @@ func (h *Handler) apiSetupEmbedding(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	if req.APIKey == "" {
-		writeErr(w, http.StatusBadRequest, "api_key 不能为空")
-		return
-	}
 	if req.BaseURL == "" {
 		req.BaseURL = "https://api.openai.com/v1"
 	}
 	if req.Model == "" {
 		req.Model = "text-embedding-3-small"
+	}
+	if req.APIKey == "" {
+		// 留空 = 保留已保存的 key；一个都没有才报错
+		if cfg, err := config.LoadMerged("", filepath.Join(registry.Home(), "config.toml")); err == nil {
+			req.APIKey = cfg.Embedding.ResolvedAPIKey()
+		}
+		if req.APIKey == "" {
+			writeErr(w, http.StatusBadRequest, "api_key 不能为空（尚未保存过 key）")
+			return
+		}
 	}
 	result := func(err error) {
 		resp := map[string]any{"ok": err == nil, "error": ""}

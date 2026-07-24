@@ -456,6 +456,70 @@ func TestEmbeddingBadURL(t *testing.T) {
 	}
 }
 
+// 留空 api_key 应保留已保存的 key；status 应回填 base_url/model/has_key。
+func TestEmbeddingEmptyKeyKeepsExisting(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	// 未保存过 key 时留空 → 400
+	code, _ := do(t, "POST", srv.URL+"/api/setup/embedding", testToken, map[string]any{
+		"base_url": "http://127.0.0.1:1",
+		"model":    "m",
+		"api_key":  "",
+	})
+	if code != 400 {
+		t.Fatalf("empty key without existing should be 400, got %d", code)
+	}
+
+	// 先保存一个 key
+	if code, _ := do(t, "POST", srv.URL+"/api/setup/embedding", testToken, map[string]any{
+		"base_url": "http://127.0.0.1:1",
+		"model":    "m1",
+		"api_key":  "sekret-key",
+	}); code != 200 {
+		t.Fatal("seed save failed")
+	}
+	// 留空 key + 改 model → 保留 sekret-key
+	code, data := do(t, "POST", srv.URL+"/api/setup/embedding", testToken, map[string]any{
+		"base_url": "http://127.0.0.1:1",
+		"model":    "m2",
+		"api_key":  "",
+	})
+	if code != 200 {
+		t.Fatalf("empty key keep-existing: status = %d, body %s", code, data)
+	}
+	cfgData, err := os.ReadFile(filepath.Join(okHome, "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(cfgData), "sekret-key") || !strings.Contains(string(cfgData), `model = "m2"`) {
+		t.Fatalf("key should be kept and model updated: %q", cfgData)
+	}
+
+	// status 回填 base_url/model/has_key（不回显 key 本体）
+	code, data = do(t, "GET", srv.URL+"/api/status", testToken, nil)
+	if code != 200 {
+		t.Fatalf("status = %d", code)
+	}
+	var st struct {
+		Embedding struct {
+			BaseURL string `json:"base_url"`
+			Model   string `json:"model"`
+			HasKey  bool   `json:"has_key"`
+		} `json:"embedding"`
+	}
+	if err := json.Unmarshal(data, &st); err != nil {
+		t.Fatal(err)
+	}
+	if st.Embedding.BaseURL != "http://127.0.0.1:1" || st.Embedding.Model != "m2" || !st.Embedding.HasKey {
+		t.Fatalf("status embedding wrong: %s", data)
+	}
+	if strings.Contains(string(data), "sekret-key") {
+		t.Fatalf("api key leaked in status: %s", data)
+	}
+}
+
 func TestHeartbeat(t *testing.T) {
 	beats := make(chan struct{}, 1)
 	okHome := t.TempDir()

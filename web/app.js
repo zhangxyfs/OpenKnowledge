@@ -296,6 +296,12 @@
     setBadge("badge-embedding", s.embeddingConfigured, "已配置", "未配置");
     setBadge("badge-toggle", !s.disabled, "已开启", "已关闭");
     $("btn-toggle").textContent = s.disabled ? "开启" : "关闭";
+    // 回填已保存的 embedding 配置（key 不回显，留空表示保持不变）
+    if (s.embedding) {
+      if (s.embedding.base_url) $("emb-base-url").value = s.embedding.base_url;
+      if (s.embedding.model) $("emb-model").value = s.embedding.model;
+      $("emb-api-key").placeholder = s.embedding.has_key ? "已保存（留空保持不变）" : "api_key";
+    }
     refreshCapture();
   }
 
