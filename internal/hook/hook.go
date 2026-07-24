@@ -230,7 +230,7 @@ func relativize(pc *project.Context, abs string) string {
 	return ""
 }
 
-// HandleStop 评估 enforce 规则，需要时以 exit 2 阻断。
+// HandleStop 先按周期发出 auto 自省提醒，再评估 enforce 规则，需要时以 exit 2 阻断。
 func HandleStop(r io.Reader, stderr io.Writer) int {
 	if registry.HooksDisabled() {
 		return 0

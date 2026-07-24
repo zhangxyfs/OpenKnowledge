@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"openknowledge/internal/registry"
+	"openknowledge/internal/state"
 )
 
 // setupProject 在临时 OK_HOME 下注册项目并返回项目目录与 KB 根。
@@ -378,5 +379,56 @@ message = "请补变更日志"
 	var stderr bytes.Buffer
 	if code := HandleStop(strings.NewReader(stop), &stderr); code != 0 {
 		t.Fatalf("disabled stop should pass, got %d (%q)", code, stderr.String())
+	}
+}
+
+func TestStopAutoCaptureThenEnforce(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	cfg := `
+[capture]
+mode = "auto"
+turn_interval = 5
+
+[[enforce]]
+type = "changelog_required"
+code_globs = ["**/*.go"]
+changelog_glob = "docs/changelogs/**"
+message = "请补变更日志"
+`
+	if err := os.WriteFile(filepath.Join(kbRoot, "config.toml"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	codeFile := filepath.Join(projDir, "main.go")
+	post := fmt.Sprintf(`{"hook_event_name":"PostToolUse","session_id":"s1","cwd":%q,"tool_name":"Write","tool_input":{"path":%q}}`, projDir, codeFile)
+	if code := HandlePostTool(strings.NewReader(post)); code != 0 {
+		t.Fatalf("post-tool exit %d", code)
+	}
+	// 预置 StopCount，使第 1 次 Stop 时自省间隔恰好到期（5-0>=5）
+	st := state.Load(filepath.Join(kbRoot, "state"), "s1")
+	st.StopCount = 4
+	if err := st.Save(filepath.Join(kbRoot, "state")); err != nil {
+		t.Fatal(err)
+	}
+	stop := fmt.Sprintf(`{"hook_event_name":"Stop","session_id":"s1","cwd":%q}`, projDir)
+	var stderr bytes.Buffer
+	// 第 1 次 Stop：auto 自省先触发（不是 enforce 文案）
+	if code := HandleStop(strings.NewReader(stop), &stderr); code != 2 {
+		t.Fatalf("first stop should block with extraction reminder, got %d (%q)", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "ok propose") {
+		t.Fatalf("first stop should be the extraction reminder, got %q", stderr.String())
+	}
+	// 第 2 次 Stop：自省间隔未满跳过，enforce 触发
+	stderr.Reset()
+	if code := HandleStop(strings.NewReader(stop), &stderr); code != 2 {
+		t.Fatalf("second stop should block with enforce message, got %d (%q)", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "请补变更日志") {
+		t.Fatalf("second stop should be the enforce message, got %q", stderr.String())
+	}
+	// 第 3 次 Stop：enforce 已阻断过（BlockedRules），自省间隔未满 → 放行
+	stderr.Reset()
+	if code := HandleStop(strings.NewReader(stop), &stderr); code != 0 {
+		t.Fatalf("third stop should pass, got %d (%q)", code, stderr.String())
 	}
 }
