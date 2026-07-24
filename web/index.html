@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OpenKnowledge 知识库</title>
+  <link rel="stylesheet" href="style.css">
+  <script>window.OK_TOKEN = "{{TOKEN}}";</script>
+</head>
+<body>
+  <div id="banner" class="banner hidden">
+    <span id="banner-text"></span>
+    <button id="banner-close" type="button" aria-label="关闭">×</button>
+  </div>
+
+  <header class="topbar">
+    <span class="brand">OpenKnowledge</span>
+    <nav class="tabs">
+      <button id="tab-manage" type="button" class="tab">管理</button>
+      <button id="tab-guide" type="button" class="tab">引导</button>
+    </nav>
+    <button id="btn-shutdown" type="button" class="btn btn-danger">退出服务</button>
+  </header>
+
+  <main>
+    <section id="page-manage" class="page">
+      <div class="toolbar">
+        <label>项目
+          <select id="project-select"></select>
+        </label>
+        <input id="search-input" type="search" placeholder="搜索条目…" autocomplete="off">
+        <button id="btn-new" type="button" class="btn btn-primary">新建</button>
+      </div>
+      <div id="search-results" class="search-results hidden"></div>
+      <table class="entries">
+        <thead>
+          <tr>
+            <th>标题</th>
+            <th>类型</th>
+            <th>tags</th>
+            <th>mandatory</th>
+            <th>摘要</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="entries-body"></tbody>
+      </table>
+      <p id="entries-empty" class="muted hidden">暂无条目，点击"新建"添加第一条知识。</p>
+    </section>
+
+    <section id="page-guide" class="page hidden">
+      <div class="cards">
+        <div class="card">
+          <h3>hooks 配置</h3>
+          <span id="badge-hooks" class="badge badge-off">未配置</span>
+          <button id="btn-hooks" type="button" class="btn">写入 hooks 配置</button>
+        </div>
+        <div class="card">
+          <h3>技能</h3>
+          <span id="badge-skills" class="badge badge-off">未配置</span>
+          <button id="btn-skills" type="button" class="btn">安装技能</button>
+        </div>
+        <div class="card">
+          <h3>embedding</h3>
+          <span id="badge-embedding" class="badge badge-off">未配置</span>
+          <div class="embedding-form">
+            <input id="emb-base-url" type="text" placeholder="base_url（默认 OpenAI）">
+            <input id="emb-model" type="text" placeholder="model（默认 text-embedding-3-small）">
+            <input id="emb-api-key" type="password" placeholder="api_key" autocomplete="off">
+            <button id="btn-embedding" type="button" class="btn">保存并测试</button>
+            <p id="emb-result" class="muted"></p>
+          </div>
+        </div>
+        <div class="card">
+          <h3>全局开关</h3>
+          <span id="badge-toggle" class="badge badge-on">已开启</span>
+          <button id="btn-toggle" type="button" class="btn">关闭</button>
+        </div>
+      </div>
+      <div class="guide-text">
+        <h3>下一步</h3>
+        <ol>
+          <li>在需要知识库的项目目录运行 <code>ok init</code>（自动取当前目录名，或在 kimi 中说"初始化知识库"）</li>
+          <li>用 <code>ok add</code> 添加知识条目</li>
+          <li>新开 kimi 会话即可生效；<code>ok off</code> / <code>ok on</code> 可随时全局开关</li>
+        </ol>
+      </div>
+    </section>
+  </main>
+
+  <div id="entry-modal" class="modal hidden">
+    <div class="modal-box">
+      <h3 id="entry-modal-title">新建条目</h3>
+      <form id="entry-form">
+        <label>标题 <input id="f-title" type="text" required></label>
+        <label>类型
+          <select id="f-type">
+            <option value="rule">rule</option>
+            <option value="pitfall">pitfall</option>
+            <option value="note">note</option>
+            <option value="reference">reference</option>
+          </select>
+        </label>
+        <label>tags（逗号分隔） <input id="f-tags" type="text"></label>
+        <label class="checkbox"><input id="f-mandatory" type="checkbox"> mandatory（每会话必注入）</label>
+        <label>摘要 <input id="f-summary" type="text"></label>
+        <label>正文 <textarea id="f-body" rows="10"></textarea></label>
+        <div class="modal-actions">
+          <button id="f-save" type="submit" class="btn btn-primary">保存</button>
+          <button id="f-cancel" type="button" class="btn">关闭</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
