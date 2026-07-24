@@ -15,7 +15,7 @@
 ## 安装
 
 ```bash
-# 1. 构建（Go ≥ 1.22）
+# 1. 构建（Go ≥ 1.25）
 go build -o ok.exe ./cmd/ok        # Windows
 go build -o ok ./cmd/ok            # Linux/macOS
 
@@ -37,7 +37,7 @@ cd /your/project
 ok init                      # 注册项目（自动取目录名）
 ok add --title "变更日志强制规则" --type rule --mandatory --file rule.md
 ok add --title "Git 提交规范" --type note --tags git --file git.md
-ok index                     # 配好 embedding 后重建向量
+ok index                     # 配好 embedding 后同步索引与向量
 ```
 
 然后**新开一个 Kimi Code 会话**（hooks 在会话启动时加载）即可生效：
@@ -73,7 +73,7 @@ summary: 每次代码修改必须立即记录变更日志
 | `ok init [名字]` | 注册当前项目（名字缺省取目录名） |
 | `ok add` | 新建知识条目（自动重建索引与向量） |
 | `ok search <词>` | 命令行预览检索效果 |
-| `ok index` | 全量重建索引与向量（手改条目后执行） |
+| `ok index` | 同步索引与向量（手改条目后执行；删除 kb.db 后执行 = 全量重建） |
 | `ok list` | 列出项目与条目 |
 | `ok doctor` | 体检：配置、embedding 连通性、hooks 状态 |
 | `ok on` / `ok off` | 全局开关（默认开启） |
@@ -122,7 +122,7 @@ Kimi Code 在三个时机调用 `ok`：
 ## 开发
 
 ```bash
-go test ./...    # 12 个包全部测试（零网络，含端到端）
+go test ./...    # 13 个包全部测试（零网络，含端到端）
 go vet ./...
 ```
 
