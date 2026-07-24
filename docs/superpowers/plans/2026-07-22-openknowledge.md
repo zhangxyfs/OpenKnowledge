@@ -4463,3 +4463,95 @@ echo "dist/ built: ok.exe + web/"
 4. 汇报体积（ls -lh dist/ok.exe）
 
 commit: `feat: dist build script and GUI docs`
+
+---
+
+## v2.1 特性（2026-07-24 用户追加需求：经验沉淀双模式）
+
+设计见规格 §2.2。要点：草稿（draft）条目不注入、人批准转正；auto 模式由
+Stop hook 按回合间隔强制 AI 自省提议。全部产出都是草稿，统一人批准。
+
+### Task 20: draft 全链路 + ok propose / approve / capture
+
+**Files:**
+- Modify: `internal/entry/entry.go`（Entry 加 `Draft bool \`yaml:"draft"\``）
+- Modify: `internal/config/config.go`（加 `Capture{Mode string; TurnInterval int}`，
+  toml `[capture]`，Default: `"propose"`, `5`）
+- Modify: `internal/index/db.go`（entries 加 draft 列 + Open 时列迁移：
+  `PRAGMA table_info(entries)` 无 draft 则 `ALTER TABLE entries ADD COLUMN draft INTEGER NOT NULL DEFAULT 0`）
+- Modify: `internal/index/sync.go`（同步 draft；INDEX.md 草稿行加 `【草稿】`前缀）
+- Modify: `internal/index/query.go`（Query 与 Mandatory 排除 draft=1）
+- Modify: `internal/cli/cli.go`（新增 `Propose/Approve/CaptureCmd`）
+- Modify: `cmd/ok/main.go`（propose/approve/capture 分支）
+- Test: 各包对应测试
+
+**Interfaces（后续任务依赖）:**
+- `entry.Entry.Draft bool`
+- `config.Capture{Mode string; TurnInterval int}`（Config.Capture 字段）
+- `cli.Propose(args, stdout, stderr) int`：flags `--title --type --tags --summary --file --body`；
+  写 `draft:true, mandatory:false` 条目，Sync(nil client)（草稿不算向量）
+- `cli.Approve(args, stdout, stderr) int`：`ok approve <file>`，置 draft=false，
+  Sync(embeddingClient)（此时才算向量）
+- `cli.CaptureCmd(args, stdout, stderr) int`：无参打印当前模式；`propose|auto` 设置
+  项目 config.toml 的 `[capture]`（保留注释重写同 defaultProjectConfig 风格）
+
+- [ ] TDD：draft 序列化往返；Query/Mandatory 排除 draft；INDEX 草稿标记；
+  propose 写草稿且不同步向量；approve 转正；capture 读写模式；DB 列迁移
+  （旧库无 draft 列打开后可用）
+- [ ] commit: `feat: draft entries with propose/approve/capture commands`
+
+---
+
+### Task 21: Stop hook auto 自省模式
+
+**Files:**
+- Modify: `internal/state/state.go`（Session 加 `StopCount int`、
+  `LastExtractReminder int`，json `stop_count`/`last_extract_reminder`）
+- Modify: `internal/hook/hook.go`（HandleStop 加 auto 分支）
+- Test: `internal/hook/hook_test.go` 追加
+
+**逻辑（HandleStop 中，enforce 评估之前，开关检查之后）:**
+```go
+// auto 自省模式：有文件修改且距上次提醒满 turn_interval 回合 → 阻断一次
+st.StopCount++
+if pc.Config.Capture.Mode == "auto" && len(st.Touched) > 0 &&
+	st.StopCount-st.LastExtractReminder >= pc.Config.Capture.TurnInterval {
+	st.LastExtractReminder = st.StopCount
+	_ = st.Save(...)
+	fmt.Fprintln(stderr, "本会话修改过文件。请回顾是否有值得记录的经验（非显而易见的坑或解法），有则立即运行 ok propose 记录草稿条目；没有则继续。")
+	return 2
+}
+```
+语义注意：该阻断**不进 BlockedRules**（它是周期性提醒，不是一次性规则）；
+`turn_interval <= 0` 时视为 1（每回合都提醒——不推荐但允许）。
+
+- [ ] TDD：auto+有修改+间隔满 → exit 2 含提示文本；间隔未满放行；
+  propose 模式不触发；无文件修改不触发；阻断后计数重置。
+- [ ] commit: `feat: auto capture mode with periodic stop-hook extraction reminder`
+
+---
+
+### Task 22: GUI 沉淀卡 + 草稿管理 + 技能安装
+
+**Files:**
+- Modify: `internal/gui/api.go`（status 加 capture 字段；条目列表/详情带 draft；
+  新增 `POST /api/approve {project,file}`、`POST /api/capture {mode}`）
+- Modify: `web/app.js`（草稿徽标、采纳按钮、引导页"经验沉淀"卡片与模式切换）
+- Modify: `web/style.css`（徽标样式）
+- Modify: `internal/setupx/setupx.go`（skillTemplates 加 openknowledge-propose、
+  openknowledge-capture）
+- Modify: `docs/ARCHITECTURE.md`、`README.md`
+- Create: `docs/changelogs/2026-07-24-capture-modes.md`
+- Test: gui api 测试追加
+
+**技能内容要点:**
+- `openknowledge-propose`：何时提议（解决了非显而易见的问题/踩坑/找到隐藏
+  约定）、何时不提议（日常操作、已在库中的内容——先 `ok search` 查重）、
+  命令格式（`"<exe>" propose --title ... --type pitfall --tags ... --file 正文.md`）、
+  告知用户"已记为草稿，待批准"
+- `openknowledge-capture`：切换沉淀模式（`"<exe>" capture propose|auto`），
+  解释两模式差异与当前状态
+
+- [ ] TDD：api draft 字段透传、approve 端点、capture 端点写配置
+- [ ] 验证：沙箱 E2E（propose → GUI 见草稿 → approve → search 可命中）
+- [ ] commit: `feat: GUI capture card, draft approval, and propose/capture skills`

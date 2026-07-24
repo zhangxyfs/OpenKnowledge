@@ -50,6 +50,21 @@ v1 只支持 Kimi Code，调用方式只用 hooks。
 - setup 核心逻辑（hooks 块写入、技能安装、embedding 配置、开关）抽为共享
   包 `internal/setupx`，CLI 与 GUI 复用同一份
 
+## 2.2 v2.1 范围：经验沉淀（propose / auto 双模式）
+
+- **草稿条目**：frontmatter 新增 `draft: true` 标记；草稿**不参与检索注入**
+  （FTS 查询与向量通道均排除），INDEX.md 与 GUI 中以"草稿"标识
+- **`ok propose`**（默认开启的提议通道）：AI 经技能指引调用，写入草稿条目
+  （强制 `mandatory: false`，同步时不算向量）；**`ok approve <文件>`** 转正
+  （去 draft 标记并同步、算向量）
+- **`[capture]` 配置**（项目级）：`mode = "propose"（默认）| "auto"`、
+  `turn_interval = 5`。auto 模式下 Stop hook：本会话有文件修改且距上次
+  自省提醒 ≥ turn_interval 回合 → 阻断一次并提示 AI 用 ok propose 提取经验
+- **切换入口**：GUI 引导页"经验沉淀"卡片 + kimi 技能 `openknowledge-capture`；
+  CLI `ok capture [propose|auto]` 查看/设置
+- **技能**：`openknowledge-propose`（教 AI 何时/如何提议草稿，含质量门槛）、
+  `openknowledge-capture`（切换模式），由 `ok setup` 安装
+
 ## 3. 总体架构
 
 单一 Go 二进制 `ok`，两类子命令：
