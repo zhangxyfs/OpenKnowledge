@@ -19,6 +19,8 @@ func run(argv []string) int {
 		// 无参数（双击 exe 场景）→ 启动 Web GUI
 		return runGUI()
 	}
+	// CLI 模式：GUI 子系统编译时挂回父控制台（管道/重定向场景自动跳过）
+	attachForCLI()
 	switch argv[1] {
 	case "gui":
 		return runGUI()
