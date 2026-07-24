@@ -18,6 +18,8 @@
 - [14. 测试与验证](#14-测试与验证)
 - [15. 常见问题排查](#15-常见问题排查)
 - [16. 后续维护建议](#16-后续维护建议)
+- [17. 检索算法实现（深度）](#17-检索算法实现深度)
+- [18. 配置参数参考](#18-配置参数参考)
 
 ---
 
@@ -207,11 +209,7 @@ func (e Embedding) ResolvedAPIKey() string  // api_key 字段 > api_key_env 环�
 
 ### 5.6 index/retrieve — 索引化混合检索（db.go 138 + sync.go 240 + query.go 138 + retrieve.go 44 行）
 
-检索不再逐文件扫描 Markdown，而是查询 SQLite 索引库 `kb.db`（位于各项目 KB 根目录）：
-
-- **同步**（`Sync`）：按 filename+mtime 增量——新增/变化条目 upsert 进 `entries`（原文）与 `entries_fts`（FTS5 表，存 Terms 切分文本），client!=nil 时为变化条目重算向量、并为缺向量的未变化条目补齐；已删条目连带清理；最后重建 INDEX.md。变化条目解析失败时**跳过该文件**（已索引旧行保留，新文件则缺席；mtime 未入库，修复后下次同步自动追上），其余条目照常提交，提交后返回 `*CorruptEntriesError` 警告（调用方 `errors.As` 区分）；SQL 失败、目录不可读、INDEX.md 写入失败等致命错误仍中止回滚。hook 与 CLI 共用这一条路径
-- **查询**（`Query`）：`score = α·归一BM25 + β·余弦`。关键词通道走 FTS5 `bm25()`（列权重 title>tags>summary>body），语义通道全量读向量算余弦（万条毫秒级）；mandatory 条目不参与（已在基础注入中）；只留 score>0，分数降序、同分标题升序，截 top_n；`queryVec=nil` 时自动退化为纯关键词（embedding 失败降级路径）
-- `Mandatory()` 返回 mandatory 条目供基础注入；`retrieve.Terms` 是自研分词器——小写拉丁/数字词（≥2 字符）+ **CJK 二元组**（`unicode.Han`），FTS 入库与 MATCH 查询共用同一切分保证词元一致
+检索不再逐文件扫描 Markdown，而是查询 SQLite 索引库 `kb.db`（位于各项目 KB 根目录）。同步按 filename+mtime 增量（枚举优先、只解析变化文件）；查询为 `score = α·归一BM25 + β·余弦` 的混合打分。**算法实现细节（分词、BM25、归一化、混合、降级矩阵、实测性能）见第 17 章**，配置参数见第 18 章。
 
 ### 5.7 state — 会话状态（96 行）
 
@@ -544,3 +542,215 @@ go build ./...         # 编译检查
 7. **Doctor 校验 enforce glob**：用 doublestar 预编译用户配置的 glob，格式错误提前暴露（当前 malformed glob 静默不生效）。
 8. **CRLF 归一**：仓库在 Windows 下全量 CRLF，`gofmt -l` 全报未格式化；建议加 `.gitattributes`（`* text=auto eol=lf`）统一为 LF。
 9. **v2 候选方向**（当前为非目标，勿提前实现）：hooks 自动沉淀经验、其他 AI 工具适配、本地 embedding、知识库远程同步。
+
+---
+
+## 17. 检索算法实现（深度）
+
+本章是检索链路的实现级说明，对应代码：`internal/retrieve/retrieve.go`（分词）、
+`internal/index/sync.go`（同步）、`internal/index/query.go`（查询）。
+
+### 17.1 检索流水线总览
+
+```
+[写入侧]  Markdown 文件（唯一真相源）
+            │  Sync：枚举 → diff → 只解析变化项
+            ▼
+        kb.db ──┬── entries（原文 + mtime + mandatory）
+                ├── entries_fts（FTS5，切分后文本）
+                └── vectors（float32 blob）
+[查询侧]  用户提问
+            │  Terms 分词 ──► FTS5 BM25 ─┐
+            │  embedding  ──► 余弦相似度 ─┤ score = α·kw + β·cos
+            ▼                             ▼
+        过滤(mandatory/≤0) → 排序 → top_n → 取正文注入
+```
+
+### 17.2 分词器（`retrieve.Terms`）
+
+规则（44 行，无第三方分词库）：
+
+- 全部转小写后逐 rune 扫描：
+  - `unicode.Han` 汉字 → 进入 CJK 缓冲，冲刷时**两两切二元组**（孤字单独成词）
+  - 其他字母/数字 → 进入拉丁缓冲，冲刷时 **≥2 字符**才成词
+  - 其余字符（空格、标点）视为分隔
+- 示例：
+  - `"Git 提交规范"` → `[git, 提交, 交规, 规范]`
+  - `"rm -rf 怎么恢复"` → `[怎么, 么恢, 恢复]`（`rm` 成词，单字 `f` 被丢弃）
+- **入库与查询同口径**：FTS 表里存的是 `strings.Join(Terms(text), " ")`，
+  MATCH 查询也用 `Terms(提问)`——保证两边词元集合一致，这是中文可命中的关键。
+- 固有局限：二元组有歧义（"提交规范"切出的"交规"也是"交通规定"的词元）；
+  不处理同义词（"删除"与"rm"互不知道对方）。这是零依赖取舍，见 17.9。
+
+### 17.3 关键词通道：FTS5 + BM25
+
+**索引结构**（`internal/index/db.go`）：
+
+```sql
+CREATE TABLE entries(filename PK, title, type, tags, summary, body,
+                     mandatory, mtime);              -- 原文
+CREATE VIRTUAL TABLE entries_fts USING fts5(
+    title, tags, summary, body, filename UNINDEXED); -- 切分后文本，独立维护
+CREATE TABLE vectors(filename PK, dim, blob);        -- float32 小端
+```
+
+FTS 表为**独立内容表**（非 external-content + 触发器），由 Sync 显式
+delete+insert 维护——换来的是对切分预处理的完全控制。
+
+**查询构造**（`query.go`）：
+
+```
+MATCH 串 = Terms(提问) 每个词元双引号包裹后用 " OR " 连接
+SELECT e.filename, e.title, e.type, e.body,
+       bm25(entries_fts, 10.0, 8.0, 3.0, 1.0) AS rank
+FROM entries_fts f JOIN entries e ON e.filename = f.filename
+WHERE entries_fts MATCH ? AND e.mandatory = 0
+```
+
+- **列权重 10 / 8 / 3 / 1**（title / tags / summary / body）：标题信号最强，
+  tags 次之，正文最弱（长文本噪音多）。
+- **BM25 相对旧方案（命中计数 +3/+2/+1）的三处修正**：
+  1. **IDF**：稀有词权重高——"sqlite"命中比"配置"命中更值钱；
+  2. **词频饱和**：一个词重复出现收益递减，防刷屏；
+  3. **长度归一**：长 summary/body 不再天然占优。
+- **归一化**：SQLite 的 `bm25()` 返回**负值**（越小越好），取 `kw = -rank`
+  后用 `kw/(kw+6)` 压缩到 [0,1)——与余弦同量纲，α/β 才有真实意义。
+
+### 17.4 语义通道：向量余弦
+
+- **写入**：条目向量 = `Embed(标题+摘要+正文)`（OpenAI 兼容接口），float32
+  小端 blob 存 `vectors` 表；mtime 未变的条目不重算（增量），缺向量的
+  未变化条目在有 key 时补齐（backfill）。
+- **查询**：`queryVec` 与全量向量逐条算余弦（万条约 60MB 内存、毫秒级），
+  维度不匹配返回 0（换模型未重建时静默降级而不是崩）。
+- **成本边界**：hook 路径每次最多为**提问**算 1 次 embedding（5s 超时），
+  条目向量只在同步时算。
+
+### 17.5 混合打分与排序
+
+```
+score = α · normBM25 + β · cosine        （α、β 默认 1.0，项目可调）
+```
+
+过滤与排序（严格确定顺序）：
+
+1. `mandatory = 0`（mandatory 条目已在每会话首次的基础注入中）
+2. `score > 0`（零分不注入）
+3. 分数降序；同分按标题升序（结果可复现）
+4. 截 `top_n`（默认 3）；注入文本再按 `inject.max_tokens` 预算截断
+
+**打分实例**（提问"git 提交规范"，条目《Git 提交规范》tags:[git]）：
+
+- 词元：`git, 提交, 交规, 规范`
+- BM25：title 全命中 + tag 命中 → kw≈7.4 → 归一 ≈0.55
+- 余弦（假设语义高度相关）≈0.8
+- **score = 1.0×0.55 + 1.0×0.8 = 1.35**；对照纯噪音条目 score=0 被过滤
+
+### 17.6 同步算法（热路径性能来源）
+
+`Sync` 每次 hook prompt 都会执行，其设计决定了每次提问的延迟：
+
+```
+os.ReadDir(knowledge/)                # 只拿文件名，不读内容
+  ├─ DirEntry.Info()                  # Windows 下复用 readdir 数据，零额外系统调用
+  ├─ 与 entries 表 filename+mtime 对比
+  ├─ 新增/变化 → 仅这些文件 ReadFile+Parse+upsert(+重算向量)
+  ├─ 已删除 → 连带清理 entries/fts/vectors
+  └─ 有变化才重写 INDEX.md（缺失时必写）
+```
+
+- **单事务**：三表写入在一个 tx 内，失败整体回滚，不会出现半同步状态。
+- **坏文件容错**：变化文件解析失败 → 跳过该文件（旧索引行保留），其余
+  照常提交，提交后返回 `*CorruptEntriesError` 警告（`errors.As` 区分）；
+  SQL 失败等致命错误才回滚。
+- **复杂度**：热路径 = 1 次目录枚举 + N 次元数据对比（内存），
+  与条目正文大小无关。
+
+### 17.7 降级矩阵
+
+| 场景 | 行为 |
+|------|------|
+| 未配置 embedding key | 纯关键词检索（`queryVec=nil`），一切正常 |
+| embedding API 超时/挂掉 | 同步先失败 → `Sync(nil)` 重试 → 关键词检索；注入不缺席 |
+| 条目缺向量（未 index） | 该条目语义分为 0，仍可被关键词命中 |
+| 切换 embedding 模型未重建 | 维度不匹配余弦为 0；需删 kb.db 后 `ok index` |
+| 单个条目文件损坏 | 跳过并保留其旧索引（`CorruptEntriesError` 警告），其余正常 |
+| kb.db 损坏/丢失 | hook 记 ok.log 后 exit 0（fail-open）；`ok index` 可重建 |
+
+### 17.8 实测性能（本机，1 万条目）
+
+| 路径 | 耗时 | 说明 |
+|------|------|------|
+| 首次全量同步 | 9.8s | 一次性（含 1 万次解析与入库） |
+| **hook 热路径** | **36ms** | Open + 增量同步(8ms) + 查询(27ms) |
+| 旧方案（逐文件扫描） | ≥1.1s | 每次提问全量读取+解析，已退役 |
+
+热路径由"目录枚举 + 内存 diff"构成，与正文大小无关；万级到 5 万级
+预计仍在 100ms 量级。embedding API 调用（200-500ms）是另一笔网络开销，
+与检索无关且失败自动降级。
+
+### 17.9 已知局限与演进方向
+
+- **无同义词/查询改写**："删除文件"与"rm"不互相召回 → 可在 Terms 层加
+  静态映射表，或查询时并行两路改写
+- **二元组歧义**："交规"误配 → 引入更小颗粒度的字典分词（会带依赖）
+- **列权重与 k=6 归一常量为硬编码**：数据量大后可按命中率回归调参
+- **提问向量无缓存**：连续相似提问重复调 API → 可加短 TTL 缓存
+- **无反馈调权**：不记录"哪些条目被注入后真正有用" → 需要埋点，属 v2 议题
+
+---
+
+## 18. 配置参数参考
+
+所有可调参数一览。合并规则：**内置默认 ← 全局 ← 项目**（后者覆盖前者）。
+
+### 18.1 全局配置 `~/.openknowledge/config.toml`
+
+| 参数 | 默认 | 作用与调优 |
+|------|------|-----------|
+| `embedding.base_url` | `https://api.openai.com/v1` | 任何 OpenAI 兼容端点（OpenAI/硅基流动/Ollama 等） |
+| `embedding.api_key` | 空 | 直接存 key（0600）；与 `api_key_env` 二选一，字段优先 |
+| `embedding.api_key_env` | 空 | 或指向环境变量名（如 `OPENAI_API_KEY`），不落明文 |
+| `embedding.model` | `text-embedding-3-small` | 换模型后必须删 kb.db 再 `ok index` |
+| `embedding.timeout_sec` | `5` | 必须小于 hook 配置的 10s，保证 prompt hook 不超时 |
+| `inject.max_tokens` | `1500` | 单次注入预算（字符数÷2 估算）；mandatory 多/条目长则调大 |
+| `retrieve.alpha` | `1.0` | 关键词分权重。术语精确的场景（错误码、命令名）可调大 |
+| `retrieve.beta` | `1.0` | 语义分权重。问法多变的场景可调大（前提是 embedding 质量好） |
+| `retrieve.top_n` | `3` | 每次最多注入条数；调大注意挤占 `max_tokens` 预算 |
+
+### 18.2 项目配置 `~/.openknowledge/projects/<名>/config.toml`
+
+可覆盖以上全部参数（`[[enforce]]` 仅项目级）：
+
+| 参数 | 说明 |
+|------|------|
+| `[[enforce]].type` | 规则类型，v1 仅 `changelog_required` |
+| `[[enforce]].code_globs` | "算改代码"的 glob 列表。**一律小写**；doublestar 语法，`**/*.go` 可匹配根目录文件 |
+| `[[enforce]].changelog_glob` | "算写日志"的 glob，如 `docs/changelogs/**` |
+| `[[enforce]].message` | 阻断时输出给 AI 的提示（会进入模型上下文，写清楚要做什么） |
+
+### 18.3 环境变量
+
+| 变量 | 作用 |
+|------|------|
+| `OK_HOME` | KB 根目录（默认 `~/.openknowledge`）；测试隔离也用它 |
+| `KIMI_CODE_HOME` | kimi 配置目录（`ok setup` 写 hooks 时定位 config.toml） |
+| `OK_SKILLS_HOME` | 技能安装目录（默认 `~/.agents/skills`） |
+| `api_key_env` 指向的变量 | embedding key 的环境变量通道（如 `OPENAI_API_KEY`） |
+
+### 18.4 hooks 配置（`~/.kimi-code/config.toml`，由 `ok setup` 维护）
+
+| 字段 | 当前值 | 说明 |
+|------|--------|------|
+| `event` | `UserPromptSubmit` / `PostToolUse` / `Stop` | 三个注入/追踪/强制时机 |
+| `matcher` | 仅 PostToolUse 用 `"Write\|Edit"` | 工具名正则过滤 |
+| `command` | `"<exe> hook prompt\|post-tool\|stop"` | `ok setup` 烧入绝对路径 |
+| `timeout` | `10` / `5` / `5` 秒 | prompt 必须 > `embedding.timeout_sec`（默认 5），否则慢 API 会被 kimi 强杀 |
+
+### 18.5 合并与解析顺序速查
+
+```
+配置值：  内置默认  ←  ~/.openknowledge/config.toml  ←  项目 config.toml
+API key： 项目 api_key → 全局 api_key → api_key_env 环境变量 → 无(纯关键词)
+开关：    ~/.openknowledge/hooks-disabled 存在 = 全静默（ok on 恢复）
+```
