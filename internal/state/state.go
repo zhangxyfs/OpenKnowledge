@@ -9,10 +9,12 @@ import (
 )
 
 type Session struct {
-	SessionID    string   `json:"session_id"`
-	Touched      []string `json:"touched"`
-	BlockedRules []string `json:"blocked_rules"`
-	BaseInjected bool     `json:"base_injected"`
+	SessionID           string   `json:"session_id"`
+	Touched             []string `json:"touched"`
+	BlockedRules        []string `json:"blocked_rules"`
+	BaseInjected        bool     `json:"base_injected"`
+	StopCount           int      `json:"stop_count"`
+	LastExtractReminder int      `json:"last_extract_reminder"`
 }
 
 func fileName(sessionID string) string {

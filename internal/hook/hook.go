@@ -243,10 +243,27 @@ func HandleStop(r io.Reader, stderr io.Writer) int {
 	if err != nil {
 		return 0
 	}
-	if len(pc.Config.Enforce) == 0 {
+	// 无 enforce 规则且非 auto 自省模式：无需加载状态，直接放行
+	if len(pc.Config.Enforce) == 0 && pc.Config.Capture.Mode != "auto" {
 		return 0
 	}
 	st := state.Load(pc.Store.StateDir(), ev.SessionID)
+	// auto 自省模式：有文件修改且距上次提醒满 turn_interval 回合 → 阻断一次。
+	// 周期性提醒，不进 BlockedRules；先于 enforce 评估触发。
+	st.StopCount++
+	interval := pc.Config.Capture.TurnInterval
+	if interval <= 0 {
+		interval = 1
+	}
+	if pc.Config.Capture.Mode == "auto" && len(st.Touched) > 0 &&
+		st.StopCount-st.LastExtractReminder >= interval {
+		st.LastExtractReminder = st.StopCount
+		if err := st.Save(pc.Store.StateDir()); err != nil {
+			logErr("stop save state: %v", err)
+		}
+		fmt.Fprintln(stderr, "本会话修改过文件。请回顾是否有值得记录的经验（非显而易见的坑或解法），有则立即运行 ok propose 记录草稿条目；没有则继续。")
+		return 2
+	}
 	for _, rule := range pc.Config.Enforce {
 		if rule.Type != "changelog_required" {
 			continue
@@ -259,6 +276,10 @@ func HandleStop(r io.Reader, stderr io.Writer) int {
 			fmt.Fprintln(stderr, reason)
 			return 2
 		}
+	}
+	// 未阻断也要持久化 StopCount
+	if err := st.Save(pc.Store.StateDir()); err != nil {
+		logErr("stop save state: %v", err)
 	}
 	return 0
 }

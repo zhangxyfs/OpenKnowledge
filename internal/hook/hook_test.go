@@ -245,6 +245,109 @@ func TestStopWithoutEnforceRulesPass(t *testing.T) {
 	}
 }
 
+// writeCaptureConfig 写入只含 [capture] 的配置（无 [[enforce]]）。
+func writeCaptureConfig(t *testing.T, kbRoot, mode string, interval int) {
+	t.Helper()
+	cfg := fmt.Sprintf("[capture]\nmode = %q\nturn_interval = %d\n", mode, interval)
+	if err := os.WriteFile(filepath.Join(kbRoot, "config.toml"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func touchGoFile(t *testing.T, projDir, sessionID string) {
+	t.Helper()
+	codeFile := filepath.Join(projDir, "main.go")
+	post := fmt.Sprintf(`{"hook_event_name":"PostToolUse","session_id":%q,"cwd":%q,"tool_name":"Write","tool_input":{"path":%q}}`, sessionID, projDir, codeFile)
+	if code := HandlePostTool(strings.NewReader(post)); code != 0 {
+		t.Fatalf("post-tool exit %d", code)
+	}
+}
+
+func stopOnce(t *testing.T, projDir, sessionID string) (int, string) {
+	t.Helper()
+	stop := fmt.Sprintf(`{"hook_event_name":"Stop","session_id":%q,"cwd":%q}`, sessionID, projDir)
+	var stderr bytes.Buffer
+	code := HandleStop(strings.NewReader(stop), &stderr)
+	return code, stderr.String()
+}
+
+func TestStopAutoCaptureRemindsOnInterval(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	writeCaptureConfig(t, kbRoot, "auto", 2)
+	touchGoFile(t, projDir, "s1")
+	// 第 1 回合：间隔未满 → 放行
+	if code, out := stopOnce(t, projDir, "s1"); code != 0 {
+		t.Fatalf("stop 1: expected 0, got %d (%q)", code, out)
+	}
+	// 第 2 回合：间隔满 → 阻断并提示 ok propose
+	code, out := stopOnce(t, projDir, "s1")
+	if code != 2 {
+		t.Fatalf("stop 2: expected 2, got %d (%q)", code, out)
+	}
+	if !strings.Contains(out, "ok propose") {
+		t.Fatalf("stop 2: missing propose hint: %q", out)
+	}
+	// 提醒后计数重置：第 3 回合放行，第 4 回合再次提醒
+	if code, out := stopOnce(t, projDir, "s1"); code != 0 {
+		t.Fatalf("stop 3: expected 0 after reminder reset, got %d (%q)", code, out)
+	}
+	if code, out := stopOnce(t, projDir, "s1"); code != 2 {
+		t.Fatalf("stop 4: expected 2 on next interval, got %d (%q)", code, out)
+	}
+}
+
+func TestStopAutoCaptureRequiresTouched(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	writeCaptureConfig(t, kbRoot, "auto", 1)
+	// 无文件修改：即使间隔为 1 也不提醒
+	for i := 0; i < 3; i++ {
+		if code, out := stopOnce(t, projDir, "s1"); code != 0 {
+			t.Fatalf("stop %d: expected 0 without touched files, got %d (%q)", i+1, code, out)
+		}
+	}
+}
+
+func TestStopProposeModeNeverReminds(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	writeCaptureConfig(t, kbRoot, "propose", 1)
+	touchGoFile(t, projDir, "s1")
+	for i := 0; i < 3; i++ {
+		if code, out := stopOnce(t, projDir, "s1"); code != 0 {
+			t.Fatalf("stop %d: propose mode must not remind, got %d (%q)", i+1, code, out)
+		}
+	}
+}
+
+func TestStopAutoTurnIntervalZeroMeansEveryStop(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	writeCaptureConfig(t, kbRoot, "auto", 0)
+	touchGoFile(t, projDir, "s1")
+	// turn_interval <= 0 视为 1：每回合都提醒
+	for i := 0; i < 2; i++ {
+		code, out := stopOnce(t, projDir, "s1")
+		if code != 2 {
+			t.Fatalf("stop %d: expected 2 with interval 0, got %d (%q)", i+1, code, out)
+		}
+		if !strings.Contains(out, "ok propose") {
+			t.Fatalf("stop %d: missing propose hint: %q", i+1, out)
+		}
+	}
+}
+
+func TestStopAutoCaptureWorksWithoutEnforce(t *testing.T) {
+	// 回归：无 [[enforce]] 时 auto 自省仍须生效（enforce 提前 return 不得跳过 auto 分支）
+	projDir, kbRoot := setupProject(t)
+	writeCaptureConfig(t, kbRoot, "auto", 1)
+	touchGoFile(t, projDir, "s1")
+	code, out := stopOnce(t, projDir, "s1")
+	if code != 2 {
+		t.Fatalf("expected 2 without enforce rules, got %d (%q)", code, out)
+	}
+	if !strings.Contains(out, "ok propose") {
+		t.Fatalf("missing propose hint: %q", out)
+	}
+}
+
 func TestHooksDisabledStopsAll(t *testing.T) {
 	projDir, kbRoot := setupProject(t)
 	cfg := `
