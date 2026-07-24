@@ -8,7 +8,8 @@
     project: "",
     entries: [],
     editingFile: null, // null=新建；否则为正在编辑的条目 file（只读模式也用同一表单）
-    readOnly: false
+    readOnly: false,
+    hitFiles: null // 搜索命中的条目 file 集合；null 表示无搜索高亮
   };
 
   // ---------- 工具 ----------
@@ -121,8 +122,16 @@
     var tbody = $("entries-body");
     tbody.innerHTML = "";
     $("entries-empty").classList.toggle("hidden", state.entries.length > 0);
-    state.entries.forEach(function (e) {
+    var list = state.entries;
+    if (state.hitFiles) {
+      // 命中条目置顶（保持各组内原有顺序）
+      list = state.entries.slice().sort(function (a, b) {
+        return (state.hitFiles[b.file] ? 1 : 0) - (state.hitFiles[a.file] ? 1 : 0);
+      });
+    }
+    list.forEach(function (e) {
       var tr = document.createElement("tr");
+      if (state.hitFiles && state.hitFiles[e.file]) tr.classList.add("hit-row");
       tr.innerHTML =
         "<td>" + esc(e.title) + "</td>" +
         "<td>" + esc(e.type) + "</td>" +
@@ -149,6 +158,7 @@
   // ---------- 管理页：搜索（300ms 防抖） ----------
 
   var searchTimer = null;
+  var searchSeq = 0; // 单调递增请求序号，用于丢弃过期响应
   $("search-input").addEventListener("input", function () {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(runSearch, 300);
@@ -157,13 +167,18 @@
   function runSearch() {
     var q = $("search-input").value.trim();
     var box = $("search-results");
+    var seq = ++searchSeq;
     if (!q || !state.project) {
       box.classList.add("hidden");
       box.innerHTML = "";
+      state.hitFiles = null;
+      renderEntries();
       return;
     }
     api("/api/search?project=" + encodeURIComponent(state.project) +
         "&q=" + encodeURIComponent(q)).then(function (hits) {
+      // 竞态防护：响应到达时若已有更新的请求或输入已被清空/修改，丢弃本次结果
+      if (seq !== searchSeq || $("search-input").value.trim() !== q) return;
       if (!hits || hits.length === 0) {
         box.innerHTML = '<span class="muted">无匹配结果</span>';
       } else {
@@ -173,6 +188,11 @@
         }).join("");
       }
       box.classList.remove("hidden");
+      // 命中条目在表格中高亮并置顶
+      var files = {};
+      (hits || []).forEach(function (h) { files[h.file] = true; });
+      state.hitFiles = files;
+      renderEntries();
     }).catch(function (err) { showError(err.message); });
   }
 
@@ -306,13 +326,14 @@
 
   // ---------- 心跳与退出 ----------
 
-  setInterval(function () {
+  var heartbeatTimer = setInterval(function () {
     api("/api/heartbeat", { method: "POST" }).catch(function () { /* 心跳失败不打扰用户 */ });
   }, 5000);
 
   $("btn-shutdown").addEventListener("click", function () {
     if (!confirm("确定退出 GUI 服务？")) return;
     api("/api/shutdown", { method: "POST" }).then(function () {
+      clearInterval(heartbeatTimer);
       document.body.innerHTML =
         '<div class="shutdown-note">服务已退出，可关闭本页</div>';
     }).catch(function (err) { showError(err.message); });

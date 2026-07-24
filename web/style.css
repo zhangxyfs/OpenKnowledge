@@ -171,6 +171,7 @@ input:focus, select:focus, textarea:focus {
 
 .entries th { background: #f0f1f4; font-weight: 600; white-space: nowrap; }
 .entries tr:last-child td { border-bottom: none; }
+.entries tr.hit-row td { background: #fef9c3; }
 .entries td:nth-child(5) { max-width: 320px; }
 
 .ops { white-space: nowrap; }
