@@ -397,6 +397,18 @@
       .catch(function (err) { showError(err.message); });
   });
 
+  $("btn-uninstall").addEventListener("click", function () {
+    if (!confirm("确认卸载？将移除 hooks 配置、技能与全局 embedding 配置。\n知识库数据（条目、索引、注册表）全部保留。")) return;
+    api("/api/uninstall", { method: "POST" })
+      .then(function (r) {
+        showError("已卸载：hooks " + (r.hooks_removed ? "已移除" : "无") +
+          "，技能移除 " + r.skills_removed + " 个，embedding " +
+          (r.embedding_removed ? "已移除" : "无") + "。知识库数据已保留。");
+        refreshStatus();
+      })
+      .catch(function (err) { showError(err.message); });
+  });
+
   // ---------- 心跳与退出 ----------
 
   var heartbeatTimer = setInterval(function () {

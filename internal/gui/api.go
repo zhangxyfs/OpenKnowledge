@@ -56,6 +56,7 @@ func NewHandler(webDir, token string, beats chan<- struct{}) *Handler {
 	api("POST /api/capture", h.apiCaptureSet)
 	api("POST /api/heartbeat", h.apiHeartbeat)
 	api("POST /api/shutdown", h.apiShutdown)
+	api("POST /api/uninstall", h.apiUninstall)
 	api("POST /api/setup/hooks", h.apiSetupHooks)
 	api("POST /api/setup/skills", h.apiSetupSkills)
 	api("POST /api/setup/embedding", h.apiSetupEmbedding)
@@ -658,6 +659,21 @@ func (h *Handler) apiHeartbeat(w http.ResponseWriter, _ *http.Request) {
 func (h *Handler) apiShutdown(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	h.doneOnce.Do(func() { close(h.done) })
+}
+
+// apiUninstall 卸载集成部分（hooks 配置、技能、全局 embedding），KB 数据保留。
+func (h *Handler) apiUninstall(w http.ResponseWriter, _ *http.Request) {
+	r, err := setupx.Uninstall()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":                true,
+		"hooks_removed":     r.HooksRemoved,
+		"skills_removed":    r.SkillsRemoved,
+		"embedding_removed": r.EmbeddingRemoved,
+	})
 }
 
 // ---------- 安装与配置 ----------

@@ -51,46 +51,51 @@
     <section id="page-guide" class="page hidden">
       <div class="cards">
         <div class="card">
-          <h3>hooks 配置</h3>
-          <span id="badge-hooks" class="badge badge-off">未配置</span>
-          <button id="btn-hooks" type="button" class="btn">写入 hooks 配置</button>
+          <div class="card-head"><h3>hooks 配置</h3><span id="badge-hooks" class="badge badge-off">未配置</span></div>
+          <p class="card-desc muted">把 3 条 hook 写入 kimi 配置，知识注入与强制检查的入口。</p>
+          <div class="card-actions"><button id="btn-hooks" type="button" class="btn">写入 hooks 配置</button></div>
         </div>
         <div class="card">
-          <h3>技能</h3>
-          <span id="badge-skills" class="badge badge-off">未配置</span>
-          <button id="btn-skills" type="button" class="btn">安装技能</button>
+          <div class="card-head"><h3>技能</h3><span id="badge-skills" class="badge badge-off">未配置</span></div>
+          <p class="card-desc muted">5 个 kimi 技能：init / on / off / propose / capture。</p>
+          <div class="card-actions"><button id="btn-skills" type="button" class="btn">安装技能</button></div>
         </div>
         <div class="card">
-          <h3>embedding</h3>
-          <span id="badge-embedding" class="badge badge-off">未配置</span>
+          <div class="card-head"><h3>全局开关</h3><span id="badge-toggle" class="badge badge-on">已开启</span></div>
+          <p class="card-desc muted">一键启停全部 hooks，关闭期间完全静默。</p>
+          <div class="card-actions"><button id="btn-toggle" type="button" class="btn">关闭</button></div>
+        </div>
+        <div class="card card-wide">
+          <div class="card-head"><h3>embedding 语义检索</h3><span id="badge-embedding" class="badge badge-off">未配置</span></div>
+          <p class="card-desc muted">OpenAI 兼容服务（注意：DeepSeek 无 embedding 接口，会报 404）。</p>
           <div class="embedding-form">
-            <input id="emb-base-url" type="text" placeholder="base_url（默认 OpenAI）">
-            <input id="emb-model" type="text" placeholder="model（默认 text-embedding-3-small）">
-            <input id="emb-api-key" type="password" placeholder="api_key" autocomplete="off">
-            <button id="btn-embedding" type="button" class="btn">保存并测试</button>
+            <div class="form-row">
+              <input id="emb-base-url" type="text" placeholder="base_url（默认 OpenAI）">
+              <input id="emb-model" type="text" placeholder="model（默认 text-embedding-3-small）">
+              <input id="emb-api-key" type="password" placeholder="api_key" autocomplete="off">
+              <button id="btn-embedding" type="button" class="btn">保存并测试</button>
+            </div>
             <p id="emb-result" class="muted"></p>
           </div>
         </div>
-        <div class="card">
-          <h3>全局开关</h3>
-          <span id="badge-toggle" class="badge badge-on">已开启</span>
-          <button id="btn-toggle" type="button" class="btn">关闭</button>
-        </div>
-        <div class="card">
-          <h3>经验沉淀</h3>
-          <p id="capture-status" class="muted">当前模式：…</p>
-          <p id="capture-mode-note" class="muted"></p>
-          <div class="capture-actions">
+        <div class="card card-wide">
+          <div class="card-head"><h3>经验沉淀</h3></div>
+          <p id="capture-status" class="card-desc muted">当前模式：…</p>
+          <p id="capture-mode-note" class="card-desc muted"></p>
+          <div class="card-actions">
             <button id="btn-capture-propose" type="button" class="btn">AI 提议（默认）</button>
             <button id="btn-capture-auto" type="button" class="btn">Stop 自动提取</button>
+            <span class="form-inline">
+              <label for="capture-interval">轮次间隔（auto 生效）</label>
+              <input id="capture-interval" type="number" min="1" max="100" value="5">
+              <button id="btn-capture-interval" type="button" class="btn">保存</button>
+            </span>
           </div>
-          <div class="capture-actions">
-            <label for="capture-interval">轮次间隔（auto 模式生效）：</label>
-            <input id="capture-interval" type="number" min="1" max="100" value="5" style="width:4em">
-            <button id="btn-capture-interval" type="button" class="btn">保存</button>
-          </div>
-          <p class="muted">AI 提议：AI 觉得值得记录时主动记为草稿，无轮次限制，由人批准（采纳）后入库。
-            Stop 自动提取：每隔指定轮次，回合结束时强制 AI 自省本轮经验并记为草稿。</p>
+        </div>
+        <div class="card card-danger">
+          <div class="card-head"><h3>卸载</h3></div>
+          <p class="card-desc muted">移除 hooks 配置、技能与全局 embedding 配置；<strong>知识库数据（条目、索引、注册表）全部保留</strong>，重装即恢复。</p>
+          <div class="card-actions"><button id="btn-uninstall" type="button" class="btn btn-danger">卸载集成</button></div>
         </div>
       </div>
       <div class="guide-text">

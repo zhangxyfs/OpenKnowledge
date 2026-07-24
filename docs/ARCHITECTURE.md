@@ -279,8 +279,9 @@ API 一览：
 | POST | `/api/toggle` | `{"on":bool}` 全局开关（等价 `ok on`/`ok off`） |
 | POST | `/api/heartbeat` | 页面心跳（204） |
 | POST | `/api/shutdown` | 停服 |
+| POST | `/api/uninstall` | 卸载集成：移除 hooks 标记块、技能目录、全局 [embedding]；KB 数据保留（`setupx.Uninstall`） |
 
-前端 `web/`（零依赖原生 HTML/JS/CSS）：「管理」标签页（项目/条目列表、新建/编辑/删除、检索预览带命中高亮、草稿条目带「草稿」徽标与「采纳」按钮、全局开关）+「引导」标签页（hooks/技能/embedding 三步一键完成、「经验沉淀」卡片查看/切换 capture 模式）。hooks 未安装时「管理」页隐藏，「引导」为默认页。
+前端 `web/`（零依赖原生 HTML/JS/CSS）：「管理」标签页（项目/条目列表、新建/编辑/删除、检索预览带命中高亮、草稿条目带「草稿」徽标与「采纳」按钮、全局开关）+「引导」标签页（hooks/技能/embedding/全局开关状态卡、「经验沉淀」卡片查看/切换 capture 模式与轮次间隔、危险区「卸载」卡片）。hooks 未安装时「管理」页隐藏，「引导」为默认页。
 
 ---
 

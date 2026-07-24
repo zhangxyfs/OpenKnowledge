@@ -189,22 +189,69 @@ input:focus, select:focus, textarea:focus {
 
 .cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
 }
 
 .card {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 16px;
+  padding: 14px 16px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  align-items: flex-start;
+  gap: 8px;
+}
+
+.card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
 .card h3 { margin: 0; font-size: 15px; }
+
+.card-desc { margin: 0; font-size: 13px; line-height: 1.5; }
+
+.card-actions {
+  margin-top: auto;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  padding-top: 4px;
+}
+
+.card-wide { grid-column: span 2; }
+
+.card-danger { border-color: #e5b4b4; background: #fdf7f7; }
+
+.btn-danger {
+  border-color: #dc2626;
+  color: #dc2626;
+  background: #fff;
+}
+.btn-danger:hover { background: #dc2626; color: #fff; }
+
+.form-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.form-row input[type="text"],
+.form-row input[type="password"] {
+  flex: 1;
+  min-width: 0;
+}
+
+.form-inline {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 13px;
+  color: #666;
+}
+.form-inline input[type="number"] { width: 4em; }
 
 .badge {
   display: inline-block;
@@ -223,7 +270,12 @@ input:focus, select:focus, textarea:focus {
 
 .embedding-form { display: flex; flex-direction: column; gap: 8px; width: 100%; }
 .embedding-form .btn { align-self: flex-start; }
-.embedding-form p { margin: 0; }
+.embedding-form p { margin: 0; word-break: break-all; }
+
+@media (max-width: 720px) {
+  .cards { grid-template-columns: 1fr; }
+  .card-wide { grid-column: span 1; }
+}
 
 .guide-text {
   margin-top: 24px;
