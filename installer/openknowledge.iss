@@ -1,0 +1,114 @@
+; OpenKnowledge 安装程序脚本（Inno Setup 6/7）
+; 构建：bash scripts/build-installer.sh（先构建 dist/ 再调用 ISCC）
+
+#define AppName "OpenKnowledge"
+#define AppVersion "2.1.0"
+#define AppPublisher "OpenKnowledge"
+
+[Setup]
+AppId={{9F4C3A2E-7B1D-4A5F-9E2C-6D8B1A3F5E70}
+AppName={#AppName}
+AppVersion={#AppVersion}
+AppPublisher={#AppPublisher}
+DefaultDirName={localappdata}\Programs\OpenKnowledge
+DefaultGroupName=OpenKnowledge
+PrivilegesRequired=lowest
+PrivilegesRequiredOverridesAllowed=dialog
+OutputDir=output
+OutputBaseFilename=OpenKnowledgeSetup-{#AppVersion}
+Compression=lzma2
+SolidCompression=yes
+WizardStyle=modern
+UninstallDisplayName={#AppName} 知识库
+; 数据目录 ~/.openknowledge 由程序运行时创建，卸载默认保留（见 [Code]）
+
+[Languages]
+Name: "chinesesimplified"; MessagesFile: "lang\ChineseSimplified.isl"
+Name: "english"; MessagesFile: "compiler:Default.isl"
+
+[Tasks]
+Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加任务："
+Name: "addpath"; Description: "将安装目录加入用户 PATH（终端可直接使用 ok 命令）"; GroupDescription: "附加任务："; Flags: unchecked
+
+[Files]
+Source: "..\dist\ok.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dist\web\*"; DestDir: "{app}\web"; Flags: ignoreversion recursesubdirs
+
+[Icons]
+Name: "{group}\OpenKnowledge 知识库"; Filename: "{app}\ok.exe"; Comment: "打开 OpenKnowledge 管理界面"
+Name: "{group}\卸载 OpenKnowledge"; Filename: "{uninstallexe}"
+Name: "{autodesktop}\OpenKnowledge 知识库"; Filename: "{app}\ok.exe"; Tasks: desktopicon
+
+[Run]
+Filename: "{app}\ok.exe"; Parameters: "setup"; Description: "运行首次引导（写入 hooks 配置、安装技能、配置 embedding）"; Flags: postinstall skipifsilent unchecked
+
+[Code]
+const
+  EnvKey = 'Environment';
+
+function PathContains(const Path, Dir: string): Boolean;
+begin
+  Result := Pos(';' + Uppercase(Dir) + ';', ';' + Uppercase(Path) + ';') > 0;
+end;
+
+procedure AddToUserPath(const Dir: string);
+var
+  Path: string;
+begin
+  if not RegQueryStringValue(HKCU, EnvKey, 'Path', Path) then
+    Path := '';
+  if not PathContains(Path, Dir) then
+  begin
+    if (Path <> '') and (Path[Length(Path)] <> ';') then
+      Path := Path + ';';
+    Path := Path + Dir;
+    RegWriteStringValue(HKCU, EnvKey, 'Path', Path);
+  end;
+end;
+
+procedure RemoveFromUserPath(const Dir: string);
+var
+  Path, UpperDir, UpperPath: string;
+  P: Integer;
+begin
+  if not RegQueryStringValue(HKCU, EnvKey, 'Path', Path) then
+    exit;
+  UpperDir := Uppercase(Dir);
+  UpperPath := Uppercase(Path);
+  P := Pos(';' + UpperDir + ';', ';' + UpperPath + ';');
+  while P > 0 do
+  begin
+    Delete(Path, P, Length(Dir) + 1);
+    if (P <= Length(Path)) and (Path[P] = ';') then
+      Delete(Path, P, 1);
+    UpperPath := Uppercase(Path);
+    P := Pos(';' + UpperDir + ';', ';' + UpperPath + ';');
+  end;
+  RegWriteStringValue(HKCU, EnvKey, 'Path', Path);
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if (CurStep = ssPostInstall) and WizardIsTaskSelected('addpath') then
+    AddToUserPath(ExpandConstant('{app}'));
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  DataDir: string;
+begin
+  if CurUninstallStep = usPostUninstall then
+  begin
+    RemoveFromUserPath(ExpandConstant('{app}'));
+    DataDir := ExpandConstant('{userdocs}\..\.openknowledge');
+    { 静默卸载（/VERYSILENT）下绝不删除数据；交互模式才询问 }
+    if (not WizardSilent) and DirExists(DataDir) then
+    begin
+      if MsgBox('是否同时删除知识库数据？' + #13#10 + #13#10 +
+                DataDir + #13#10 +
+                '（包含全部知识条目、索引与配置。选"否"保留，重装后可继续使用。）',
+                mbConfirmation, MB_YESNO) = IDYES then
+        DelTree(DataDir, True, True, True);
+    end;
+  end;
+end;

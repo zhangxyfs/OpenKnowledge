@@ -15,6 +15,16 @@
 
 ## 安装
 
+**方式 A：安装程序（Windows，中文界面）**
+
+```bash
+bash scripts/build-installer.sh   # 产出 installer/output/OpenKnowledgeSetup-<版本>.exe
+```
+
+运行安装包：默认装到 `%LOCALAPPDATA%\Programs\OpenKnowledge`（免管理员），可选桌面快捷方式 / 加入 PATH / 安装后自动运行首次引导。卸载默认保留知识库数据（交互卸载时可选删除，静默卸载一律保留）。
+
+**方式 B：手动构建**
+
 ```bash
 # 1. 构建（Go ≥ 1.25）
 go build -o ok.exe ./cmd/ok        # Windows
