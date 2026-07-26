@@ -42,7 +42,7 @@ Name: "{group}\卸载 OpenKnowledge"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\OpenKnowledge 知识库"; Filename: "{app}\ok.exe"; IconFilename: "{app}\logo.ico"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\ok.exe"; Parameters: "setup"; Description: "运行首次引导（写入 hooks 配置、安装技能、配置 embedding）"; Flags: postinstall skipifsilent unchecked
+Filename: "{app}\ok.exe"; Description: "打开 OpenKnowledge 管理界面（引导页可一键完成 hooks / 技能 / embedding 配置）"; Flags: postinstall skipifsilent unchecked
 
 [Code]
 const
