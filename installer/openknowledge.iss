@@ -11,6 +11,7 @@ AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher={#AppPublisher}
 DefaultDirName={localappdata}\Programs\OpenKnowledge
+UsePreviousAppDir=no
 DefaultGroupName=OpenKnowledge
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
