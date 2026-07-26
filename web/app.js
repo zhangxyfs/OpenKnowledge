@@ -415,20 +415,11 @@
       .catch(function (err) { showError(err.message); });
   });
 
-  // ---------- 心跳与退出 ----------
+  // ---------- 心跳（关闭页面 30s 后服务自动退出） ----------
 
-  var heartbeatTimer = setInterval(function () {
+  setInterval(function () {
     api("/api/heartbeat", { method: "POST" }).catch(function () { /* 心跳失败不打扰用户 */ });
   }, 5000);
-
-  $("btn-shutdown").addEventListener("click", function () {
-    if (!confirm("确定退出 GUI 服务？")) return;
-    api("/api/shutdown", { method: "POST" }).then(function () {
-      clearInterval(heartbeatTimer);
-      document.body.innerHTML =
-        '<div class="shutdown-note">服务已退出，可关闭本页</div>';
-    }).catch(function (err) { showError(err.message); });
-  });
 
   // ---------- 启动 ----------
 

@@ -60,8 +60,6 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
-.brand { font-weight: 700; font-size: 16px; }
-
 .tabs { display: flex; gap: 4px; flex: 1; }
 
 .tab {
@@ -109,7 +107,7 @@ body {
 
 /* ---------- 页面主体 ---------- */
 
-main { padding: 20px; max-width: 1100px; margin: 0 auto; }
+main { padding: 20px 32px; }
 
 .toolbar {
   display: flex;
@@ -343,14 +341,3 @@ input:focus, select:focus, textarea:focus {
 }
 
 .modal-actions { display: flex; gap: 10px; margin-top: 14px; }
-
-/* ---------- 退出提示 ---------- */
-
-.shutdown-note {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 100vh;
-  font-size: 18px;
-  color: var(--muted);
-}
