@@ -202,6 +202,7 @@ type entrySummaryJSON struct {
 	Mandatory bool     `json:"mandatory"`
 	Draft     bool     `json:"draft"`
 	Summary   string   `json:"summary"`
+	Mtime     int64    `json:"mtime"` // 文件修改时间（unix 秒），界面排序/展示用
 }
 
 type entryDetailJSON struct {
@@ -225,6 +226,12 @@ func summaryOf(e *entry.Entry) entrySummaryJSON {
 	if tags == nil {
 		tags = []string{}
 	}
+	var mtime int64
+	if e.Path != "" {
+		if fi, err := os.Stat(e.Path); err == nil {
+			mtime = fi.ModTime().Unix()
+		}
+	}
 	return entrySummaryJSON{
 		File:      e.FileName(),
 		Title:     e.Title,
@@ -233,6 +240,7 @@ func summaryOf(e *entry.Entry) entrySummaryJSON {
 		Mandatory: e.Mandatory,
 		Draft:     e.Draft,
 		Summary:   e.Summary,
+		Mtime:     mtime,
 	}
 }
 

@@ -9,7 +9,8 @@
     entries: [],
     editingFile: null, // null=新建；否则为正在编辑的条目 file（只读模式也用同一表单）
     readOnly: false,
-    hitFiles: null // 搜索命中的条目 file 集合；null 表示无搜索高亮
+    hitFiles: null, // 搜索命中的条目 file 集合；null 表示无搜索高亮
+    typeFilter: "" // "" = 全部；"draft" = 仅草稿；其余按条目类型过滤
   };
 
   // ---------- 工具 ----------
@@ -109,6 +110,11 @@
     refreshCapture();
   });
 
+  $("type-filter").addEventListener("change", function () {
+    state.typeFilter = this.value;
+    renderEntries();
+  });
+
   // ---------- 管理页：条目列表 ----------
 
   function loadEntries() {
@@ -119,21 +125,36 @@
     }).catch(function (err) { showError(err.message); });
   }
 
+  function fmtTime(unix) {
+    if (!unix) return "";
+    var d = new Date(unix * 1000);
+    var p = function (n) { return String(n).padStart(2, "0"); };
+    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) +
+      " " + p(d.getHours()) + ":" + p(d.getMinutes());
+  }
+
   function renderEntries() {
     var tbody = $("entries-body");
     tbody.innerHTML = "";
-    $("entries-empty").classList.toggle("hidden", state.entries.length > 0);
-    var list = state.entries;
-    if (state.hitFiles) {
-      // 命中条目置顶（保持各组内原有顺序）
-      list = state.entries.slice().sort(function (a, b) {
-        return (state.hitFiles[b.file] ? 1 : 0) - (state.hitFiles[a.file] ? 1 : 0);
-      });
-    }
+    // 类型过滤（draft 选项只看草稿）
+    var list = state.entries.filter(function (e) {
+      if (state.typeFilter === "draft") return e.draft;
+      if (state.typeFilter) return e.type === state.typeFilter;
+      return true;
+    });
+    $("entries-empty").classList.toggle("hidden", list.length > 0);
+    // 默认按时间倒序；搜索命中时命中项置顶（组内仍按时间倒序）
+    list = list.slice().sort(function (a, b) {
+      var ha = state.hitFiles && state.hitFiles[a.file] ? 1 : 0;
+      var hb = state.hitFiles && state.hitFiles[b.file] ? 1 : 0;
+      if (ha !== hb) return hb - ha;
+      return (b.mtime || 0) - (a.mtime || 0);
+    });
     list.forEach(function (e) {
       var tr = document.createElement("tr");
       if (state.hitFiles && state.hitFiles[e.file]) tr.classList.add("hit-row");
       tr.innerHTML =
+        '<td class="muted">' + fmtTime(e.mtime) + "</td>" +
         "<td>" + esc(e.title) + (e.draft ? ' <span class="badge badge-draft">草稿</span>' : "") + "</td>" +
         "<td>" + esc(e.type) + "</td>" +
         "<td>" + esc((e.tags || []).join(", ")) + "</td>" +

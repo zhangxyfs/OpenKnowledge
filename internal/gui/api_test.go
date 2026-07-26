@@ -213,18 +213,22 @@ func TestEntryCRUD(t *testing.T) {
 		t.Fatalf("list: status = %d, body %s", code, data)
 	}
 	var list []struct {
-		File     string   `json:"file"`
-		Title    string   `json:"title"`
-		Type     string   `json:"type"`
-		Tags     []string `json:"tags"`
-		Mandatory bool    `json:"mandatory"`
-		Summary  string   `json:"summary"`
+		File      string   `json:"file"`
+		Title     string   `json:"title"`
+		Type      string   `json:"type"`
+		Tags      []string `json:"tags"`
+		Mandatory bool     `json:"mandatory"`
+		Summary   string   `json:"summary"`
+		Mtime     int64    `json:"mtime"`
 	}
 	if err := json.Unmarshal(data, &list); err != nil {
 		t.Fatal(err)
 	}
 	if len(list) != 1 || list[0].File != created.File || list[0].Type != "note" || len(list[0].Tags) != 2 {
 		t.Fatalf("unexpected list: %s", data)
+	}
+	if list[0].Mtime <= 0 {
+		t.Fatalf("list item should carry mtime: %s", data)
 	}
 
 	// 详情
