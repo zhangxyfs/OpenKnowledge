@@ -368,3 +368,29 @@ th.sortable:hover { color: var(--accent, #2563eb); }
   opacity: 0.45;
   cursor: not-allowed;
 }
+
+/* ---------- 布局置底（分页栏等固定到窗口底部） ---------- */
+
+html, body { height: 100%; }
+
+body {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+#page-manage {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.entries-footer {
+  margin-top: auto;
+}

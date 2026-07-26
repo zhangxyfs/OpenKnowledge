@@ -84,15 +84,15 @@ func newToken() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// openBrowser 依次尝试 Edge/Chrome 应用模式（最大化）与默认浏览器；全失败则只打印 URL。
+// openBrowser 以最大化窗口打开 Edge/Chrome 应用模式；失败退回默认浏览器（不保证最大化）。
+// 注：cmd start 会把 --start-maximized 当自家参数吞掉且 Edge 常忽略该 flag，
+// 经 PowerShell Start-Process -WindowStyle Maximized 才可靠。
 func openBrowser(url string) {
-	for _, args := range [][]string{
-		{"/c", "start", "msedge", "--start-maximized", "--app=" + url},
-		{"/c", "start", "chrome", "--start-maximized", "--app=" + url},
-		{"/c", "start", url},
-	} {
-		if err := exec.Command("cmd", args...).Run(); err == nil {
+	for _, browser := range []string{"msedge", "chrome"} {
+		ps := fmt.Sprintf("Start-Process %s -ArgumentList '--app=%s' -WindowStyle Maximized", browser, url)
+		if err := exec.Command("powershell", "-NoProfile", "-Command", ps).Run(); err == nil {
 			return
 		}
 	}
+	_ = exec.Command("cmd", "/c", "start", url).Run()
 }
