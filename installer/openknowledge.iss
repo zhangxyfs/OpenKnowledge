@@ -47,7 +47,32 @@ Filename: "{app}\ok.exe"; Description: "打开 OpenKnowledge 管理界面（引�
 
 [Code]
 const
+  UninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{9F4C3A2E-7B1D-4A5F-9E2C-6D8B1A3F5E70}_is1';
   EnvKey = 'Environment';
+
+{ 升级判定：存在旧安装且旧版本号 ≠ 当前版本号 }
+function IsUpgrade: Boolean;
+var
+  PrevVer: string;
+begin
+  Result := RegQueryStringValue(HKCU, UninstallKey, 'DisplayVersion', PrevVer) and
+            (PrevVer <> '{#AppVersion}');
+end;
+
+{ 有旧安装时预填旧目录（UsePreviousAppDir=no 下由代码接管默认值） }
+procedure InitializeWizard;
+var
+  PrevDir: string;
+begin
+  if RegQueryStringValue(HKCU, UninstallKey, 'InstallLocation', PrevDir) and (PrevDir <> '') then
+    WizardForm.DirEdit.Text := PrevDir;
+end;
+
+{ 升级时跳过目录选择页（静默装进旧目录）；同版本重装/首次安装仍显示 }
+function ShouldSkipPage(PageID: Integer): Boolean;
+begin
+  Result := (PageID = wpSelectDir) and IsUpgrade;
+end;
 
 function PathContains(const Path, Dir: string): Boolean;
 begin
