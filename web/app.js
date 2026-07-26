@@ -10,7 +10,11 @@
     editingFile: null, // null=新建；否则为正在编辑的条目 file（只读模式也用同一表单）
     readOnly: false,
     hitFiles: null, // 搜索命中的条目 file 集合；null 表示无搜索高亮
-    typeFilter: "" // "" = 全部；"draft" = 仅草稿；其余按条目类型过滤
+    typeFilter: "", // "" = 全部；"draft" = 仅草稿；其余按条目类型过滤
+    sortDir: "desc", // 时间排序方向：desc 新→旧 / asc 旧→新
+    page: 1,
+    pageSize: 20,
+    lastVersion: 0 // 最近一次自动刷新见到的 kb.db 版本（mtime）
   };
 
   // ---------- 工具 ----------
@@ -105,6 +109,8 @@
 
   $("project-select").addEventListener("change", function () {
     state.project = this.value;
+    state.page = 1;
+    state.lastVersion = 0;
     loadEntries();
     runSearch();
     refreshCapture();
@@ -112,6 +118,26 @@
 
   $("type-filter").addEventListener("change", function () {
     state.typeFilter = this.value;
+    state.page = 1;
+    renderEntries();
+  });
+
+  $("th-time").addEventListener("click", function () {
+    state.sortDir = state.sortDir === "desc" ? "asc" : "desc";
+    $("time-arrow").textContent = state.sortDir === "desc" ? "↓" : "↑";
+    renderEntries();
+  });
+
+  $("btn-refresh").addEventListener("click", function () {
+    state.lastVersion = 0; // 手动刷新后重新记录版本，避免下一次心跳重复拉取
+    loadEntries();
+  });
+
+  $("btn-prev").addEventListener("click", function () {
+    if (state.page > 1) { state.page--; renderEntries(); }
+  });
+  $("btn-next").addEventListener("click", function () {
+    state.page++;
     renderEntries();
   });
 
@@ -143,14 +169,25 @@
       return true;
     });
     $("entries-empty").classList.toggle("hidden", list.length > 0);
-    // 默认按时间倒序；搜索命中时命中项置顶（组内仍按时间倒序）
+    // 默认按时间排序（方向见 state.sortDir）；搜索命中时命中项置顶（组内仍按时间排）
     list = list.slice().sort(function (a, b) {
       var ha = state.hitFiles && state.hitFiles[a.file] ? 1 : 0;
       var hb = state.hitFiles && state.hitFiles[b.file] ? 1 : 0;
       if (ha !== hb) return hb - ha;
-      return (b.mtime || 0) - (a.mtime || 0);
+      var d = (b.mtime || 0) - (a.mtime || 0);
+      return state.sortDir === "asc" ? -d : d;
     });
-    list.forEach(function (e) {
+    // 分页
+    var total = list.length;
+    var pages = Math.max(1, Math.ceil(total / state.pageSize));
+    if (state.page > pages) state.page = pages;
+    var start = (state.page - 1) * state.pageSize;
+    var pageItems = list.slice(start, start + state.pageSize);
+    $("entries-total").textContent = "共 " + total + " 条";
+    $("entries-page").textContent = "第 " + state.page + " / " + pages + " 页";
+    $("btn-prev").disabled = state.page <= 1;
+    $("btn-next").disabled = state.page >= pages;
+    pageItems.forEach(function (e) {
       var tr = document.createElement("tr");
       if (state.hitFiles && state.hitFiles[e.file]) tr.classList.add("hit-row");
       tr.innerHTML =
@@ -192,6 +229,7 @@
     var q = $("search-input").value.trim();
     var box = $("search-results");
     var seq = ++searchSeq;
+    state.page = 1; // 新搜索回到第一页
     if (!q || !state.project) {
       box.classList.add("hidden");
       box.innerHTML = "";
@@ -439,7 +477,15 @@
   // ---------- 心跳（关闭页面 30s 后服务自动退出） ----------
 
   setInterval(function () {
-    api("/api/heartbeat", { method: "POST" }).catch(function () { /* 心跳失败不打扰用户 */ });
+    // 心跳顺带做"变更才重拉"的自动刷新：版本（kb.db mtime）变化才重载列表
+    var url = "/api/heartbeat" + (state.project ? "?project=" + encodeURIComponent(state.project) : "");
+    api(url, { method: "POST" }).then(function (res) {
+      var v = res && res.version ? res.version : 0;
+      if (state.lastVersion !== 0 && v !== 0 && v !== state.lastVersion) {
+        loadEntries(); // 数据库有变更，自动刷新（仅此时才重拉）
+      }
+      if (v !== 0) state.lastVersion = v;
+    }).catch(function () { /* 心跳失败不打扰用户 */ });
   }, 5000);
 
   // ---------- 启动 ----------

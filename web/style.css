@@ -341,3 +341,30 @@ input:focus, select:focus, textarea:focus {
 }
 
 .modal-actions { display: flex; gap: 10px; margin-top: 14px; }
+
+/* ---------- 排序与分页 ---------- */
+
+th.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+th.sortable:hover { color: var(--accent, #2563eb); }
+
+.entries-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 4px;
+  font-size: 13px;
+}
+
+.entries-footer .pager {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.entries-footer .btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

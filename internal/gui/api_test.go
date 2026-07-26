@@ -535,13 +535,47 @@ func TestHeartbeat(t *testing.T) {
 	defer srv.Close()
 
 	code, _ := do(t, "POST", srv.URL+"/api/heartbeat", testToken, nil)
-	if code != 204 {
+	if code != 200 {
 		t.Fatalf("status = %d", code)
 	}
 	select {
 	case <-beats:
 	default:
 		t.Fatal("heartbeat did not signal beats channel")
+	}
+}
+
+func TestHeartbeatVersion(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	mkProject(t, okHome, "demo")
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	// 无 kb.db 时 version 为 0
+	code, data := do(t, "POST", srv.URL+"/api/heartbeat?project=demo", testToken, nil)
+	if code != 200 {
+		t.Fatalf("status = %d", code)
+	}
+	var res struct {
+		Version int64 `json:"version"`
+	}
+	if err := json.Unmarshal(data, &res); err != nil {
+		t.Fatal(err)
+	}
+	if res.Version != 0 {
+		t.Fatalf("expected version 0 without kb.db, got %d", res.Version)
+	}
+	// 有 kb.db 时返回其 mtime（非 0）
+	kb := filepath.Join(okHome, "projects", "demo", "kb.db")
+	if err := os.WriteFile(kb, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, data = do(t, "POST", srv.URL+"/api/heartbeat?project=demo", testToken, nil)
+	if err := json.Unmarshal(data, &res); err != nil {
+		t.Fatal(err)
+	}
+	if res.Version == 0 {
+		t.Fatal("expected non-zero version with kb.db present")
 	}
 }
 

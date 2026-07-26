@@ -661,12 +661,28 @@ func (h *Handler) apiCaptureSet(w http.ResponseWriter, r *http.Request) {
 
 // ---------- 心跳与停服 ----------
 
-func (h *Handler) apiHeartbeat(w http.ResponseWriter, _ *http.Request) {
+// apiHeartbeat 心跳（驱动看门狗），同时返回指定项目 kb.db 的修改时间作为版本号，
+// 供前端做"变更才重拉"的自动刷新。project 为空或不存在时 version 为 0。
+func (h *Handler) apiHeartbeat(w http.ResponseWriter, r *http.Request) {
 	select {
 	case h.beats <- struct{}{}:
 	default:
 	}
-	w.WriteHeader(http.StatusNoContent)
+	var version int64
+	if name := r.URL.Query().Get("project"); name != "" {
+		if reg, err := registry.Load(registry.DefaultPath()); err == nil {
+			for _, p := range reg.Projects {
+				if p.Name == name {
+					kb := filepath.Join(registry.Home(), "projects", p.Name, "kb.db")
+					if fi, err := os.Stat(kb); err == nil {
+						version = fi.ModTime().UnixNano()
+					}
+					break
+				}
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"version": version})
 }
 
 func (h *Handler) apiShutdown(w http.ResponseWriter, _ *http.Request) {

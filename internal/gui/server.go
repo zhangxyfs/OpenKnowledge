@@ -84,11 +84,11 @@ func newToken() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// openBrowser 依次尝试 Edge/Chrome 应用模式与默认浏览器；全失败则只打印 URL。
+// openBrowser 依次尝试 Edge/Chrome 应用模式（最大化）与默认浏览器；全失败则只打印 URL。
 func openBrowser(url string) {
 	for _, args := range [][]string{
-		{"/c", "start", "msedge", "--app=" + url},
-		{"/c", "start", "chrome", "--app=" + url},
+		{"/c", "start", "msedge", "--start-maximized", "--app=" + url},
+		{"/c", "start", "chrome", "--start-maximized", "--app=" + url},
 		{"/c", "start", url},
 	} {
 		if err := exec.Command("cmd", args...).Run(); err == nil {
