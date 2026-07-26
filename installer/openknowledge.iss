@@ -20,6 +20,7 @@ Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 UninstallDisplayName={#AppName} 知识库
+SetupIconFile=assets\logo.ico
 ; 数据目录 ~/.openknowledge 由程序运行时创建，卸载默认保留（见 [Code]）
 
 [Languages]
@@ -33,11 +34,12 @@ Name: "addpath"; Description: "将安装目录加入用户 PATH（终端可直�
 [Files]
 Source: "..\dist\ok.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\dist\web\*"; DestDir: "{app}\web"; Flags: ignoreversion recursesubdirs
+Source: "assets\logo.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\OpenKnowledge 知识库"; Filename: "{app}\ok.exe"; Comment: "打开 OpenKnowledge 管理界面"
+Name: "{group}\OpenKnowledge 知识库"; Filename: "{app}\ok.exe"; IconFilename: "{app}\logo.ico"; Comment: "打开 OpenKnowledge 管理界面"
 Name: "{group}\卸载 OpenKnowledge"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\OpenKnowledge 知识库"; Filename: "{app}\ok.exe"; Tasks: desktopicon
+Name: "{autodesktop}\OpenKnowledge 知识库"; Filename: "{app}\ok.exe"; IconFilename: "{app}\logo.ico"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\ok.exe"; Parameters: "setup"; Description: "运行首次引导（写入 hooks 配置、安装技能、配置 embedding）"; Flags: postinstall skipifsilent unchecked

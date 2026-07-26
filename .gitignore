@@ -4,3 +4,4 @@
 /dist/
 .idea/
 /installer/output/
+cmd/ok/*.syso
