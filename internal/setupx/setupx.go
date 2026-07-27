@@ -65,6 +65,8 @@ var okHookCommand = regexp.MustCompile(`(?i)^\s*command\s*=\s*"[^"]*\bok(?:\.exe
 
 // StripLegacyOKHooks 移除配置中所有指向 ok hook 的无标记 [[hooks]] 表
 // （历史遗留的手动粘贴块），其它工具的 hooks 原样保留。
+// 注意：被删表连同其后直到下一个 section 头的所有行一起移除（TOML 表所有权范围），
+// 调用方需保证不应触碰的区域（如标记块内部）不传入本函数。
 func StripLegacyOKHooks(content string) string {
 	lines := strings.Split(content, "\n")
 	removed := make([]bool, len(lines))
@@ -117,7 +119,20 @@ func UpsertHooksBlock(configPath, block string) error {
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	content := StripLegacyOKHooks(string(data))
+	content := string(data)
+	// 存量 ok hooks 只清理标记块之外的区域；块内内容交给原位替换/损坏报错逻辑。
+	// 若对整个 content 调用 StripLegacyOKHooks，标记块自身的 ok hook 表会被删掉，
+	// 连带着吃掉两个标记行，导致原位替换退化为尾部追加、损坏标记检测失效。
+	if i := strings.Index(content, MarkerBegin); i >= 0 {
+		if j := strings.Index(content, MarkerEnd); j > i {
+			content = StripLegacyOKHooks(content[:i]) + content[i:j+len(MarkerEnd)] + StripLegacyOKHooks(content[j+len(MarkerEnd):])
+		} else {
+			// 有头无尾：保留原样，交给下面的损坏标记分支报错
+			content = StripLegacyOKHooks(content[:i]) + content[i:]
+		}
+	} else {
+		content = StripLegacyOKHooks(content)
+	}
 	wrapped := MarkerBegin + "\n" + block + MarkerEnd + "\n"
 	i := strings.Index(content, MarkerBegin)
 	j := strings.Index(content, MarkerEnd)

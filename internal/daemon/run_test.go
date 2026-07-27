@@ -91,6 +91,40 @@ func TestRunPortFallback(t *testing.T) {
 	<-done
 }
 
+func TestRunSelfCheckExitsWhenOrphaned(t *testing.T) {
+	t.Setenv("OK_HOME", t.TempDir())
+	_ = stubSpawn(t)
+	old := selfCheckInterval
+	selfCheckInterval = 100 * time.Millisecond
+	t.Cleanup(func() { selfCheckInterval = old })
+
+	done := make(chan int, 1)
+	go func() { done <- Run(t.TempDir(), io.Discard, io.Discard) }()
+	info := waitHealthy(t, 5*time.Second)
+
+	// 伪造易主：daemon.json 指向其它 PID（并发 spawn 败者/版本切换残留）
+	if err := daemonx.Save(&daemonx.Info{PID: 999999, Port: info.Port, Token: "other", Fingerprint: "x"}); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case code := <-done:
+		if code != 0 {
+			t.Fatalf("run exited %d", code)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("orphaned daemon did not self-exit")
+	}
+	// 条件 Remove 不得误删新主的凭据
+	cur, err := daemonx.Load()
+	if err != nil {
+		t.Fatalf("daemon.json should survive: %v", err)
+	}
+	if cur.PID != 999999 {
+		t.Fatalf("daemon.json PID = %d, want 999999", cur.PID)
+	}
+}
+
 func TestOpenGUI(t *testing.T) {
 	t.Setenv("OK_HOME", t.TempDir())
 	_ = stubSpawn(t)

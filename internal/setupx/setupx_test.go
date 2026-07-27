@@ -106,6 +106,46 @@ func TestUpsertHooksBlockCorruptMarker(t *testing.T) {
 	}
 }
 
+func TestUpsertHooksBlockReplacesMarkerInPlace(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "config.toml")
+	initial := "default_model = \"kimi\"\n\n" + MarkerBegin + "\n" + HooksBlockFor("D:/old/ok.exe") + MarkerEnd + "\n\n[providers]\n"
+	if err := os.WriteFile(cfg, []byte(initial), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpsertHooksBlock(cfg, HooksBlockFor("D:/new/ok.exe")); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(cfg)
+	got := string(data)
+	if c := strings.Count(got, MarkerBegin); c != 1 {
+		t.Fatalf("expected exactly one marker block, got %d: %q", c, got)
+	}
+	if !strings.Contains(got, "D:/new/ok.exe") || strings.Contains(got, "D:/old/ok.exe") {
+		t.Fatalf("exe path not replaced: %q", got)
+	}
+	if strings.Index(got, MarkerBegin) > strings.Index(got, "[providers]") {
+		t.Fatalf("marker block should stay before [providers] (in-place replace): %q", got)
+	}
+	if !strings.Contains(got, `default_model = "kimi"`) {
+		t.Fatalf("default_model lost: %q", got)
+	}
+}
+
+func TestUpsertHooksBlockCorruptMarkerWithOKCommands(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "config.toml")
+	initial := MarkerBegin + "\n" + HooksBlockFor("D:/x/ok.exe")
+	if err := os.WriteFile(cfg, []byte(initial), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpsertHooksBlock(cfg, HooksBlockFor("D:/new/ok.exe")); err == nil {
+		t.Fatal("expected corrupt marker error")
+	}
+	data, _ := os.ReadFile(cfg)
+	if string(data) != initial {
+		t.Fatalf("file should be unmodified on error: %q", data)
+	}
+}
+
 func TestInstallSkills(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("OK_SKILLS_HOME", dir)

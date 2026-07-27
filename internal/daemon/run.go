@@ -16,6 +16,9 @@ import (
 // OpenBrowserFunc 打开浏览器；测试可替换。
 var OpenBrowserFunc = gui.OpenBrowser
 
+// selfCheckInterval 自省间隔；测试可调小。
+var selfCheckInterval = 15 * time.Second
+
 // Run 以单实例运行 daemon 并阻塞：端口即锁，第二个实例发现已有健康 daemon 即退出 0。
 // 默认端口被非 daemon 占用时回退随机端口。/api/shutdown 或进程信号结束运行。
 func Run(webDir string, stdout, stderr io.Writer) int {
@@ -64,6 +67,18 @@ func Run(webDir string, stdout, stderr io.Writer) int {
 	go func() {
 		<-gh.Done()
 		_ = srv.Shutdown(context.Background())
+	}()
+	// 自省：daemon.json 丢失或易主（并发 spawn 败者/版本切换残留）→ 自动退出，保证全局唯一
+	go func() {
+		ticker := time.NewTicker(selfCheckInterval)
+		defer ticker.Stop()
+		for range ticker.C {
+			cur, err := daemonx.Load()
+			if err != nil || cur.PID != os.Getpid() {
+				_ = srv.Shutdown(context.Background())
+				return
+			}
+		}
 	}()
 	fmt.Fprintf(stdout, "OpenKnowledge daemon: %s\n", info.URL())
 	if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
