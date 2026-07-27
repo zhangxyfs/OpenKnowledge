@@ -42,6 +42,9 @@ Name: "{group}\OpenKnowledge 知识库"; Filename: "{app}\ok.exe"; IconFilename:
 Name: "{group}\卸载 OpenKnowledge"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\OpenKnowledge 知识库"; Filename: "{app}\ok.exe"; IconFilename: "{app}\logo.ico"; Tasks: desktopicon
 
+[Registry]
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "OpenKnowledge"; ValueData: """{app}\ok.exe"" daemon"; Flags: uninsdeletevalue
+
 [Run]
 Filename: "{app}\ok.exe"; Description: "打开 OpenKnowledge 管理界面（引导页可一键完成 hooks / 技能 / embedding 配置）"; Flags: postinstall skipifsilent unchecked
 
@@ -124,7 +127,13 @@ end;
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   DataDir: string;
+  ResultCode: Integer;
 begin
+  if CurUninstallStep = usUninstall then
+  begin
+    { 文件删除前停常驻 daemon（不存在则 ok.exe 立即返回 0，无害） }
+    Exec(ExpandConstant('{app}\ok.exe'), 'daemon stop', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
   if CurUninstallStep = usPostUninstall then
   begin
     RemoveFromUserPath(ExpandConstant('{app}'));
