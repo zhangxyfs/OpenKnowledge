@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 
 	"openknowledge/internal/cli"
-	"openknowledge/internal/gui"
 	"openknowledge/internal/hook"
 )
 
@@ -82,13 +81,16 @@ func usage() {
 }
 
 // runGUI 定位 web 资源目录并启动 Web GUI。
+// TODO(task7): 改为 daemon.OpenGUI。此处临时保留编译。
 func runGUI() int {
 	webDir, err := findWebDir()
+	_ = webDir
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	return gui.Run(webDir, os.Stdout, os.Stderr)
+	fmt.Fprintln(os.Stderr, "runGUI 待 Task 7 接入 daemon")
+	return 1
 }
 
 // findWebDir 依次尝试 <exe目录>/web 与 <当前目录>/web。

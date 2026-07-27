@@ -661,7 +661,7 @@ func (h *Handler) apiCaptureSet(w http.ResponseWriter, r *http.Request) {
 
 // ---------- 心跳与停服 ----------
 
-// apiHeartbeat 心跳（驱动看门狗），同时返回指定项目 kb.db 的修改时间作为版本号，
+// apiHeartbeat 心跳（前端 5s 轮询），返回指定项目 kb.db 的修改时间作为版本号，
 // 供前端做"变更才重拉"的自动刷新。project 为空或不存在时 version 为 0。
 func (h *Handler) apiHeartbeat(w http.ResponseWriter, r *http.Request) {
 	select {
