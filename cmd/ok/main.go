@@ -1,12 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
 	"openknowledge/internal/cli"
+	"openknowledge/internal/daemon"
 	"openknowledge/internal/hook"
+	"openknowledge/internal/registry"
 )
 
 func main() {
@@ -25,6 +29,12 @@ func run(argv []string) int {
 		return runGUI()
 	case "hook":
 		return runHook(argv[2:])
+	case "daemon":
+		if len(argv) > 2 && argv[2] == "stop" {
+			return daemon.Stop(os.Stdout, os.Stderr)
+		}
+		webDir, _ := findWebDir() // 找不到 web 目录也能跑（仅无 GUI 静态页）
+		return daemon.Run(webDir, os.Stdout, os.Stderr)
 	case "setup":
 		return cli.Setup(argv[2:], os.Stdin, os.Stdout, os.Stderr)
 	case "init":
@@ -56,6 +66,7 @@ func run(argv []string) int {
 }
 
 // runHook hook 路径全面 fail-open：panic 也只放行。
+// 优先转发给常驻 daemon；daemon 不在则本地直接处理并后台拉起。
 func runHook(args []string) (code int) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -65,13 +76,21 @@ func runHook(args []string) (code int) {
 	if len(args) < 1 {
 		return 0
 	}
+	if registry.HooksDisabled() {
+		return 0
+	}
+	payload, _ := io.ReadAll(io.LimitReader(os.Stdin, 1<<20))
+	if handled, c := daemon.ForwardHook(args[0], payload, os.Stdout, os.Stderr); handled {
+		return c
+	}
+	r := bytes.NewReader(payload)
 	switch args[0] {
 	case "prompt":
-		return hook.HandlePrompt(os.Stdin, os.Stdout)
+		return hook.HandlePrompt(r, os.Stdout)
 	case "post-tool":
-		return hook.HandlePostTool(os.Stdin)
+		return hook.HandlePostTool(r)
 	case "stop":
-		return hook.HandleStop(os.Stdin, os.Stderr)
+		return hook.HandleStop(r, os.Stderr)
 	}
 	return 0
 }
@@ -80,17 +99,9 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "用法: ok [gui] <setup|init|add|propose|approve|capture|search|index|list|doctor|on|off|hook> ...")
 }
 
-// runGUI 定位 web 资源目录并启动 Web GUI。
-// TODO(task7): 改为 daemon.OpenGUI。此处临时保留编译。
+// runGUI 确保 daemon 在线后打开浏览器并立即返回（进程生命周期由 daemon 托管）。
 func runGUI() int {
-	webDir, err := findWebDir()
-	_ = webDir
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	fmt.Fprintln(os.Stderr, "runGUI 待 Task 7 接入 daemon")
-	return 1
+	return daemon.OpenGUI(os.Stdout, os.Stderr)
 }
 
 // findWebDir 依次尝试 <exe目录>/web 与 <当前目录>/web。

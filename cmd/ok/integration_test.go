@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 var binPath string
@@ -57,6 +58,20 @@ func TestEndToEnd(t *testing.T) {
 	if err := os.MkdirAll(proj, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// hook 转发（ForwardHook→Ensure）会后台拉起常驻 daemon，其进程持有
+	// $OK_HOME/daemon.log；测试结束前停掉并等它释放文件，否则 Windows 上
+	// TempDir 清理会因文件占用失败。
+	defer func() {
+		runOK(t, home, proj, "", "daemon", "stop")
+		logPath := filepath.Join(home, "daemon.log")
+		for i := 0; i < 50; i++ {
+			if err := os.Remove(logPath); err == nil || os.IsNotExist(err) {
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		t.Log("warning: daemon.log still locked after daemon stop")
+	}()
 
 	// init：注册项目并幂等写入 hooks 配置（不打印裸 hooks 块）
 	stdout, _, code := runOK(t, home, proj, "", "init", "demo")
