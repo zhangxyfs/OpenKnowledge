@@ -1,10 +1,15 @@
 package setupx
 
 import (
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"openknowledge/internal/daemonx"
 )
 
 // setupUninstallEnv 构造 hooks 配置、技能、全局配置齐全的沙盒。
@@ -154,5 +159,31 @@ func TestRemoveSectionDeletesEmptyFile(t *testing.T) {
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatal("file should be deleted when no content remains")
+	}
+}
+
+func TestUninstallStopsDaemon(t *testing.T) {
+	setupUninstallEnv(t)
+	// 伪造一个活的"daemon"：httptest + daemon.json
+	stopped := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/shutdown" {
+			stopped = true
+		}
+		w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	port := srv.Listener.Addr().(*net.TCPAddr).Port
+	if err := daemonx.Save(&daemonx.Info{PID: os.Getpid(), Port: port, Token: "tok"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Uninstall(); err != nil {
+		t.Fatal(err)
+	}
+	if !stopped {
+		t.Fatal("daemon should be asked to shutdown")
+	}
+	if _, err := daemonx.Load(); err == nil {
+		t.Fatal("daemon.json should be removed")
 	}
 }

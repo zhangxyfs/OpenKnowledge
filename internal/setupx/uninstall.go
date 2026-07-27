@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"openknowledge/internal/daemonx"
 	"openknowledge/internal/registry"
 )
 
@@ -20,6 +21,9 @@ type UninstallResult struct {
 // 绝不触碰知识库数据（registry、projects、kb.db、knowledge 条目）。
 func Uninstall() (*UninstallResult, error) {
 	r := &UninstallResult{}
+
+	// 0. 停止常驻 daemon（不存在则忽略）
+	daemonx.StopDaemon()
 
 	// 1. 移除 kimi config.toml 中的 hooks 标记块与无标记的存量 ok hooks
 	cfgPath := filepath.Join(KimiHome(), "config.toml")
