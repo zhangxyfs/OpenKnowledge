@@ -129,8 +129,9 @@ begin
   begin
     RemoveFromUserPath(ExpandConstant('{app}'));
     DataDir := ExpandConstant('{userdocs}\..\.openknowledge');
-    { 静默卸载（/VERYSILENT）下绝不删除数据；交互模式才询问 }
-    if (not WizardSilent) and DirExists(DataDir) then
+    { 静默卸载（/VERYSILENT）下绝不删除数据；交互模式才询问。
+      注意：卸载期只能用 UninstallSilent，WizardSilent 是 Setup 期函数，误用会运行时错误。 }
+    if (not UninstallSilent) and DirExists(DataDir) then
     begin
       if MsgBox('是否同时删除知识库数据？' + #13#10 + #13#10 +
                 DataDir + #13#10 +
