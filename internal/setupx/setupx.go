@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -59,13 +60,64 @@ timeout = 5
 `, exe, exe, exe)
 }
 
-// UpsertHooksBlock 以标记块幂等写入 hooks 配置：已存在标记块则原位替换，否则追加。
+// okHookCommand 匹配指向 ok hook 的 command 行（如 "ok hook prompt"、"D:/x/ok.exe hook stop"）。
+var okHookCommand = regexp.MustCompile(`(?i)^\s*command\s*=\s*"[^"]*\bok(?:\.exe)?\s+hook\s`)
+
+// StripLegacyOKHooks 移除配置中所有指向 ok hook 的无标记 [[hooks]] 表
+// （历史遗留的手动粘贴块），其它工具的 hooks 原样保留。
+func StripLegacyOKHooks(content string) string {
+	lines := strings.Split(content, "\n")
+	removed := make([]bool, len(lines))
+	for i := 0; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) != "[[hooks]]" {
+			continue
+		}
+		j := i + 1
+		isOK := false
+		for ; j < len(lines); j++ {
+			t := strings.TrimSpace(lines[j])
+			if strings.HasPrefix(t, "[") {
+				break
+			}
+			if okHookCommand.MatchString(lines[j]) {
+				isOK = true
+			}
+		}
+		if !isOK {
+			continue
+		}
+		for k := i; k < j; k++ {
+			removed[k] = true
+		}
+		// 连同删除紧随其后的空行（块间分隔），避免留下成串空行
+		for k := j; k < len(lines) && strings.TrimSpace(lines[k]) == ""; k++ {
+			removed[k] = true
+		}
+		// 连同删除紧邻其前的 OpenKnowledge 注释行（init 曾打印的引导注释）
+		if i > 0 && !removed[i-1] {
+			t := strings.TrimSpace(lines[i-1])
+			if strings.HasPrefix(t, "#") && strings.Contains(strings.ToLower(t), "openknowledge") {
+				removed[i-1] = true
+			}
+		}
+	}
+	var out []string
+	for i, l := range lines {
+		if !removed[i] {
+			out = append(out, l)
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+// UpsertHooksBlock 以标记块幂等写入 hooks 配置：先清除存量 ok hooks（含无标记的
+// 历史遗留块），已存在标记块则原位替换（exe 路径随之更新），否则追加。
 func UpsertHooksBlock(configPath, block string) error {
 	data, err := os.ReadFile(configPath)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	content := string(data)
+	content := StripLegacyOKHooks(string(data))
 	wrapped := MarkerBegin + "\n" + block + MarkerEnd + "\n"
 	i := strings.Index(content, MarkerBegin)
 	j := strings.Index(content, MarkerEnd)

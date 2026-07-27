@@ -23,25 +23,6 @@ import (
 	"openknowledge/internal/store"
 )
 
-const hooksBlock = `
-# OpenKnowledge hooks —— 追加到 ~/.kimi-code/config.toml
-[[hooks]]
-event = "UserPromptSubmit"
-command = "ok hook prompt"
-timeout = 10
-
-[[hooks]]
-event = "PostToolUse"
-matcher = "Write|Edit"
-command = "ok hook post-tool"
-timeout = 5
-
-[[hooks]]
-event = "Stop"
-command = "ok hook stop"
-timeout = 5
-`
-
 const defaultProjectConfig = `# OpenKnowledge 项目知识库配置
 # [embedding] / [inject] / [retrieve] 缺省继承全局配置 ~/.openknowledge/config.toml。
 # 需要按项目覆盖时自行添加对应小节（字段见 ok setup 输出与设计文档）。
@@ -109,8 +90,12 @@ func Init(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	fmt.Fprintf(stdout, "已注册项目 %q → %s\n知识库目录: %s\n", name, cwd, st.Root)
-	fmt.Fprint(stdout, hooksBlock+"\n")
-	fmt.Fprintln(stdout, "或直接运行 ok setup 自动写入 hooks 配置并安装技能（推荐）")
+	// 幂等写入 hooks 配置（已存在则覆盖 exe 路径并去重）；失败不阻断注册结果
+	if exe, err := resolveExe(); err != nil {
+		fmt.Fprintf(stderr, "hooks 配置写入失败（可运行 ok setup 重试）: %v\n", err)
+	} else if code := writeHooks(exe, stdout, stderr); code != 0 {
+		fmt.Fprintln(stderr, "hooks 配置写入失败（可运行 ok setup 重试）")
+	}
 	return 0
 }
 

@@ -33,6 +33,58 @@ func TestUpsertHooksBlockAppendAndReplace(t *testing.T) {
 	}
 }
 
+func TestUpsertHooksBlockStripsLegacyOKHooks(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "config.toml")
+	legacy := `default_model = "kimi"
+
+[[hooks]]
+event = "UserPromptSubmit"
+command = "D:/old/ok.exe hook prompt"
+timeout = 10
+
+[[hooks]]
+event = "PostToolUse"
+matcher = "Write|Edit"
+command = "D:/old/ok.exe hook post-tool"
+timeout = 5
+
+[[hooks]]
+event = "Stop"
+command = "ok hook stop"
+timeout = 5
+
+[[hooks]]
+event = "SessionStart"
+command = "other-tool run"
+timeout = 3
+
+[providers]
+`
+	if err := os.WriteFile(cfg, []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpsertHooksBlock(cfg, HooksBlockFor(`D:\new\ok.exe`)); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(cfg)
+	got := string(data)
+	if strings.Contains(got, "D:/old/ok.exe") || strings.Contains(got, `"ok hook stop"`) {
+		t.Fatalf("legacy ok hooks should be stripped: %q", got)
+	}
+	if !strings.Contains(got, "other-tool run") || !strings.Contains(got, "default_model") || !strings.Contains(got, "[providers]") {
+		t.Fatalf("user content should be preserved: %q", got)
+	}
+	if c := strings.Count(got, MarkerBegin); c != 1 {
+		t.Fatalf("expected exactly one marker block, got %d: %q", c, got)
+	}
+	if c := strings.Count(got, "[[hooks]]"); c != 4 {
+		t.Fatalf("expected 3 new + 1 foreign hook tables, got %d: %q", c, got)
+	}
+	if !strings.Contains(got, "D:/new/ok.exe hook prompt") {
+		t.Fatalf("new exe path should overwrite the old one: %q", got)
+	}
+}
+
 func TestUpsertHooksBlockNewFile(t *testing.T) {
 	cfg := filepath.Join(t.TempDir(), "sub", "config.toml")
 	if err := UpsertHooksBlock(cfg, "BLOCK\n"); err != nil {

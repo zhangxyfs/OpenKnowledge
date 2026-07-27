@@ -23,14 +23,39 @@ func Setup(args []string, in io.Reader, stdout, stderr io.Writer) int {
 	if err := fs.Parse(args); err != nil {
 		return 1
 	}
-	exe, err := os.Executable()
+	exe, err := resolveExe()
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	if code := writeHooks(exe, stdout, stderr); code != 0 {
+		return code
+	}
+	if err := setupx.InstallSkills(exe); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "技能已安装到 %s (openknowledge-init/on/off/propose/capture)\n", setupx.SkillsHome())
+	setupEmbedding(fs.NFlag() > 0, *baseURL, *model, *apiKey, in, stdout)
+	fmt.Fprint(stdout, guideText+"\n")
+	return 0
+}
+
+// resolveExe 返回当前可执行文件的解析后路径。
+func resolveExe() (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
 	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
 		exe = resolved
 	}
+	return exe, nil
+}
+
+// writeHooks 备份并幂等写入 kimi hooks 配置（自动清除存量重复的 ok hooks），
+// 供 setup 与 init 共用。
+func writeHooks(exe string, stdout, stderr io.Writer) int {
 	cfgPath := filepath.Join(setupx.KimiHome(), "config.toml")
 	if data, err := os.ReadFile(cfgPath); err == nil {
 		_ = os.WriteFile(cfgPath+".bak-openknowledge", data, 0o644)
@@ -40,13 +65,6 @@ func Setup(args []string, in io.Reader, stdout, stderr io.Writer) int {
 		return 1
 	}
 	fmt.Fprintf(stdout, "hooks 配置已写入 %s\n", cfgPath)
-	if err := setupx.InstallSkills(exe); err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	fmt.Fprintf(stdout, "技能已安装到 %s (openknowledge-init/on/off/propose/capture)\n", setupx.SkillsHome())
-	setupEmbedding(fs.NFlag() > 0, *baseURL, *model, *apiKey, in, stdout)
-	fmt.Fprint(stdout, guideText+"\n")
 	return 0
 }
 

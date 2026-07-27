@@ -21,18 +21,22 @@ type UninstallResult struct {
 func Uninstall() (*UninstallResult, error) {
 	r := &UninstallResult{}
 
-	// 1. 移除 kimi config.toml 中的 hooks 标记块
+	// 1. 移除 kimi config.toml 中的 hooks 标记块与无标记的存量 ok hooks
 	cfgPath := filepath.Join(KimiHome(), "config.toml")
 	data, err := os.ReadFile(cfgPath)
 	if err == nil {
 		content := string(data)
+		orig := content
 		i := strings.Index(content, MarkerBegin)
 		j := strings.Index(content, MarkerEnd)
 		if i >= 0 && j > i {
 			tail := strings.TrimPrefix(content[j+len(MarkerEnd):], "\n")
 			head := strings.TrimRight(content[:i], "\n")
-			out := head + "\n" + tail
-			if err := os.WriteFile(cfgPath, []byte(out), 0o644); err != nil {
+			content = head + "\n" + tail
+		}
+		content = StripLegacyOKHooks(content)
+		if content != orig {
+			if err := os.WriteFile(cfgPath, []byte(content), 0o644); err != nil {
 				return r, fmt.Errorf("移除 hooks 配置: %w", err)
 			}
 			r.HooksRemoved = true

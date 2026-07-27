@@ -9,6 +9,7 @@ import (
 
 	"openknowledge/internal/entry"
 	"openknowledge/internal/registry"
+	"openknowledge/internal/setupx"
 )
 
 // chdir 切换工作目录并在结束时还原。
@@ -27,6 +28,7 @@ func chdir(t *testing.T, dir string) {
 func TestInitAddSearchList(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("OK_HOME", home)
+	t.Setenv("KIMI_CODE_HOME", filepath.Join(home, "kimi"))
 	t.Setenv("OPENAI_API_KEY", "") // 防止真实网络调用，保证测试离线
 	proj := filepath.Join(home, "demo")
 	if err := os.MkdirAll(proj, 0o755); err != nil {
@@ -35,12 +37,22 @@ func TestInitAddSearchList(t *testing.T) {
 	chdir(t, proj)
 	var out, errBuf bytes.Buffer
 
-	// init
+	// init：注册项目并幂等写入 hooks 配置（不再打印可粘贴的裸 hooks 块）
 	if code := Init([]string{"demo"}, &out, &errBuf); code != 0 {
 		t.Fatalf("init code=%d err=%q", code, errBuf.String())
 	}
-	if !strings.Contains(out.String(), "[[hooks]]") {
-		t.Fatalf("init should print hooks block, got %q", out.String())
+	if strings.Contains(out.String(), "[[hooks]]") {
+		t.Fatalf("init should not print raw hooks block, got %q", out.String())
+	}
+	if !strings.Contains(out.String(), "hooks 配置已写入") {
+		t.Fatalf("init should write hooks config, got %q", out.String())
+	}
+	kimiCfg, err := os.ReadFile(filepath.Join(home, "kimi", "config.toml"))
+	if err != nil {
+		t.Fatalf("init should write kimi config: %v", err)
+	}
+	if !strings.Contains(string(kimiCfg), setupx.MarkerBegin) || strings.Count(string(kimiCfg), "[[hooks]]") != 3 {
+		t.Fatalf("kimi config should contain one marker block with 3 hooks: %q", kimiCfg)
 	}
 
 	// add（无 embedding key → 提示跳过向量，仍成功）

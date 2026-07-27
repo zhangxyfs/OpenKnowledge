@@ -38,7 +38,7 @@ func runOK(t *testing.T, home, cwd, stdin string, args ...string) (string, strin
 	cmd := exec.Command(binPath, args...)
 	cmd.Stdin = strings.NewReader(stdin)
 	cmd.Dir = cwd
-	cmd.Env = append(os.Environ(), "OK_HOME="+home, "OPENAI_API_KEY=") // 清空 key 保证测试离线
+	cmd.Env = append(os.Environ(), "OK_HOME="+home, "KIMI_CODE_HOME="+filepath.Join(home, "kimi"), "OPENAI_API_KEY=") // 清空 key 保证测试离线
 	var so, se bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &so, &se
 	err := cmd.Run()
@@ -58,10 +58,14 @@ func TestEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// init：注册项目并打印 hooks 块
+	// init：注册项目并幂等写入 hooks 配置（不打印裸 hooks 块）
 	stdout, _, code := runOK(t, home, proj, "", "init", "demo")
-	if code != 0 || !strings.Contains(stdout, "已注册项目") || !strings.Contains(stdout, "[[hooks]]") {
+	if code != 0 || !strings.Contains(stdout, "已注册项目") || strings.Contains(stdout, "[[hooks]]") {
 		t.Fatalf("init failed: code=%d out=%q", code, stdout)
+	}
+	kimiCfg, err := os.ReadFile(filepath.Join(home, "kimi", "config.toml"))
+	if err != nil || strings.Count(string(kimiCfg), "[[hooks]]") != 3 {
+		t.Fatalf("init should write 3 hooks into kimi config: %v %q", err, kimiCfg)
 	}
 
 	// add 普通条目（无 embedding key → 跳过向量但成功）

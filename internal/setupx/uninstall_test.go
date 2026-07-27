@@ -94,6 +94,41 @@ func TestUninstall(t *testing.T) {
 	}
 }
 
+func TestUninstallRemovesLegacyOKHooks(t *testing.T) {
+	kimiHome, _ := setupUninstallEnv(t)
+	cfgPath := filepath.Join(kimiHome, "config.toml")
+	data, _ := os.ReadFile(cfgPath)
+	legacy := string(data) + `
+[[hooks]]
+event = "Stop"
+command = "D:/old/ok.exe hook stop"
+timeout = 5
+
+[[hooks]]
+event = "SessionStart"
+command = "other-tool run"
+timeout = 3
+`
+	if err := os.WriteFile(cfgPath, []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Uninstall()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.HooksRemoved {
+		t.Fatal("HooksRemoved should be true")
+	}
+	out, _ := os.ReadFile(cfgPath)
+	got := string(out)
+	if strings.Contains(got, "ok.exe hook") || strings.Contains(got, MarkerBegin) {
+		t.Fatalf("ok hooks should be removed: %q", got)
+	}
+	if !strings.Contains(got, "other-tool run") {
+		t.Fatalf("foreign hooks should be preserved: %q", got)
+	}
+}
+
 func TestUninstallIdempotent(t *testing.T) {
 	setupUninstallEnv(t)
 	if _, err := Uninstall(); err != nil {
