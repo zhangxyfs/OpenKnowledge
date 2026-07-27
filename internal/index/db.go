@@ -46,7 +46,9 @@ type DB struct {
 // Open 打开（必要时创建）索引库并建表；若同目录存在旧版 vectors.json
 // 且 vectors 表为空，则导入其向量并将该文件改名为 vectors.json.bak。
 func Open(path string) (*DB, error) {
-	sqldb, err := sql.Open("sqlite", path)
+	// busy_timeout：daemon 与本地兜底路径短暂并发写时等待而非立即 SQLITE_BUSY
+	dsn := "file:" + filepath.ToSlash(path) + "?_pragma=busy_timeout(3000)"
+	sqldb, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}

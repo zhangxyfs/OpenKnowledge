@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"openknowledge/internal/config"
 	"openknowledge/internal/retrieve"
@@ -196,5 +197,45 @@ func TestManyEntriesQuery(t *testing.T) {
 	}
 	if len(hits) == 0 || hits[0].Title != "Git 提交规范" {
 		t.Fatalf("2k entries query wrong: %+v", hits)
+	}
+}
+
+// 两个连接并发写同一库：无 busy_timeout 时第二个立即 SQLITE_BUSY；
+// 有 busy_timeout 时等待第一个提交后成功。
+func TestOpenBusyTimeout(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "kb.db")
+	db1, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db1.Close()
+	db2, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db2.Close()
+
+	tx, err := db1.sql.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(`INSERT INTO entries(filename,title,type) VALUES('a.md','A','note')`); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		done <- tx.Commit()
+	}()
+	start := time.Now()
+	_, werr := db2.sql.Exec(`INSERT INTO entries(filename,title,type) VALUES('b.md','B','note')`)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if werr != nil {
+		t.Fatalf("concurrent write should wait for busy_timeout, got %v", werr)
+	}
+	if time.Since(start) < 150*time.Millisecond {
+		t.Fatal("write did not wait — busy_timeout likely not applied")
 	}
 }
