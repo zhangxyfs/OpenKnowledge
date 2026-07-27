@@ -338,7 +338,20 @@ ok setup
   → 打印引导
 ```
 
-幂等性由"先清除存量 ok hooks + 标记块原位替换"保证：写入前 `StripLegacyOKHooks` 移除所有指向 ok hook 的无标记 `[[hooks]]` 表（历史手动粘贴遗留），重复执行或更换 exe 路径只覆盖更新、绝不重复堆积；标记损坏（有头无尾）时报错拒绝修改，不破坏用户配置。`ok init` 复用同一写入逻辑（写失败不阻断注册），卸载时同样清除无标记存量。
+幂等性由"先清除存量 ok hooks + 标记块原位替换"保证：写入前 `StripLegacyOKHooks` 移除所有指向 ok hook 的无标记 `[[hooks]]` 表（历史手动粘贴遗留），重复执行或更换 exe 路径只覆盖更新、绝不重复堆积；标记损坏（有头无尾）时报错拒绝修改，不破坏用户配置。`ok init` 复用同一写入逻辑（写失败不阻断注册），卸载时同样清除无标记存量。daemon 化后 `ok gui` 不再阻塞，GUI 页面关闭不退出进程（原 30s 心跳看门狗已随 daemon 化移除）。
+
+### 6.5 常驻 daemon（单进程架构）
+
+全系统只有一个 ok.exe 常驻进程，承载 GUI 与 kimi hook 请求：
+
+- internal/daemonx（叶子包）：daemon.json 凭证（pid/port/token/exe指纹）、健康检查、版本判定
+- internal/daemon（编排包）：HTTP mux（/api/health、/api/hook/* + gui.Handler）、Run（端口即单实例锁，
+  默认 17888，占用回退随机）、spawn（DETACHED 后台拉起，15s 防抖）、ForwardHook（瘦客户端转发，
+  9s 超时 fail-open）、OpenGUI（ensure + 开浏览器即退）
+- exe 指纹 = 路径|size|mtime：exe 升级后客户端发现指纹不一致 → 旧 daemon shutdown → 拉起新版
+- hook 兜底：daemon 不在时本次请求本地直接处理（hook.Handle* 原逻辑），同时后台拉起 daemon
+- 安装器写 HKCU Run 登录自启；卸载/ok daemon stop/setupx.Uninstall 均可停 daemon
+- kb.db 所有写入收敛到 daemon 单进程；index.Open 另加 busy_timeout(3000) 兜底短暂并发
 
 ---
 
@@ -506,6 +519,7 @@ go build ./...         # 编译检查
 |------|------|----------|
 | `ok setup` | 首次引导 | 写 hooks 配置（标记块幂等）+ 装 5 个 kimi 技能 + 交互配 embedding + 连通性验证 |
 | `ok gui` | 启动 Web 管理界面 | 无参数运行同效；127.0.0.1 随机端口 + 令牌鉴权，自动开浏览器，30s 无心跳自动停服 |
+| `ok daemon [stop]` | 常驻进程管理 | 无参启动常驻 daemon（承载 GUI 与 hook 转发，端口 17888 即单实例锁）；`stop` 停止 daemon |
 | `ok init [名字]` | 注册当前项目 | 名字缺省取目录基名；建 KB 骨架；幂等写入/更新 hooks 配置（复用 setup 逻辑，失败仅提示） |
 | `ok add --title …` | 新建条目 | `--type/--tags/--mandatory/--file`；自动同步索引库（无 key 时向量跳过） |
 | `ok propose --title …` | AI 提议草稿条目 | `--type/--tags/--summary/--file|--body`；写 `draft:true`，只同步 INDEX 不算向量，不参与检索 |
