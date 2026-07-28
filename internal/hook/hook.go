@@ -19,6 +19,7 @@ import (
 	"openknowledge/internal/retrieve"
 	"openknowledge/internal/state"
 	"openknowledge/internal/store"
+	"openknowledge/internal/wiki"
 )
 
 type Event struct {
@@ -184,6 +185,9 @@ func HandlePrompt(r io.Reader, w io.Writer) int {
 		fmt.Fprintf(&b, "## %s\n\n%s\n\n", h.Title, h.Body)
 	}
 	out := store.TruncateToBudget(b.String(), pc.Config.Inject.MaxTokens)
+	if nudge := wikiNudge(pc, st, ev.Cwd); nudge != "" {
+		out += nudge
+	}
 	if strings.TrimSpace(out) != "" {
 		fmt.Fprintln(w, out)
 	}
@@ -282,4 +286,25 @@ func HandleStop(r io.Reader, stderr io.Writer) int {
 		logErr("stop save state: %v", err)
 	}
 	return 0
+}
+
+// wikiNudge 返回 wiki 落后提示（每会话最多一次，预算外放行）；不适用返回空串。
+// fail-open：git 不可用/非 git 项目时 CheckStatus 不 stale，自然无提示。
+func wikiNudge(pc *project.Context, st *state.Session, cwd string) string {
+	threshold := pc.Config.Wiki.StaleCommits
+	if threshold <= 0 || st.WikiNudged {
+		return ""
+	}
+	s := wiki.CheckStatus(pc.Store.StateDir(), cwd, threshold)
+	if !s.Stale {
+		return ""
+	}
+	st.WikiNudged = true
+	if err := st.Save(pc.Store.StateDir()); err != nil {
+		logErr("prompt save state: %v", err)
+	}
+	if !s.HasWiki {
+		return "\n[OpenKnowledge] 本项目还没有 wiki，建议用 openknowledge-wiki 技能生成项目 wiki（含架构、模块与演进历史）。\n"
+	}
+	return fmt.Sprintf("\n[OpenKnowledge] wiki 已落后 %d 个 commit，建议用 openknowledge-wiki 技能增量更新。\n", s.Behind)
 }

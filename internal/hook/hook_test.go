@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -430,5 +431,95 @@ message = "请补变更日志"
 	stderr.Reset()
 	if code := HandleStop(strings.NewReader(stop), &stderr); code != 0 {
 		t.Fatalf("third stop should pass, got %d (%q)", code, stderr.String())
+	}
+}
+
+// initGitRepo 在项目目录初始化 git 并提交 n 个 commit（供 wiki 落后提示测试）。
+func initGitRepo(t *testing.T, dir string, n int) {
+	t.Helper()
+	env := append(os.Environ(),
+		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+	run := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = env
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("init")
+	for i := 0; i < n; i++ {
+		if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte{byte(i)}, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		run("add", ".")
+		run("commit", "-m", "c")
+	}
+}
+
+const wikiNudgeHint = "本项目还没有 wiki"
+
+func TestPromptWikiNudge(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	initGitRepo(t, projDir, 2)
+	if err := os.WriteFile(filepath.Join(kbRoot, "config.toml"), []byte("[wiki]\nstale_commits = 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mkPrompt := func() string {
+		return fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":"hello"}`, projDir)
+	}
+	var out bytes.Buffer
+	// 达阈值：第一次提示，且提示在输出末尾
+	if code := HandlePrompt(strings.NewReader(mkPrompt()), &out); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	got := out.String()
+	if !strings.Contains(got, wikiNudgeHint) {
+		t.Fatalf("first prompt missing wiki nudge: %q", got)
+	}
+	if !strings.HasSuffix(strings.TrimRight(got, "\n"), "。") || !strings.HasSuffix(got, "\n") {
+		t.Fatalf("nudge should be at output end: %q", got)
+	}
+	// 第二次（同会话）：不再提示
+	out.Reset()
+	if code := HandlePrompt(strings.NewReader(mkPrompt()), &out); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if strings.Contains(out.String(), wikiNudgeHint) {
+		t.Fatalf("nudge repeated in same session: %q", out.String())
+	}
+}
+
+func TestPromptWikiNudgeDisabled(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	initGitRepo(t, projDir, 2)
+	// stale_commits = 0：关闭提示
+	if err := os.WriteFile(filepath.Join(kbRoot, "config.toml"), []byte("[wiki]\nstale_commits = 0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	in := fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":"hello"}`, projDir)
+	var out bytes.Buffer
+	if code := HandlePrompt(strings.NewReader(in), &out); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if strings.Contains(out.String(), wikiNudgeHint) {
+		t.Fatalf("stale_commits=0 must not nudge: %q", out.String())
+	}
+}
+
+func TestPromptWikiNudgeNonGitSilent(t *testing.T) {
+	projDir, kbRoot := setupProject(t) // projDir 非 git 仓库
+	if err := os.WriteFile(filepath.Join(kbRoot, "config.toml"), []byte("[wiki]\nstale_commits = 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	in := fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":"hello"}`, projDir)
+	var out bytes.Buffer
+	// fail-open：非 git 目录静默，退出码不变
+	if code := HandlePrompt(strings.NewReader(in), &out); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if strings.Contains(out.String(), wikiNudgeHint) {
+		t.Fatalf("non-git project must not nudge: %q", out.String())
 	}
 }

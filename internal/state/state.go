@@ -15,6 +15,7 @@ type Session struct {
 	BaseInjected        bool     `json:"base_injected"`
 	StopCount           int      `json:"stop_count"`
 	LastExtractReminder int      `json:"last_extract_reminder"`
+	WikiNudged          bool     `json:"wiki_nudged"`
 }
 
 func fileName(sessionID string) string {
