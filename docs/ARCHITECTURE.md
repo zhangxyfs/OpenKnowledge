@@ -162,10 +162,12 @@ OpenKnowledge/
 │   │   ├── setupx.go              #   HooksBlockFor/UpsertHooksBlock/InstallSkills/SaveEmbedding/TestEmbedding/Enable/Disable
 │   │   └── setupx_test.go
 │   └── gui/                       # ★ Web GUI（ok gui / 无参数启动）
-│       ├── server.go              #   127.0.0.1 随机端口服务、令牌生成、心跳看门狗、浏览器自动打开
+│       ├── server.go              #   127.0.0.1 随机端口服务、令牌生成、浏览器自动打开（同步最大化）
 │       ├── api.go                 #   Handler 路由、令牌鉴权、管理 API（条目 CRUD/检索/setup/toggle）
+│       ├── window_windows.go      #   Windows 窗口最大化兜底（maximizeWindowByTitle）
+│       ├── window_other.go        #   非 Windows 平台无操作实现
 │       └── api_test.go
-├── web/                           # GUI 前端（零依赖原生 HTML/JS/CSS，双标签页：管理/引导）
+├── web/                           # GUI 前端（零依赖原生 HTML/JS/CSS，三标签页：管理/引导/其他）
 │   ├── index.html                 #   页面骨架（{{TOKEN}} 占位符由服务端注入令牌）
 │   ├── app.js                     #   条目 CRUD、检索预览、引导流程、心跳（5s）
 │   └── style.css
