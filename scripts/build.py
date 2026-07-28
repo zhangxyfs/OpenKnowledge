@@ -10,6 +10,7 @@
 """
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -18,6 +19,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 ISCC = os.environ.get("ISCC", r"C:\Users\Administrator\AppData\Local\Programs\Inno Setup 7\ISCC.exe")
 LDFLAGS = "-s -w -H windowsgui"
+
+
+def app_version():
+    """从 installer/openknowledge.iss 提取 #define AppVersion，提取不到则报错退出。"""
+    text = (ROOT / "installer" / "openknowledge.iss").read_text(encoding="utf-8")
+    m = re.search(r'^#define AppVersion "([^"]+)"', text, re.MULTILINE)
+    if not m:
+        sys.exit("未能从 installer/openknowledge.iss 提取 AppVersion")
+    return m.group(1)
 
 
 def run(cmd, cwd=ROOT):
@@ -40,9 +50,10 @@ def main():
             print("go-winres 未安装，跳过 exe 图标嵌入")
             print("  安装: go install github.com/tc-hib/go-winres@latest")
 
-    # 2. 编译 dist/ok.exe + 拷贝 web/
+    # 2. 编译 dist/ok.exe + 拷贝 web/（注入版本号，与 build-dist.sh 一致）
+    ldflags = f"{LDFLAGS} -X openknowledge/internal/version.Version={app_version()}"
     (ROOT / "dist").mkdir(exist_ok=True)
-    run(["go", "build", "-ldflags", LDFLAGS, "-o", "dist/ok.exe", "./cmd/ok"])
+    run(["go", "build", "-ldflags", ldflags, "-o", "dist/ok.exe", "./cmd/ok"])
     web_dist = ROOT / "dist" / "web"
     if web_dist.exists():
         shutil.rmtree(web_dist)
