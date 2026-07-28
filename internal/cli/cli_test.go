@@ -2,7 +2,9 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -167,5 +169,74 @@ func TestIndexRebuildsIndexWithoutAPIKey(t *testing.T) {
 	}
 	if !strings.Contains(errBuf.String(), "INDEX") {
 		t.Fatalf("stderr should mention INDEX rebuilt, got %q", errBuf.String())
+	}
+}
+
+// ok wiki status/mark：临时 git 仓库里验证游标与落后计数。
+func TestWikiStatusAndMark(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("OK_HOME", home)
+	t.Setenv("KIMI_CODE_HOME", filepath.Join(home, "kimi"))
+	t.Setenv("OPENAI_API_KEY", "") // 防止真实网络调用，保证测试离线
+	// 在临时 git 仓库里跑（cwd 即项目）
+	repo := t.TempDir()
+	gitEnv := append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+	git := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repo
+		cmd.Env = gitEnv
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git("init")
+	if err := os.WriteFile(filepath.Join(repo, "f"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", ".")
+	git("commit", "-m", "c1")
+	// 切 cwd 到 repo（cli 走 resolveFromCwd）
+	chdir(t, repo)
+
+	var out, errBuf bytes.Buffer
+	if code := Init(nil, &out, &errBuf); code != 0 {
+		t.Fatalf("init code=%d err=%q", code, errBuf.String())
+	}
+	out.Reset()
+	if code := WikiCmd([]string{"status"}, &out, &errBuf); code != 0 {
+		t.Fatalf("status code=%d err=%q", code, errBuf.String())
+	}
+	var st struct {
+		Project   string `json:"project"`
+		HasWiki   bool   `json:"has_wiki"`
+		Behind    int    `json:"behind"`
+		Stale     bool   `json:"stale"`
+		Threshold int    `json:"threshold"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &st); err != nil {
+		t.Fatalf("status output %q: %v", out.String(), err)
+	}
+	if st.HasWiki || st.Behind != 1 || st.Threshold != 20 {
+		t.Fatalf("status: %+v", st)
+	}
+
+	// mark 无参 → 取 HEAD
+	out.Reset()
+	if code := WikiCmd([]string{"mark"}, &out, &errBuf); code != 0 {
+		t.Fatalf("mark code=%d err=%q", code, errBuf.String())
+	}
+	if !strings.Contains(out.String(), "已记录 wiki 游标") {
+		t.Fatalf("mark output: %q", out.String())
+	}
+	out.Reset()
+	if code := WikiCmd([]string{"status"}, &out, &errBuf); code != 0 {
+		t.Fatalf("status2 code=%d err=%q", code, errBuf.String())
+	}
+	if err := json.Unmarshal(out.Bytes(), &st); err != nil {
+		t.Fatalf("status2 output %q: %v", out.String(), err)
+	}
+	if !st.HasWiki || st.Behind != 0 {
+		t.Fatalf("after mark: %+v", st)
 	}
 }

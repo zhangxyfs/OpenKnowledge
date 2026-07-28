@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -21,6 +22,7 @@ import (
 	"openknowledge/internal/retrieve"
 	"openknowledge/internal/setupx"
 	"openknowledge/internal/store"
+	"openknowledge/internal/wiki"
 )
 
 const defaultProjectConfig = `# OpenKnowledge 项目知识库配置
@@ -533,6 +535,66 @@ func CaptureCmd(args []string, stdout, stderr io.Writer) int {
 	default:
 		fmt.Fprintln(stderr, "用法: ok capture [propose|auto|interval <n>]")
 		return 1
+	}
+}
+
+// WikiCmd 处理 ok wiki status|mark。
+func WikiCmd(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("wiki", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	pc, code := resolveFromCwd(stderr)
+	if pc == nil {
+		return code
+	}
+	cwd, _ := os.Getwd()
+
+	switch fs.Arg(0) {
+	case "status":
+		st := wiki.CheckStatus(pc.Store.StateDir(), cwd, pc.Config.Wiki.StaleCommits)
+		out := map[string]any{
+			"project":   pc.Project.Name,
+			"has_wiki":  st.HasWiki,
+			"behind":    st.Behind,
+			"stale":     st.Stale,
+			"threshold": st.Threshold,
+		}
+		if st.LastCommit != "" {
+			out["last_commit"] = st.LastCommit
+		}
+		_ = json.NewEncoder(stdout).Encode(out)
+		return 0
+	case "mark":
+		commit := fs.Arg(1)
+		if commit == "" {
+			commit, _ = wiki.HeadCommit(cwd) // 非 git 项目留空，只写时间戳
+		}
+		count := 0
+		if db, err := index.Open(pc.Store.KbPath()); err == nil {
+			if err := db.Sync(pc.Store.KnowledgeDir(), nil); err == nil {
+				count, _ = db.WikiCount()
+			}
+			db.Close()
+		}
+		c := &wiki.Cursor{LastCommit: commit, GeneratedAt: time.Now(), EntryCount: count}
+		if err := wiki.SaveCursor(pc.Store.StateDir(), c); err != nil {
+			fmt.Fprintln(stderr, "写游标失败:", err)
+			return 1
+		}
+		short := commit
+		if len(short) > 7 {
+			short = short[:7]
+		}
+		if short == "" {
+			short = "(无 git)"
+		}
+		fmt.Fprintf(stdout, "已记录 wiki 游标 %s（%d 条 wiki 条目）\n", short, count)
+		return 0
+	default:
+		fmt.Fprintln(stderr, "用法: ok wiki <status|mark [commit]>")
+		return 2
 	}
 }
 

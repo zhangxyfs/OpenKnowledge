@@ -47,6 +47,8 @@ func run(argv []string) int {
 		return cli.Approve(argv[2:], os.Stdout, os.Stderr)
 	case "capture":
 		return cli.CaptureCmd(argv[2:], os.Stdout, os.Stderr)
+	case "wiki":
+		return cli.WikiCmd(argv[2:], os.Stdout, os.Stderr)
 	case "search":
 		return cli.Search(argv[2:], os.Stdout, os.Stderr)
 	case "index":
@@ -96,7 +98,7 @@ func runHook(args []string) (code int) {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "用法: ok [gui] <setup|init|add|propose|approve|capture|search|index|list|doctor|on|off|hook> ...")
+	fmt.Fprintln(os.Stderr, "用法: ok [gui] <setup|init|add|propose|approve|capture|wiki|search|index|list|doctor|on|off|hook> ...")
 }
 
 // runGUI 确保 daemon 在线后打开浏览器并立即返回（进程生命周期由 daemon 托管）。
