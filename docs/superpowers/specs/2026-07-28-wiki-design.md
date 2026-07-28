@@ -142,7 +142,7 @@ Sync 重建 INDEX.md 时末尾追加：
 - 非 git 项目 / git 不存在：`status` 报 `behind:-1`，hook 不提示；`mark` 只写时间戳；技能退化掉 git 步骤。
 - 游标文件损坏：当作无游标（`has_wiki:false`），不报错。
 - 游标 commit 已不在历史（rebase/amend）：`rev-list` 失败 → `behind:-1`，不提示；下次 `mark` 自愈。
-- wiki 增量更新重写旧条目靠 `ok add` 同名覆盖的现有行为。
+- wiki 增量更新重写旧条目靠 `ok add --force` 显式覆盖。
 
 ## 8. 测试
 

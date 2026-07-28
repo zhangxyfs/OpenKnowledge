@@ -281,3 +281,64 @@ func TestAddSummaryFlag(t *testing.T) {
 		t.Fatalf("frontmatter should default summary to title, got %q", data)
 	}
 }
+
+// ok add --force：同名条目不带 --force 报错（既有行为）；带 --force 覆盖且内容为新值。
+func TestAddForceOverwrites(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("OK_HOME", home)
+	t.Setenv("OPENAI_API_KEY", "") // 防止真实网络调用，保证测试离线
+	proj := filepath.Join(home, "demo")
+	if err := os.MkdirAll(proj, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	chdir(t, proj)
+	var out, errBuf bytes.Buffer
+	if code := Init([]string{"demo"}, &out, &errBuf); code != 0 {
+		t.Fatalf("init code=%d err=%q", code, errBuf.String())
+	}
+	kb := filepath.Join(home, "projects", "demo", "knowledge")
+	entryPath := filepath.Join(kb, entry.Slug("架构总览")+".md")
+
+	out.Reset()
+	if code := Add([]string{"--title", "架构总览", "--type", "reference", "--tags", "wiki,架构"}, &out, &errBuf); code != 0 {
+		t.Fatalf("add code=%d err=%q", code, errBuf.String())
+	}
+
+	// 同名 add 不带 --force → 报错，原内容不变
+	out.Reset()
+	errBuf.Reset()
+	if code := Add([]string{"--title", "架构总览", "--type", "reference", "--tags", "wiki,架构", "--file", writeBody(t, proj, "v2 无 force")}, &out, &errBuf); code == 0 {
+		t.Fatal("expected duplicate add without --force to fail")
+	}
+	if !strings.Contains(errBuf.String(), "条目已存在") {
+		t.Fatalf("stderr should mention 条目已存在, got %q", errBuf.String())
+	}
+
+	// 带 --force → 覆盖成功，内容为新值
+	newBody := writeBody(t, proj, "重写后的架构正文。")
+	out.Reset()
+	errBuf.Reset()
+	if code := Add([]string{"--title", "架构总览", "--type", "reference", "--tags", "wiki,架构", "--summary", "新摘要", "--file", newBody, "--force"}, &out, &errBuf); code != 0 {
+		t.Fatalf("add --force code=%d err=%q", code, errBuf.String())
+	}
+	data, err := os.ReadFile(entryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "重写后的架构正文。") {
+		t.Fatalf("entry should be overwritten with new body, got %q", data)
+	}
+	if !strings.Contains(string(data), "summary: 新摘要") {
+		t.Fatalf("entry should carry new summary, got %q", data)
+	}
+}
+
+// writeBody 写一个临时正文文件并返回路径。
+func writeBody(t *testing.T, dir, content string) string {
+	t.Helper()
+	p := filepath.Join(dir, "body-"+strings.ReplaceAll(t.Name(), "/", "-")+".md")
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}

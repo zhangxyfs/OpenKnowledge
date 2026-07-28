@@ -101,7 +101,7 @@ func Init(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// Add: ok add --title T --type rule --tags a,b --summary S --mandatory [--file body.md]
+// Add: ok add --title T --type rule --tags a,b --summary S --mandatory [--file body.md] [--force]
 func Add(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("add", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -111,11 +111,12 @@ func Add(args []string, stdout, stderr io.Writer) int {
 	summary := fs.String("summary", "", "一句话摘要（缺省取标题）")
 	mandatory := fs.Bool("mandatory", false, "每会话首次提问全文注入")
 	file := fs.String("file", "", "正文来源文件；缺省生成模板")
+	force := fs.Bool("force", false, "覆盖已存在的同名条目")
 	if err := fs.Parse(args); err != nil {
 		return 1
 	}
 	if *title == "" || !entry.ValidType(*typ) {
-		fmt.Fprintln(stderr, "用法: ok add --title <标题> --type <rule|pitfall|note|reference> [--tags a,b] [--summary 摘要] [--mandatory] [--file 正文.md]")
+		fmt.Fprintln(stderr, "用法: ok add --title <标题> --type <rule|pitfall|note|reference> [--tags a,b] [--summary 摘要] [--mandatory] [--file 正文.md] [--force]")
 		return 1
 	}
 	pc, code := resolveFromCwd(stderr)
@@ -142,7 +143,7 @@ func Add(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	path := filepath.Join(pc.Store.KnowledgeDir(), entry.Slug(*title)+".md")
-	if _, err := os.Stat(path); err == nil {
+	if _, err := os.Stat(path); err == nil && !*force {
 		fmt.Fprintf(stderr, "条目已存在: %s\n", path)
 		return 1
 	}
