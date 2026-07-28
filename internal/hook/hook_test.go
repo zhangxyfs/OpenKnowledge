@@ -82,8 +82,11 @@ func TestFirstPromptInjectsBaseOnce(t *testing.T) {
 	if !strings.Contains(got, "改完代码先写日志。") || !strings.Contains(got, "知识索引") {
 		t.Fatalf("first prompt missing base injection: %q", got)
 	}
-	if !strings.Contains(got, "Conventional Commits") {
-		t.Fatalf("first prompt missing retrieval: %q", got)
+	if !strings.Contains(got, "提交信息格式") || !strings.Contains(got, "git.md") {
+		t.Fatalf("first prompt missing retrieval summary line: %q", got)
+	}
+	if strings.Contains(got, "Conventional Commits") {
+		t.Fatalf("retrieval should not inject full body: %q", got)
 	}
 	// 第二次提问（同会话）：不再重复基础注入，检索仍生效
 	out.Reset()
@@ -94,8 +97,11 @@ func TestFirstPromptInjectsBaseOnce(t *testing.T) {
 	if strings.Contains(got, "改完代码先写日志。") || strings.Contains(got, "知识索引") {
 		t.Fatalf("base injection repeated: %q", got)
 	}
-	if !strings.Contains(got, "Conventional Commits") {
+	if !strings.Contains(got, "提交信息格式") || !strings.Contains(got, "git.md") {
 		t.Fatalf("retrieval lost on second prompt: %q", got)
+	}
+	if strings.Contains(got, "Conventional Commits") {
+		t.Fatalf("retrieval should not inject full body: %q", got)
 	}
 }
 
@@ -107,7 +113,7 @@ func TestPromptStringFormCompat(t *testing.T) {
 	if code := HandlePrompt(strings.NewReader(in), &out); code != 0 {
 		t.Fatalf("exit %d", code)
 	}
-	if !strings.Contains(out.String(), "Conventional Commits") {
+	if !strings.Contains(out.String(), "提交信息格式") {
 		t.Fatalf("string prompt form broken: %q", out.String())
 	}
 }
@@ -120,8 +126,8 @@ func TestPromptKeywordFallback(t *testing.T) {
 	if code := HandlePrompt(strings.NewReader(in), &out); code != 0 {
 		t.Fatalf("exit %d", code)
 	}
-	if !strings.Contains(out.String(), "Conventional Commits") {
-		t.Fatalf("expected git entry injected, got %q", out.String())
+	if !strings.Contains(out.String(), "提交信息格式") {
+		t.Fatalf("expected git entry summary injected, got %q", out.String())
 	}
 }
 
@@ -152,7 +158,7 @@ timeout_sec = 1
 	if !strings.Contains(got, "改完代码先写日志。") {
 		t.Fatalf("base injection suppressed by embed outage: %q", got)
 	}
-	if !strings.Contains(got, "Conventional Commits") {
+	if !strings.Contains(got, "提交信息格式") {
 		t.Fatalf("keyword retrieval suppressed by embed outage: %q", got)
 	}
 }
@@ -181,7 +187,7 @@ func TestPromptSkipsBadEntry(t *testing.T) {
 	if code := HandlePrompt(strings.NewReader(in), &out); code != 0 {
 		t.Fatalf("exit %d", code)
 	}
-	if !strings.Contains(out.String(), "Conventional Commits") {
+	if !strings.Contains(out.String(), "提交信息格式") {
 		t.Fatalf("corrupt sibling must not suppress retrieval, got %q", out.String())
 	}
 }

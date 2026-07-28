@@ -70,7 +70,7 @@ func TestDaemonEndToEnd(t *testing.T) {
 	// hook prompt：daemon 在线 → 注入生效
 	ev := fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":[{"type":"text","text":"git 提交规范"}]}`, proj)
 	stdout, _, code := runOK(t, home, proj, ev, "hook", "prompt")
-	if code != 0 || !strings.Contains(stdout, "Conventional Commits") {
+	if code != 0 || !strings.Contains(stdout, "Git 提交规范") {
 		t.Fatalf("hook via daemon: code=%d out=%q", code, stdout)
 	}
 
@@ -81,7 +81,7 @@ func TestDaemonEndToEnd(t *testing.T) {
 	_ = daemonCmd.Process.Kill()
 	_, _ = daemonCmd.Process.Wait()
 	stdout, _, code = runOK(t, home, proj, ev, "hook", "prompt")
-	if code != 0 || !strings.Contains(stdout, "Conventional Commits") {
+	if code != 0 || !strings.Contains(stdout, "Git 提交规范") {
 		t.Fatalf("local fallback: code=%d out=%q", code, stdout)
 	}
 	// 兜底路径已后台拉起新 daemon：必须等到一个"新 PID 且健康"的实例，

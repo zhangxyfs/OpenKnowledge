@@ -181,8 +181,17 @@ func HandlePrompt(r io.Reader, w io.Writer) int {
 	if err != nil {
 		logErr("prompt query: %v", err)
 	}
-	for _, h := range hits {
-		fmt.Fprintf(&b, "## %s\n\n%s\n\n", h.Title, h.Body)
+	if len(hits) > 0 {
+		b.WriteString("## 相关知识（需要全文时读取对应文件）\n\n")
+		for _, h := range hits {
+			p := filepath.ToSlash(filepath.Join(pc.Store.KnowledgeDir(), h.Filename))
+			if h.Summary != "" {
+				fmt.Fprintf(&b, "- **%s** (%s) — %s（%s）\n", h.Title, h.Type, h.Summary, p)
+			} else {
+				fmt.Fprintf(&b, "- **%s** (%s)（%s）\n", h.Title, h.Type, p)
+			}
+		}
+		b.WriteString("\n")
 	}
 	out := store.TruncateToBudget(b.String(), pc.Config.Inject.MaxTokens)
 	if nudge := wikiNudge(pc, st, ev.Cwd); nudge != "" {

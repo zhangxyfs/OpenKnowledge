@@ -107,13 +107,13 @@ func TestEndToEnd(t *testing.T) {
 		return fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":[{"type":"text","text":%q}]}`, proj, text)
 	}
 	stdout, _, code = runOK(t, home, proj, mkPrompt("git 提交规范"), "hook", "prompt")
-	if code != 0 || !strings.Contains(stdout, "改完代码先写日志。") || !strings.Contains(stdout, "知识索引") || !strings.Contains(stdout, "Conventional Commits") {
+	if code != 0 || !strings.Contains(stdout, "改完代码先写日志。") || !strings.Contains(stdout, "知识索引") || !strings.Contains(stdout, "Git 提交规范") {
 		t.Fatalf("first prompt: code=%d out=%q", code, stdout)
 	}
 
 	// 第二次 prompt（同会话）：不再重复基础注入，检索仍生效
 	stdout, _, code = runOK(t, home, proj, mkPrompt("git 提交规范"), "hook", "prompt")
-	if code != 0 || strings.Contains(stdout, "改完代码先写日志。") || strings.Contains(stdout, "知识索引") || !strings.Contains(stdout, "Conventional Commits") {
+	if code != 0 || strings.Contains(stdout, "改完代码先写日志。") || strings.Contains(stdout, "知识索引") || !strings.Contains(stdout, "Git 提交规范") {
 		t.Fatalf("second prompt: code=%d out=%q", code, stdout)
 	}
 
@@ -128,7 +128,7 @@ func TestEndToEnd(t *testing.T) {
 		t.Fatalf("precondition: INDEX should exist and be stale: %v %q", err, data)
 	}
 	stdout, _, code = runOK(t, home, proj, mkPrompt("部署清单"), "hook", "prompt")
-	if code != 0 || !strings.Contains(stdout, "上线前先跑回归测试套件。") {
+	if code != 0 || !strings.Contains(stdout, "上线步骤") {
 		t.Fatalf("prompt after manual edit: code=%d out=%q", code, stdout)
 	}
 	if data, err := os.ReadFile(filepath.Join(kbDir, "INDEX.md")); err != nil || !strings.Contains(string(data), "部署清单") {
@@ -191,7 +191,7 @@ func TestEndToEnd(t *testing.T) {
 		t.Fatalf("on: code=%d", code)
 	}
 	stdout, _, code = runOK(t, home, proj, ev, "hook", "prompt")
-	if code != 0 || !strings.Contains(stdout, "Conventional Commits") {
+	if code != 0 || !strings.Contains(stdout, "Git 提交规范") {
 		t.Fatalf("re-enabled prompt: code=%d out=%q", code, stdout)
 	}
 }

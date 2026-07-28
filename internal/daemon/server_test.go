@@ -114,7 +114,7 @@ func TestHookPromptViaHTTP(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&hr); err != nil {
 		t.Fatal(err)
 	}
-	if hr.Code != 0 || !strings.Contains(hr.Stdout, "Conventional Commits") {
+	if hr.Code != 0 || !strings.Contains(hr.Stdout, "提交规范") || !strings.Contains(hr.Stdout, "git.md") {
 		t.Fatalf("hook prompt: %+v", hr)
 	}
 }
