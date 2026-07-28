@@ -29,6 +29,9 @@ func waitHealthy(t *testing.T, d time.Duration) *daemonx.Info {
 func TestRunStopAndSecondInstance(t *testing.T) {
 	t.Setenv("OK_HOME", t.TempDir())
 	_ = stubSpawn(t)
+	oldTray := trayEnabled
+	trayEnabled = false
+	t.Cleanup(func() { trayEnabled = oldTray })
 	webDir := t.TempDir()
 
 	// 起第一个 daemon
@@ -75,6 +78,9 @@ func TestRunStopAndSecondInstance(t *testing.T) {
 func TestRunPortFallback(t *testing.T) {
 	t.Setenv("OK_HOME", t.TempDir())
 	_ = stubSpawn(t)
+	oldTray := trayEnabled
+	trayEnabled = false
+	t.Cleanup(func() { trayEnabled = oldTray })
 	// 占用默认端口（无 daemon.json → 不是"已有 daemon"）→ Run 应回退随机端口
 	ln, err := net.Listen("tcp", "127.0.0.1:17888")
 	if err != nil {
@@ -94,6 +100,9 @@ func TestRunPortFallback(t *testing.T) {
 func TestRunSelfCheckExitsWhenOrphaned(t *testing.T) {
 	t.Setenv("OK_HOME", t.TempDir())
 	_ = stubSpawn(t)
+	oldTray := trayEnabled
+	trayEnabled = false
+	t.Cleanup(func() { trayEnabled = oldTray })
 	old := selfCheckInterval
 	selfCheckInterval = 100 * time.Millisecond
 	t.Cleanup(func() { selfCheckInterval = old })
@@ -128,6 +137,9 @@ func TestRunSelfCheckExitsWhenOrphaned(t *testing.T) {
 func TestOpenGUI(t *testing.T) {
 	t.Setenv("OK_HOME", t.TempDir())
 	_ = stubSpawn(t)
+	oldTray := trayEnabled
+	trayEnabled = false
+	t.Cleanup(func() { trayEnabled = oldTray })
 	var opened string
 	old := OpenBrowserFunc
 	OpenBrowserFunc = func(url string) uintptr { opened = url; return 0 }

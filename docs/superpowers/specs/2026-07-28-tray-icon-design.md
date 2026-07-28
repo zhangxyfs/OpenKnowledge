@@ -53,6 +53,8 @@ daemon.Run 内以 goroutine 调用，所有 panic 由 tray 内部 defer/recover 
   - 否则 → 调 openGUI（即 daemon 现有 OpenBrowser 链路）并更新记录
 - token 含在 URL 里，同一 daemon 生命周期内 URL 稳定，聚焦复用无鉴权问题
 
+**单窗口的作用域（终审裁定）**：严格意义的"有且只有一个"覆盖托盘双击与同一 daemon 生命周期——此期间 URL（含 token）恒定，Edge 应用模式按 URL 复用窗口（实测：同 URL 再开会替换旧窗口而非堆叠）。`ok gui` 与托盘分属不同进程，跨入口、跨 daemon 重启的场景不保证单窗口；daemon 重启后旧 token 窗口已失效（API 401），应关闭，不复用——复用失效窗口反而是 bug。
+
 ### 生命周期与清理
 
 - daemon 任何退出路径（/api/shutdown、信号、孤儿自检、菜单退出）→ ctx 取消 → tray 消息循环退出 → `Shell_NotifyIconW(NIM_DELETE)` 删除图标

@@ -21,6 +21,9 @@ var OpenBrowserFunc = gui.OpenBrowser
 // selfCheckInterval 自省间隔；测试可调小。
 var selfCheckInterval = 15 * time.Second
 
+// trayEnabled 控制是否启动系统托盘；测试置 false 避免在测试机创建真实托盘图标。
+var trayEnabled = true
+
 // Run 以单实例运行 daemon 并阻塞：端口即锁，第二个实例发现已有健康 daemon 即退出 0。
 // 默认端口被非 daemon 占用时回退随机端口。/api/shutdown 或进程信号结束运行。
 func Run(webDir string, stdout, stderr io.Writer) int {
@@ -83,15 +86,30 @@ func Run(webDir string, stdout, stderr io.Writer) int {
 		}
 	}()
 	// 系统托盘（仅 windows 有效）：单击菜单（版本+退出）、双击打开/聚焦 GUI。
-	// 托盘崩溃/失败不影响主服务；daemon 退出时 ctx 取消带动图标清理。
-	trayCtx, trayCancel := context.WithCancel(context.Background())
-	defer trayCancel()
-	go func() {
-		defer func() { _ = recover() }()
-		tray.Run(trayCtx, version.Version,
-			func() uintptr { return OpenBrowserFunc(info.URL() + "/?token=" + info.Token) },
-			func() { go func() { _ = srv.Shutdown(context.Background()) }() })
-	}()
+	// 托盘崩溃/失败不影响主服务；daemon 退出时先 cancel 再等待清理（NIM_DELETE），
+	// 避免 main 抢先 os.Exit 留下幽灵图标。
+	if trayEnabled {
+		trayCtx, trayCancel := context.WithCancel(context.Background())
+		trayDone := make(chan struct{})
+		defer func() {
+			select {
+			case <-trayDone:
+			case <-time.After(2 * time.Second):
+			}
+		}()
+		defer trayCancel()
+		go func() {
+			defer close(trayDone)
+			defer func() {
+				if r := recover(); r != nil {
+					fmt.Fprintf(stderr, "tray panic: %v\n", r)
+				}
+			}()
+			tray.Run(trayCtx, version.Version,
+				func() uintptr { return OpenBrowserFunc(info.URL() + "/?token=" + info.Token) },
+				func() { go func() { _ = srv.Shutdown(context.Background()) }() })
+		}()
+	}
 	fmt.Fprintf(stdout, "OpenKnowledge daemon: %s\n", info.URL())
 	if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
 		fmt.Fprintln(stderr, err)
