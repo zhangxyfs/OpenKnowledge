@@ -13,7 +13,7 @@ import (
 	"openknowledge/internal/gui"
 )
 
-// OpenBrowserFunc 打开浏览器；测试可替换。
+// OpenBrowserFunc 打开浏览器并返回窗口句柄；测试可替换。
 var OpenBrowserFunc = gui.OpenBrowser
 
 // selfCheckInterval 自省间隔；测试可调小。

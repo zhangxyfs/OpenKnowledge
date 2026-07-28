@@ -130,7 +130,7 @@ func TestOpenGUI(t *testing.T) {
 	_ = stubSpawn(t)
 	var opened string
 	old := OpenBrowserFunc
-	OpenBrowserFunc = func(url string) { opened = url }
+	OpenBrowserFunc = func(url string) uintptr { opened = url; return 0 }
 	t.Cleanup(func() { OpenBrowserFunc = old })
 
 	done := make(chan int, 1)
