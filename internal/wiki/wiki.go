@@ -1,5 +1,5 @@
 // Package wiki 管理项目 wiki 的游标（state/wiki.json）与 git 落后计数。
-// 叶子包：只依赖 stdlib 与外部 git 命令。
+// 叶子包：只依赖 stdlib、procx 与外部 git 命令。
 package wiki
 
 import (
@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"openknowledge/internal/procx"
 )
 
 // Cursor 记录上次 wiki 生成到的位置。
@@ -82,7 +84,9 @@ func CheckStatus(stateDir, srcDir string, threshold int) *Status {
 
 // HeadCommit 返回 srcDir 的 HEAD 完整 hash。
 func HeadCommit(srcDir string) (string, error) {
-	out, err := exec.Command("git", "-C", srcDir, "rev-parse", "HEAD").Output()
+	cmd := exec.Command("git", "-C", srcDir, "rev-parse", "HEAD")
+	procx.HideWindow(cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		return "", err
 	}
@@ -90,7 +94,9 @@ func HeadCommit(srcDir string) (string, error) {
 }
 
 func countCommits(srcDir, rev string) (int, error) {
-	out, err := exec.Command("git", "-C", srcDir, "rev-list", "--count", rev).Output()
+	cmd := exec.Command("git", "-C", srcDir, "rev-list", "--count", rev)
+	procx.HideWindow(cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		return 0, err
 	}

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os/exec"
 	"time"
+
+	"openknowledge/internal/procx"
 )
 
 // OpenBrowser 以最大化窗口打开 Edge/Chrome 应用模式；失败退回默认浏览器（不保证最大化）。
@@ -17,11 +19,15 @@ import (
 func OpenBrowser(url string) {
 	for _, browser := range []string{"msedge", "chrome"} {
 		ps := fmt.Sprintf("Start-Process %s -ArgumentList '--app=%s' -WindowStyle Maximized", browser, url)
-		if err := exec.Command("powershell", "-NoProfile", "-Command", ps).Run(); err == nil {
+		cmd := exec.Command("powershell", "-NoProfile", "-Command", ps)
+		procx.HideWindow(cmd)
+		if err := cmd.Run(); err == nil {
 			maximizeWindowByTitle("OpenKnowledge", 10*time.Second)
 			return
 		}
 	}
-	_ = exec.Command("cmd", "/c", "start", url).Run()
+	fallback := exec.Command("cmd", "/c", "start", url)
+	procx.HideWindow(fallback)
+	_ = fallback.Run()
 	maximizeWindowByTitle("OpenKnowledge", 10*time.Second)
 }
