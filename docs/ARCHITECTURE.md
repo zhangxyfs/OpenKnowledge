@@ -371,6 +371,7 @@ ok setup
 - hook 兜底：daemon 不在时本次请求本地直接处理（hook.Handle* 原逻辑），同时后台拉起 daemon
 - 安装器写 HKCU Run 登录自启；卸载/ok daemon stop/setupx.Uninstall 均可停 daemon
 - kb.db 所有写入收敛到 daemon 单进程；index.Open 另加 busy_timeout(3000) 兜底短暂并发
+- 系统托盘（internal/tray）内嵌 daemon 进程：右下角图标，单击弹菜单（版本号 + 退出）、双击打开/聚焦唯一 GUI 窗口；菜单"退出"与 `ok daemon stop` 同走 /api/shutdown 链路
 
 ### 6.6 wiki（项目 wiki 的生成驱动与落后提醒）
 
