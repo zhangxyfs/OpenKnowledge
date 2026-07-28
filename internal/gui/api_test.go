@@ -1,9 +1,11 @@
 package gui
 
 import (
+	"archive/zip"
 	"bytes"
 	"encoding/json"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -815,5 +817,73 @@ func TestStatusVersionAndHome(t *testing.T) {
 	}
 	if s.AppVersion == "" || s.Home == "" {
 		t.Fatalf("status missing app_version/home: %s", data)
+	}
+}
+
+func TestExportImportEndpoints(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	mkProject(t, okHome, "alpha")
+	// 写一条条目
+	kdir := filepath.Join(okHome, "projects", "alpha", "knowledge")
+	if err := os.WriteFile(filepath.Join(kdir, "a.md"), []byte("---\ntitle: A\ntype: note\ntags: []\nsummary: s\ndraft: false\nmandatory: false\n---\n正文\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	// 鉴权
+	if code, _ := do(t, "GET", srv.URL+"/api/export?project=all", "wrong", nil); code != 401 {
+		t.Fatal("export auth")
+	}
+	if code, _ := do(t, "POST", srv.URL+"/api/import", "wrong", nil); code != 401 {
+		t.Fatal("import auth")
+	}
+	// 导出
+	code, data := do(t, "GET", srv.URL+"/api/export?project=all", testToken, nil)
+	if code != 200 {
+		t.Fatalf("export code=%d", code)
+	}
+	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil || len(zr.File) == 0 {
+		t.Fatalf("not a zip: %v", err)
+	}
+	// 项目不存在
+	if code, _ := do(t, "GET", srv.URL+"/api/export?project=nope", testToken, nil); code != 404 {
+		t.Fatal("export 404")
+	}
+	// 删掉条目后用刚导出的包导入
+	if err := os.Remove(filepath.Join(kdir, "a.md")); err != nil {
+		t.Fatal(err)
+	}
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	fw, _ := mw.CreateFormFile("file", "backup.zip")
+	if _, err := fw.Write(data); err != nil {
+		t.Fatal(err)
+	}
+	mw.Close()
+	req, _ := http.NewRequest("POST", srv.URL+"/api/import", &body)
+	req.Header.Set("X-Ok-Token", testToken)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	rdata, _ := io.ReadAll(res.Body)
+	if res.StatusCode != 200 {
+		t.Fatalf("import code=%d body=%s", res.StatusCode, rdata)
+	}
+	var rep struct {
+		Imported int `json:"imported"`
+	}
+	if err := json.Unmarshal(rdata, &rep); err != nil {
+		t.Fatal(err)
+	}
+	if rep.Imported != 1 {
+		t.Fatalf("report: %s", rdata)
+	}
+	if _, err := os.Stat(filepath.Join(kdir, "a.md")); err != nil {
+		t.Fatal("entry not restored via endpoint")
 	}
 }

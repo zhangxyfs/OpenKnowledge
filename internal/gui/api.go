@@ -1,9 +1,12 @@
 package gui
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -11,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"openknowledge/internal/backup"
 	"openknowledge/internal/config"
 	"openknowledge/internal/embed"
 	"openknowledge/internal/entry"
@@ -62,6 +66,8 @@ func NewHandler(webDir, token string, beats chan<- struct{}) *Handler {
 	api("POST /api/setup/skills", h.apiSetupSkills)
 	api("POST /api/setup/embedding", h.apiSetupEmbedding)
 	api("POST /api/toggle", h.apiToggle)
+	api("GET /api/export", h.apiExport)
+	api("POST /api/import", h.apiImport)
 	h.mux = mux
 	return h
 }
@@ -294,6 +300,64 @@ func (h *Handler) apiStatus(w http.ResponseWriter, _ *http.Request) {
 		"app_version":         version.Version,
 		"home":                registry.Home(),
 	})
+}
+
+// apiExport 导出知识库 zip（project 缺省 all）。
+func (h *Handler) apiExport(w http.ResponseWriter, r *http.Request) {
+	project := r.URL.Query().Get("project")
+	if project == "" {
+		project = "all"
+	}
+	if project != "all" {
+		reg, err := registry.Load(registry.DefaultPath())
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		found := false
+		for _, p := range reg.Projects {
+			if p.Name == project {
+				found = true
+				break
+			}
+		}
+		if !found {
+			writeErr(w, http.StatusNotFound, "项目不存在: "+project)
+			return
+		}
+	}
+	filename := "openknowledge-backup-" + project + "-" + time.Now().Format("20060102") + ".zip"
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+	if err := backup.Export(w, project); err != nil {
+		log.Printf("export %s: %v", project, err) // 响应头已发，只能记日志
+	}
+}
+
+// apiImport 导入知识库 zip（multipart 字段 file）。
+func (h *Handler) apiImport(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, backup.MaxSize+1<<20)
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "缺少 file 字段或超过大小上限")
+		return
+	}
+	defer file.Close()
+	data, err := io.ReadAll(file)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "读取上传失败或超过 32MB 上限")
+		return
+	}
+	rep, err := backup.Import(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		if errors.Is(err, backup.ErrBadPackage) {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, rep)
 }
 
 func (h *Handler) apiProjects(w http.ResponseWriter, _ *http.Request) {
