@@ -16,8 +16,8 @@ const (
 	wmTrayIcon       = 0x0400 + 1 // WM_USER + 1
 	wmQuit           = 0x0012
 	wmDestroy        = 0x0002
-	wmLButtonUp      = 0x0202
 	wmLButtonDblClk  = 0x0203
+	wmRButtonUp      = 0x0205
 	nimAdd           = 0x00000000
 	nimDelete        = 0x00000002
 	nifMessage       = 0x00000001
@@ -218,7 +218,7 @@ func trayWndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 	switch msg {
 	case wmTrayIcon:
 		switch lParam {
-		case wmLButtonUp:
+		case wmRButtonUp:
 			t.showMenu()
 		case wmLButtonDblClk:
 			t.openOrFocus()
@@ -232,7 +232,7 @@ func trayWndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 	return r
 }
 
-// showMenu 单击弹菜单：灰化版本项 + 分隔线 + 退出。
+// showMenu 右键弹菜单：灰化版本项 + 分隔线 + 退出。
 // 弹出前 SetForegroundWindow 自身窗口，保证点击他处菜单正常消失（Win32 惯例）。
 func (t *Tray) showMenu() {
 	menu, _, _ := procCreatePopupMenu.Call()

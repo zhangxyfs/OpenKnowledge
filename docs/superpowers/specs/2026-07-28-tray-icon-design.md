@@ -7,7 +7,7 @@
 daemon 常驻后台但无任何可见入口，用户无法感知其状态，也无法方便地打开 GUI 或停止服务。目标：
 
 - daemon 运行时，右下角系统托盘显示 OpenKnowledge 图标
-- **单击**图标：弹出菜单（TrackPopupMenu，ZeroTier 风格）——灰化版本号项 + 分隔线 + "退出"
+- **右键单击**图标：弹出菜单（TrackPopupMenu，ZeroTier 风格）——灰化版本号项 + 分隔线 + "退出"（菜单绑右键：左键单击与双击冲突，由用户裁定）
 - **双击**图标：打开 GUI；GUI 窗口有且只有一个——已打开则聚焦既有窗口，不新开
 - "退出"：停止 daemon 整体（托盘消失、服务停止）；后续 hook 触发或登录自启会按需拉起（现有机制，无需新增）
 
@@ -39,7 +39,7 @@ daemon.Run 内以 goroutine 调用，所有 panic 由 tray 内部 defer/recover 
 
 - 图标：`LoadIcon` 读取 exe 自身模块的 RT_GROUP_ICON（logo 已内嵌），不新增资源文件
 - tooltip：`OpenKnowledge v<version>`（版本来自 `internal/version`）
-- 菜单（单击 `WM_LBUTTONUP` 时 `TrackPopupMenu`，`TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON`）：
+- 菜单（右键单击 `WM_RBUTTONUP` 时 `TrackPopupMenu`，`TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON`）：
   1. `OpenKnowledge v<version>`（`MF_GRAYED`，不可点）
   2. 分隔线
   3. `退出` → 调 onQuit
@@ -70,7 +70,7 @@ daemon.Run 内以 goroutine 调用，所有 panic 由 tray 内部 defer/recover 
 - 纯逻辑可单测：菜单项构造（版本文案、项序）、hwnd 复用判定（IsWindow 结果分支）——以注入函数变量的方式测试
 - Win32 集成部分实测验收：
   1. `ok daemon` 启动 → 托盘出现图标，tooltip 版本正确
-  2. 单击 → 菜单弹出，版本项灰化不可点，点击他处菜单消失
+  2. 右键单击 → 菜单弹出，版本项灰化不可点，点击他处菜单消失
   3. 双击 → 打开 GUI 并最大化；再双击 → 聚焦同一窗口不新开
   4. 菜单"退出" → daemon 停止、图标消失；`ok gui` 后图标随新 daemon 回来
   5. 登录自启（HKCU Run）场景图标正常出现
@@ -79,5 +79,5 @@ daemon.Run 内以 goroutine 调用，所有 panic 由 tray 内部 defer/recover 
 
 - 菜单里不加"打开 GUI"项（双击已覆盖）
 - 不做自绘弹窗/气泡通知
-- 不做托盘右键菜单与单击菜单的区分（单击即菜单）
+- 托盘菜单绑右键（`WM_RBUTTONUP`）——用户裁定：左键单击与双击冲突，左键单击不做任何事
 - 非 Windows 平台不实现托盘
