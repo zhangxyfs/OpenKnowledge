@@ -2,7 +2,7 @@
 ; 构建：bash scripts/build-installer.sh（先构建 dist/ 再调用 ISCC）
 
 #define AppName "OpenKnowledge"
-#define AppVersion "2.2.1"
+#define AppVersion "2.2.2"
 #define AppPublisher "OpenKnowledge"
 
 [Setup]
@@ -119,7 +119,12 @@ begin
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ResultCode: Integer;
 begin
+  if CurStep = ssInstall then
+    { 文件拷贝前停常驻 daemon（hooks 会按需自动拉起它锁住 ok.exe；不存在则 Exec 失败无害） }
+    Exec(ExpandConstant('{app}\ok.exe'), 'daemon stop', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   if (CurStep = ssPostInstall) and WizardIsTaskSelected('addpath') then
     AddToUserPath(ExpandConstant('{app}'));
 end;
