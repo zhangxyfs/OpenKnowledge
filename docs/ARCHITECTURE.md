@@ -170,7 +170,7 @@ OpenKnowledge/
 │   ├── app.js                     #   条目 CRUD、检索预览、引导流程、心跳（5s）
 │   └── style.css
 ├── scripts/
-│   └── build-dist.sh              # 发布构建：-ldflags "-s -w" 产出 dist/ok.exe + dist/web/
+│   └── build-dist.sh              # 发布构建：-ldflags "-s -w" + 版本注入，产出 dist/ok.exe + dist/web/
 ├── dist/                          # 发布产物（.gitignore 忽略）：ok.exe + web/
 ├── docs/
 │   ├── ARCHITECTURE.md            # 本文档
@@ -254,18 +254,18 @@ v1 仅 `changelog_required`：触碰文件中存在匹配 `code_globs` 的 且 �
 - `setup.go`：见第 6.4 节
 - `toggle.go`：`On`/`Off` 即删除/创建 `~/.openknowledge/hooks-disabled` 标志文件
 
-### 5.11 gui — Web 管理界面（server.go 98 行 + api.go 580 行）
+### 5.11 gui — Web 管理界面（server.go 27 行 + window_*.go + api.go 864 行）
 
 `ok gui` 或无参数运行（双击 exe）启动的本地 Web 管理界面，供不熟悉命令行的用户完成首次引导与日常知识维护。
 
-- **server.go**：`net.Listen("tcp", "127.0.0.1:0")` 随机端口、仅监听回环；16 字节随机 hex 令牌；启动后自动打开浏览器（Edge/Chrome 应用模式 → 默认浏览器，全失败只打印 URL）；**心跳看门狗**——页面每 5s `POST /api/heartbeat`，收到首个心跳后上膛，30s 无心跳（页面被关闭）自动停服；`POST /api/shutdown` 立即停服。web 资源目录由 `cmd/ok` 定位：`<exe目录>/web` 优先，其次 `<当前目录>/web`（`scripts/build-dist.sh` 产出的 dist/ 布局正好满足前者）。
+- **server.go**：`net.Listen("tcp", "127.0.0.1:0")` 随机端口、仅监听回环；16 字节随机 hex 令牌；启动后自动打开浏览器（Edge/Chrome 应用模式 → 默认浏览器，全失败只打印 URL）；最大化窗口（`maximizeWindowByTitle`，window_windows.go 轮询置顶窗口标题，非 Windows 无操作）为**同步调用**——daemon 化后 `ok gui` 开浏览器即退，协程会随进程死亡。web 资源目录由 `cmd/ok` 定位：`<exe目录>/web` 优先，其次 `<当前目录>/web`（`scripts/build-dist.sh` 产出的 dist/ 布局正好满足前者）。
 - **api.go**：`/api/*` 全部经 `X-Ok-Token` 头鉴权（缺失/错误 401）；`/` 返回注入令牌的 index.html（`{{TOKEN}}` 替换）；静态资源仅白名单 `app.js`/`style.css`；条目文件名参数必须是不含 `..` 与路径分隔符的 `.md` 基本名（防路径穿越）；写操作（POST/PUT/DELETE entry）落盘后自动 `index.Sync` 同步索引库。
 
 API 一览：
 
 | 方法 | 路径 | 作用 |
 |------|------|------|
-| GET | `/api/status` | 项目列表 + hooks/技能/embedding 安装状态 + 全局开关状态（前端据此决定默认标签页） |
+| GET | `/api/status` | 项目列表 + hooks/技能/embedding 安装状态 + 全局开关状态 + `app_version`（构建期注入版本）与 `home`（KB 根目录）（前端据此决定默认标签页） |
 | GET | `/api/projects` | 注册表项目列表 |
 | GET | `/api/entries?project=` | 项目条目摘要列表 |
 | GET | `/api/entry?project=&file=` | 条目详情（含正文） |
@@ -283,8 +283,22 @@ API 一览：
 | POST | `/api/heartbeat` | 页面心跳（204） |
 | POST | `/api/shutdown` | 停服 |
 | POST | `/api/uninstall` | 卸载集成：移除 hooks 标记块、技能目录、全局 [embedding]；KB 数据保留（`setupx.Uninstall`） |
+| GET | `/api/export?project=<名\|all>` | 知识库导出 zip（`backup.Export`；project 缺省 all，项目不存在 404） |
+| POST | `/api/import` | multipart `file` 上传备份 zip 导入（`backup.Import`，32MB 上限；`ErrBadPackage` → 400，成功返回 `Report{imported, skipped, projects}`） |
 
-前端 `web/`（零依赖原生 HTML/JS/CSS）：「管理」标签页（项目/条目列表、新建/编辑/删除、检索预览带命中高亮、草稿条目带「草稿」徽标与「采纳」按钮、全局开关）+「引导」标签页（hooks/技能/embedding/全局开关状态卡、「经验沉淀」卡片查看/切换 capture 模式与轮次间隔、危险区「卸载」卡片）。hooks 未安装时「管理」页隐藏，「引导」为默认页。
+前端 `web/`（零依赖原生 HTML/JS/CSS）：「管理」标签页（项目/条目列表、新建/编辑/删除、检索预览带命中高亮、草稿条目带「草稿」徽标与「采纳」按钮、全局开关）+「引导」标签页（hooks/技能/embedding/全局开关状态卡、「经验沉淀」卡片查看/切换 capture 模式与轮次间隔、危险区「卸载」卡片）+「其他」标签页（数据导出/导入、关于卡片显示版本与项目数）。hooks 未安装时「管理」页隐藏，「引导」为默认页。
+
+### 5.12 backup — 知识库导出/导入（251 行）
+
+GUI「其他」tab 背后的备份包（叶子包：stdlib zip + registry/entry/store/index）：
+
+- `Export(w io.Writer, project string)`：registry.toml + 各项目 `knowledge/*.md` + `config.toml` 打成 zip；`project="all"` 全导，单项目时 registry 随之过滤
+- `Import(r io.ReaderAt, size int64)`：`MaxSize` 32MB 上限、zip-slip 防护（拒绝 `..`/绝对路径）、只接受 `registry.toml`/`projects/<名>/knowledge/*.md`/`projects/<名>/config.toml` 三类路径；条目 .md 过 `entry.Parse` 失败计 skipped 不阻断；同名覆盖、缺失项目自动注册（同名已注册则合并进现有目录）；最后逐项目 `index.Sync` 重建索引
+- 返回 `Report{imported, skipped, projects}`；客户端侧错误统一包 `ErrBadPackage`（HTTP 层映射 400）
+
+### 5.13 version — 构建期注入的应用版本号（6 行）
+
+`var Version = "dev"`；`scripts/build-dist.sh` 用 sed 从 `installer/openknowledge.iss` 的 `#define AppVersion` 提取版本，经 `-ldflags -X openknowledge/internal/version.Version=` 注入——版本事实源只有 .iss 一处，裸 `go build` 为 `dev`。经 `/api/status` 的 `app_version` 暴露给前端。
 
 ---
 
@@ -350,7 +364,7 @@ ok setup
 - internal/daemonx（叶子包）：daemon.json 凭证（pid/port/token/exe指纹）、健康检查、版本判定
 - internal/daemon（编排包）：HTTP mux（/api/health、/api/hook/* + gui.Handler）、Run（端口即单实例锁，
   默认 17888，占用回退随机）、spawn（DETACHED 后台拉起，15s 防抖）、ForwardHook（瘦客户端转发，
-  9s 超时 fail-open）、OpenGUI（ensure + 开浏览器即退）
+  9s 超时 fail-open）、OpenGUI（ensure + 开浏览器即退；窗口最大化为同步调用——开浏览器即退的进程里协程会随之死亡）
 - exe 指纹 = 路径|size|mtime：exe 升级后客户端发现指纹不一致 → 旧 daemon shutdown → 拉起新版
 - hook 兜底：daemon 不在时本次请求本地直接处理（hook.Handle* 原逻辑），同时后台拉起 daemon
 - 安装器写 HKCU Run 登录自启；卸载/ok daemon stop/setupx.Uninstall 均可停 daemon
@@ -522,10 +536,10 @@ hook prompt（基础注入之后）
 ```bash
 go build -o ok.exe ./cmd/ok   # Windows
 go build -o ok ./cmd/ok       # Linux/macOS
-bash scripts/build-dist.sh    # 发布构建：dist/ok.exe（-ldflags "-s -w"）+ dist/web/
+bash scripts/build-dist.sh    # 发布构建：dist/ok.exe（-ldflags "-s -w -H windowsgui" + 版本注入）+ dist/web/
 ```
 
-无构建标签、无代码生成、无资源嵌入；`go.mod` 声明 `go 1.25.0`。GUI 的 web 资源不内嵌，由 `dist/web/` 随二进制分发。
+无构建标签、无代码生成、无资源嵌入；`go.mod` 声明 `go 1.25.0`。GUI 的 web 资源不内嵌，由 `dist/web/` 随二进制分发。应用版本号由 build-dist.sh 用 sed 从 `installer/openknowledge.iss` 的 `#define AppVersion` 提取，经 `-ldflags -X openknowledge/internal/version.Version=<版本>` 注入 `internal/version.Version`（事实源只有 .iss 一处；裸 `go build` 为 `dev`）。
 
 ### 12.2 常用开发命令
 
