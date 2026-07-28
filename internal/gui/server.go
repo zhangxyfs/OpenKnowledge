@@ -12,14 +12,16 @@ import (
 // OpenBrowser 以最大化窗口打开 Edge/Chrome 应用模式；失败退回默认浏览器（不保证最大化）。
 // 注：cmd start 会吞 --start-maximized 参数，Edge 单实例时 Start-Process 的
 // -WindowStyle 也会被既有进程吞掉，只能在窗口出现后事后 ShowWindow 兜底。
+// maximizeWindowByTitle 必须同步调用：ok gui 开浏览器即退（daemon 托管生命周期），
+// 协程会随进程退出而被杀——v2.1 的"不自动最大化"回归正源于此。
 func OpenBrowser(url string) {
 	for _, browser := range []string{"msedge", "chrome"} {
 		ps := fmt.Sprintf("Start-Process %s -ArgumentList '--app=%s' -WindowStyle Maximized", browser, url)
 		if err := exec.Command("powershell", "-NoProfile", "-Command", ps).Run(); err == nil {
-			go maximizeWindowByTitle("OpenKnowledge", 10*time.Second)
+			maximizeWindowByTitle("OpenKnowledge", 10*time.Second)
 			return
 		}
 	}
 	_ = exec.Command("cmd", "/c", "start", url).Run()
-	go maximizeWindowByTitle("OpenKnowledge", 10*time.Second)
+	maximizeWindowByTitle("OpenKnowledge", 10*time.Second)
 }
