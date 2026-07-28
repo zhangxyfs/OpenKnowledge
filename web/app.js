@@ -63,11 +63,14 @@
   function switchTab(name) {
     $("tab-manage").classList.toggle("active", name === "manage");
     $("tab-guide").classList.toggle("active", name === "guide");
+    $("tab-misc").classList.toggle("active", name === "misc");
     $("page-manage").classList.toggle("hidden", name !== "manage");
     $("page-guide").classList.toggle("hidden", name !== "guide");
+    $("page-misc").classList.toggle("hidden", name !== "misc");
   }
   $("tab-manage").addEventListener("click", function () { switchTab("manage"); });
   $("tab-guide").addEventListener("click", function () { switchTab("guide"); });
+  $("tab-misc").addEventListener("click", function () { switchTab("misc"); });
 
   // ---------- 启动与状态 ----------
 
@@ -75,6 +78,9 @@
     return api("/api/status").then(function (s) {
       state.status = s;
       renderGuide(s);
+      $("misc-version").textContent = "OpenKnowledge v" + (s.app_version || "dev");
+      $("misc-home").textContent = "知识库目录：" + (s.home || "");
+      $("misc-project-count").textContent = "已注册项目：" + ((s.projects || []).length) + " 个";
       if (!s.projects || s.projects.length === 0) {
         // 首次运行：隐藏管理 tab，只展示引导页
         $("tab-manage").classList.add("hidden");
@@ -104,6 +110,21 @@
     var names = projects.map(function (p) { return p.name; });
     state.project = names.indexOf(prev) >= 0 ? prev : names[0];
     sel.value = state.project;
+    // "其他"页的导出项目下拉：与管理页项目列表保持同步
+    var exp = $("misc-export-project");
+    if (exp) {
+      exp.innerHTML = "";
+      var all = document.createElement("option");
+      all.value = "all";
+      all.textContent = "全部项目";
+      exp.appendChild(all);
+      (projects || []).forEach(function (p) {
+        var o = document.createElement("option");
+        o.value = p.name;
+        o.textContent = p.name;
+        exp.appendChild(o);
+      });
+    }
     loadEntries();
   }
 
@@ -472,6 +493,53 @@
         refreshStatus();
       })
       .catch(function (err) { showError(err.message); });
+  });
+
+  // ---------- 其他页：导出 / 导入 ----------
+
+  $("btn-export").addEventListener("click", function () {
+    var p = $("misc-export-project").value || "all"; // 无项目时下拉为空，回退到全部
+    fetch("/api/export?project=" + encodeURIComponent(p), {
+      headers: { "X-Ok-Token": TOKEN },
+    }).then(function (res) {
+      if (!res.ok) {
+        return res.json().catch(function () { return {}; }).then(function (e) {
+          showError("导出失败：" + (e.error || res.status));
+        });
+      }
+      return res.blob().then(function (blob) {
+        var a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "openknowledge-backup-" + p + ".zip";
+        a.click();
+        URL.revokeObjectURL(a.href);
+      });
+    }).catch(function (err) { showError("网络错误: " + err.message); });
+  });
+
+  $("btn-import").addEventListener("click", function () {
+    var out = $("misc-import-result");
+    var f = $("misc-import-file").files[0];
+    if (!f) {
+      out.textContent = "请先选择 zip 文件";
+      return;
+    }
+    var fd = new FormData();
+    fd.append("file", f);
+    fetch("/api/import", { method: "POST", headers: { "X-Ok-Token": TOKEN }, body: fd })
+      .then(function (res) {
+        return res.json().catch(function () { return {}; }).then(function (data) {
+          if (!res.ok) {
+            out.textContent = "导入失败：" + (data.error || res.status);
+            return;
+          }
+          out.textContent = "导入 " + data.imported + " 条，跳过 " + data.skipped +
+            " 条（格式损坏），涉及项目：" + (data.projects || []).join("、") + "；同名条目已覆盖";
+          state.lastVersion = 0;
+          refreshStatus();
+          loadEntries();
+        });
+      }).catch(function (err) { showError("网络错误: " + err.message); });
   });
 
   // ---------- 心跳（关闭页面 30s 后服务自动退出） ----------

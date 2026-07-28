@@ -17,6 +17,7 @@
     <nav class="tabs">
       <button id="tab-manage" type="button" class="tab">管理</button>
       <button id="tab-guide" type="button" class="tab">引导</button>
+      <button id="tab-misc" type="button" class="tab">其他</button>
     </nav>
   </header>
 
@@ -123,6 +124,33 @@
           <li>用 <code>ok add</code> 添加知识条目</li>
           <li>新开 kimi 会话即可生效；<code>ok off</code> / <code>ok on</code> 可随时全局开关</li>
         </ol>
+      </div>
+    </section>
+
+    <section id="page-misc" class="page hidden">
+      <div class="cards">
+        <div class="card">
+          <div class="card-head"><h3>数据导出</h3></div>
+          <p class="card-desc muted">导出 registry 与条目（不含索引，导入时自动重建）。</p>
+          <div class="card-actions">
+            <select id="misc-export-project"></select>
+            <button id="btn-export" type="button" class="btn">导出</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>数据导入</h3></div>
+          <div class="card-actions">
+            <input id="misc-import-file" type="file" accept=".zip">
+            <button id="btn-import" type="button" class="btn">导入</button>
+          </div>
+          <p id="misc-import-result" class="card-desc muted"></p>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>关于</h3></div>
+          <p id="misc-version" class="card-desc muted"></p>
+          <p id="misc-home" class="card-desc muted"></p>
+          <p id="misc-project-count" class="card-desc muted"></p>
+        </div>
       </div>
     </section>
   </main>
