@@ -11,6 +11,8 @@ import (
 
 	"openknowledge/internal/daemonx"
 	"openknowledge/internal/gui"
+	"openknowledge/internal/tray"
+	"openknowledge/internal/version"
 )
 
 // OpenBrowserFunc 打开浏览器并返回窗口句柄；测试可替换。
@@ -79,6 +81,16 @@ func Run(webDir string, stdout, stderr io.Writer) int {
 				return
 			}
 		}
+	}()
+	// 系统托盘（仅 windows 有效）：单击菜单（版本+退出）、双击打开/聚焦 GUI。
+	// 托盘崩溃/失败不影响主服务；daemon 退出时 ctx 取消带动图标清理。
+	trayCtx, trayCancel := context.WithCancel(context.Background())
+	defer trayCancel()
+	go func() {
+		defer func() { _ = recover() }()
+		tray.Run(trayCtx, version.Version,
+			func() uintptr { return OpenBrowserFunc(info.URL() + "/?token=" + info.Token) },
+			func() { go func() { _ = srv.Shutdown(context.Background()) }() })
 	}()
 	fmt.Fprintf(stdout, "OpenKnowledge daemon: %s\n", info.URL())
 	if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
