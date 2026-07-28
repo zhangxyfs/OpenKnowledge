@@ -96,6 +96,31 @@ func TestCaptureDefaults(t *testing.T) {
 	}
 }
 
+func TestWikiConfigDefaultAndOverride(t *testing.T) {
+	def := Default()
+	if def.Wiki.StaleCommits != 20 {
+		t.Fatalf("default stale_commits = %d, want 20", def.Wiki.StaleCommits)
+	}
+	dir := t.TempDir()
+	global := filepath.Join(dir, "global.toml")
+	project := filepath.Join(dir, "project.toml")
+	os.WriteFile(global, []byte("[wiki]\nstale_commits = 50\n"), 0o644)
+	os.WriteFile(project, []byte("[wiki]\nstale_commits = 0\n"), 0o644)
+	cfg, err := LoadMerged(project, global)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Wiki.StaleCommits != 0 {
+		t.Fatalf("project override: %d, want 0", cfg.Wiki.StaleCommits)
+	}
+	// 项目文件不写 wiki 时继承全局
+	os.WriteFile(project, []byte(""), 0o644)
+	cfg, _ = LoadMerged(project, global)
+	if cfg.Wiki.StaleCommits != 50 {
+		t.Fatalf("global inherit: %d, want 50", cfg.Wiki.StaleCommits)
+	}
+}
+
 func TestCaptureLoad(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(path, []byte("[capture]\nmode = \"auto\"\nturn_interval = 9\n"), 0o644); err != nil {

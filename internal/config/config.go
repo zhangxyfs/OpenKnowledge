@@ -51,12 +51,18 @@ type Capture struct {
 	TurnInterval int    `toml:"turn_interval"`
 }
 
+// Wiki 控制 wiki 落后提示。
+type Wiki struct {
+	StaleCommits int `toml:"stale_commits"` // 落后多少 commit 提示；0 = 关闭
+}
+
 type Config struct {
 	Embedding Embedding     `toml:"embedding"`
 	Inject    Inject        `toml:"inject"`
 	Retrieve  Retrieve      `toml:"retrieve"`
 	Enforce   []EnforceRule `toml:"enforce"`
 	Capture   Capture       `toml:"capture"`
+	Wiki      Wiki          `toml:"wiki"`
 }
 
 func Default() Config {
@@ -65,6 +71,7 @@ func Default() Config {
 		Inject:    Inject{MaxTokens: 1500},
 		Retrieve:  Retrieve{Alpha: 1.0, Beta: 1.0, TopN: 3},
 		Capture:   Capture{Mode: "propose", TurnInterval: 5},
+		Wiki:      Wiki{StaleCommits: 20},
 	}
 }
 
