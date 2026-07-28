@@ -136,3 +136,35 @@ func (db *DB) Mandatory() ([]Hit, error) {
 	}
 	return out, rows.Err()
 }
+
+// WikiEntry 是 Wiki 目录的一行。
+type WikiEntry struct {
+	Title    string
+	Filename string
+	Summary  string
+}
+
+// WikiEntries 返回打 wiki 标签的已转正条目（按 title 排序）。
+func (db *DB) WikiEntries() ([]WikiEntry, error) {
+	rows, err := db.sql.Query(`SELECT title, filename, summary FROM entries WHERE draft = 0 AND tags LIKE '%wiki%' ORDER BY title`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []WikiEntry
+	for rows.Next() {
+		var e WikiEntry
+		if err := rows.Scan(&e.Title, &e.Filename, &e.Summary); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// WikiCount 返回 wiki 条目数（ok wiki mark 展示用）。
+func (db *DB) WikiCount() (int, error) {
+	var n int
+	err := db.sql.QueryRow(`SELECT COUNT(*) FROM entries WHERE draft = 0 AND tags LIKE '%wiki%'`).Scan(&n)
+	return n, err
+}

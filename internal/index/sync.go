@@ -245,5 +245,15 @@ func (db *DB) rebuildIndex(dir string) error {
 	if err := rows.Err(); err != nil {
 		return err
 	}
+	if wikiEntries, err := db.WikiEntries(); err == nil && len(wikiEntries) > 0 {
+		b.WriteString("\n## Wiki 目录\n\n")
+		for _, we := range wikiEntries {
+			if we.Summary != "" {
+				fmt.Fprintf(&b, "- [%s](%s) — %s\n", we.Title, we.Filename, we.Summary)
+			} else {
+				fmt.Fprintf(&b, "- [%s](%s)\n", we.Title, we.Filename)
+			}
+		}
+	}
 	return os.WriteFile(filepath.Join(filepath.Dir(dir), "INDEX.md"), []byte(b.String()), 0o644)
 }
