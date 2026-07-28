@@ -11,7 +11,7 @@ func TestLoadMissingReturnsDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Inject.MaxTokens != 1500 || cfg.Retrieve.TopN != 3 || cfg.Embedding.TimeoutSec != 5 {
+	if cfg.Inject.MaxTokens != 800 || cfg.Retrieve.TopN != 2 || cfg.Embedding.TimeoutSec != 5 {
 		t.Fatalf("unexpected defaults %+v", cfg)
 	}
 }
@@ -64,14 +64,14 @@ func TestLoadMergedPrecedence(t *testing.T) {
 	if cfg.Embedding.BaseURL != "https://g.example.com/v1" || cfg.Embedding.APIKey != "gk" {
 		t.Fatalf("global embedding should apply, got %+v", cfg.Embedding)
 	}
-	if cfg.Inject.MaxTokens != 1500 {
+	if cfg.Inject.MaxTokens != 800 {
 		t.Fatalf("builtin default lost, got %+v", cfg.Inject)
 	}
 }
 
 func TestLoadMergedMissingFiles(t *testing.T) {
 	cfg, err := LoadMerged(filepath.Join(t.TempDir(), "a.toml"), filepath.Join(t.TempDir(), "b.toml"))
-	if err != nil || cfg.Retrieve.TopN != 3 {
+	if err != nil || cfg.Retrieve.TopN != 2 {
 		t.Fatalf("missing files should yield defaults, got %+v err=%v", cfg, err)
 	}
 }

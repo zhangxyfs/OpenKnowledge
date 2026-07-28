@@ -68,8 +68,8 @@ type Config struct {
 func Default() Config {
 	return Config{
 		Embedding: Embedding{TimeoutSec: 5},
-		Inject:    Inject{MaxTokens: 1500},
-		Retrieve:  Retrieve{Alpha: 1.0, Beta: 1.0, TopN: 3},
+		Inject:    Inject{MaxTokens: 800},
+		Retrieve:  Retrieve{Alpha: 1.0, Beta: 1.0, TopN: 2},
 		Capture:   Capture{Mode: "propose", TurnInterval: 5},
 		Wiki:      Wiki{StaleCommits: 20},
 	}

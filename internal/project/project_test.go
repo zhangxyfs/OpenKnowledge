@@ -26,7 +26,7 @@ func TestFromCwd(t *testing.T) {
 	if ctx.Project.Name != "demo" {
 		t.Fatalf("unexpected project %+v", ctx.Project)
 	}
-	if ctx.Config.Inject.MaxTokens != 1500 {
+	if ctx.Config.Inject.MaxTokens != 800 {
 		t.Fatalf("expected default config, got %+v", ctx.Config)
 	}
 	if _, err := FromCwd(filepath.Join(home, "nowhere")); err == nil {
