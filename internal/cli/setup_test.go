@@ -48,6 +48,7 @@ func TestSetupInteractiveSkipKeepsGlobal(t *testing.T) {
 func TestInitTemplateHasNoActiveEmbedding(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("OK_HOME", home)
+	t.Setenv("KIMI_CODE_HOME", filepath.Join(home, "kimi")) // 隔离真实 kimi 配置，Init 会写 hooks
 	proj := filepath.Join(home, "demo")
 	if err := os.MkdirAll(proj, 0o755); err != nil {
 		t.Fatal(err)
