@@ -8,11 +8,12 @@ import (
 	"openknowledge/internal/embed"
 )
 
-// Hit 是一条检索命中，携带注入所需的正文。
+// Hit 是一条检索命中，携带注入所需的正文与摘要。
 type Hit struct {
 	Filename string
 	Title    string
 	Type     string
+	Summary  string
 	Body     string
 	Score    float64
 }
@@ -42,7 +43,7 @@ func (db *DB) Query(terms []string, queryVec []float32, cfg config.Retrieve) ([]
 	// 归一化为 kw/(kw+6)。
 	if match := buildMatch(terms); match != "" {
 		rows, err := db.sql.Query(
-			`SELECT e.filename, e.title, e.type, e.body,
+			`SELECT e.filename, e.title, e.type, e.summary, e.body,
 				bm25(entries_fts, 10.0, 8.0, 3.0, 1.0) AS r
 			FROM entries_fts JOIN entries e ON e.filename = entries_fts.filename
 			WHERE entries_fts MATCH ? AND e.mandatory = 0 AND e.draft = 0`, match)
@@ -52,7 +53,7 @@ func (db *DB) Query(terms []string, queryVec []float32, cfg config.Retrieve) ([]
 		for rows.Next() {
 			var h Hit
 			var rank float64
-			if err := rows.Scan(&h.Filename, &h.Title, &h.Type, &h.Body, &rank); err != nil {
+			if err := rows.Scan(&h.Filename, &h.Title, &h.Type, &h.Summary, &h.Body, &rank); err != nil {
 				_ = rows.Close()
 				return nil, err
 			}
@@ -70,16 +71,16 @@ func (db *DB) Query(terms []string, queryVec []float32, cfg config.Retrieve) ([]
 	// 语义通道：向量全量读入内存算余弦（万条毫秒级）。
 	if len(queryVec) > 0 {
 		rows, err := db.sql.Query(
-			`SELECT e.filename, e.title, e.type, e.body, v.blob
+			`SELECT e.filename, e.title, e.type, e.summary, e.body, v.blob
 			FROM vectors v JOIN entries e ON e.filename = v.filename
 			WHERE e.mandatory = 0 AND e.draft = 0`)
 		if err != nil {
 			return nil, err
 		}
 		for rows.Next() {
-			var filename, title, typ, body string
+			var filename, title, typ, summary, body string
 			var blob []byte
-			if err := rows.Scan(&filename, &title, &typ, &body, &blob); err != nil {
+			if err := rows.Scan(&filename, &title, &typ, &summary, &body, &blob); err != nil {
 				_ = rows.Close()
 				return nil, err
 			}
@@ -88,7 +89,7 @@ func (db *DB) Query(terms []string, queryVec []float32, cfg config.Retrieve) ([]
 				h.Score += cfg.Beta * cos
 			} else if cos > 0 {
 				hits[filename] = &Hit{
-					Filename: filename, Title: title, Type: typ, Body: body,
+					Filename: filename, Title: title, Type: typ, Summary: summary, Body: body,
 					Score: cfg.Beta * cos,
 				}
 			}
