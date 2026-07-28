@@ -21,6 +21,9 @@ import (
 // MaxSize 是导入包的大小上限。
 const MaxSize = 32 << 20
 
+// maxDecompressed 是导入包解压后的总大小上限（防 zip bomb）。包级变量以便测试调小。
+var maxDecompressed int64 = 256 << 20
+
 // ErrBadPackage 标记客户端侧的包错误（HTTP 层映射 400）。
 var ErrBadPackage = errors.New("无效的备份包")
 
@@ -112,6 +115,7 @@ func Import(r io.ReaderAt, size int64) (*Report, error) {
 	var regData []byte
 	var entries []item
 	var configs []item
+	budget := maxDecompressed
 	for _, f := range zr.File {
 		if !validName(f.Name) {
 			return nil, fmt.Errorf("%w: 非法路径 %q", ErrBadPackage, f.Name)
@@ -119,17 +123,17 @@ func Import(r io.ReaderAt, size int64) (*Report, error) {
 		parts := strings.Split(f.Name, "/")
 		switch {
 		case f.Name == "registry.toml":
-			if regData, err = readZipFile(f); err != nil {
+			if regData, err = readZipFile(f, &budget); err != nil {
 				return nil, err
 			}
 		case len(parts) == 4 && parts[0] == "projects" && parts[2] == "knowledge" && strings.HasSuffix(parts[3], ".md"):
-			data, err := readZipFile(f)
+			data, err := readZipFile(f, &budget)
 			if err != nil {
 				return nil, err
 			}
 			entries = append(entries, item{parts[1], parts[3], data})
 		case len(parts) == 3 && parts[0] == "projects" && parts[2] == "config.toml":
-			data, err := readZipFile(f)
+			data, err := readZipFile(f, &budget)
 			if err != nil {
 				return nil, err
 			}
@@ -241,11 +245,19 @@ func validName(name string) bool {
 	return true
 }
 
-func readZipFile(f *zip.File) ([]byte, error) {
+func readZipFile(f *zip.File, budget *int64) ([]byte, error) {
 	rc, err := f.Open()
 	if err != nil {
 		return nil, err
 	}
 	defer rc.Close()
-	return io.ReadAll(rc)
+	data, err := io.ReadAll(io.LimitReader(rc, *budget+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > *budget {
+		return nil, fmt.Errorf("%w: 解压后超过 256MB 上限", ErrBadPackage)
+	}
+	*budget -= int64(len(data))
+	return data, nil
 }

@@ -212,6 +212,26 @@ func TestImportRejectsBadNames(t *testing.T) {
 	}
 }
 
+// zip bomb：条目解压后总体积超上限整包拒绝
+func TestImportRejectsDecompressionBomb(t *testing.T) {
+	setupHome(t)
+	old := maxDecompressed
+	maxDecompressed = 64
+	defer func() { maxDecompressed = old }()
+
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, _ := zw.Create("registry.toml")
+	w.Write([]byte("[[project]]\nname=\"a\"\npaths=[\"x\"]\n"))
+	hdr := &zip.FileHeader{Name: "projects/a/knowledge/big.md", Method: zip.Store}
+	w2, _ := zw.CreateHeader(hdr)
+	w2.Write(make([]byte, 4096))
+	zw.Close()
+	if _, err := Import(bytes.NewReader(buf.Bytes()), int64(buf.Len())); !errors.Is(err, ErrBadPackage) {
+		t.Fatalf("expected ErrBadPackage, got %v", err)
+	}
+}
+
 func TestImportTooBigAndMissingRegistry(t *testing.T) {
 	setupHome(t)
 	if _, err := Import(bytes.NewReader(nil), MaxSize+1); !errors.Is(err, ErrBadPackage) {
