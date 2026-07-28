@@ -237,6 +237,10 @@ func (db *DB) rebuildIndex(dir string) error {
 		if err := rows.Scan(&title, &typ, &tags, &summary, &draft); err != nil {
 			return err
 		}
+		// 已转正的 wiki 条目只进 Wiki 目录节（带链接），主列表不重复
+		if draft == 0 && strings.Contains(tags, "wiki") {
+			continue
+		}
 		if draft != 0 {
 			title = "【草稿】" + title
 		}

@@ -55,6 +55,18 @@ func TestRebuildIndexWikiSection(t *testing.T) {
 		strings.Contains(section, "普通条目") {
 		t.Fatalf("wiki section wrong:\n%s", section)
 	}
+
+	// 主列表（Wiki 目录节之前的部分）不再出现已转正的 wiki 条目；草稿 wiki 仍留主列表
+	main := s[:i]
+	if strings.Contains(main, "A 架构") || strings.Contains(main, "B 模块") {
+		t.Fatalf("wiki entries should not appear in main list:\n%s", main)
+	}
+	if !strings.Contains(main, "【草稿】草稿wiki") {
+		t.Fatalf("draft wiki entry should stay in main list:\n%s", main)
+	}
+	if !strings.Contains(main, "普通条目") {
+		t.Fatalf("plain entry should stay in main list:\n%s", main)
+	}
 }
 
 // 无 wiki 条目时 INDEX.md 不生成 "Wiki 目录" 节（输出与现状逐字节一致）。
