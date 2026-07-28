@@ -3,6 +3,7 @@ package setupx
 
 import (
 	"context"
+	_ "embed"
 	"errors"
 	"fmt"
 	"os"
@@ -221,6 +222,13 @@ func Enable() error {
 		return err
 	}
 	return nil
+}
+
+//go:embed skills/openknowledge-wiki/SKILL.md
+var wikiSkillTemplate string
+
+func init() {
+	skillTemplates["openknowledge-wiki"] = wikiSkillTemplate
 }
 
 var skillTemplates = map[string]string{
