@@ -37,7 +37,7 @@ go build -o ok ./cmd/ok            # Linux/macOS
 `ok setup` 会依次：
 
 1. 把 3 条 hook 写入 `~/.kimi-code/config.toml`（标记块幂等，自动备份原配置；已存在的 ok hooks 会被检测并覆盖更新 exe 路径，不会重复堆积）
-2. 安装 `openknowledge-init / on / off` 三个 kimi 技能到 `~/.agents/skills/`
+2. 安装 `openknowledge-init / on / off / propose / capture / wiki` 六个 kimi 技能到 `~/.agents/skills/`
 3. 询问 embedding 配置（base_url / model / API key，可直接粘贴；回车跳过则只用关键词检索），写入全局配置并当场验证连通性
 
 ## 快速开始
@@ -105,6 +105,7 @@ summary: 每次代码修改必须立即记录变更日志
 | `ok propose` | AI 提议草稿条目（不参与检索，待人批准） |
 | `ok approve <文件>` | 批准草稿转正（同步索引与向量） |
 | `ok capture [propose\|auto\|interval <n>]` | 查看/切换经验沉淀模式，配置轮次间隔 |
+| `ok wiki status` / `ok wiki mark [commit]` | 查看 wiki 落后状态（JSON）/ 记录 wiki 游标（缺省取 HEAD） |
 | `ok search <词>` | 命令行预览检索效果 |
 | `ok index` | 同步索引与向量（手改条目后执行；删除 kb.db 后执行 = 全量重建） |
 | `ok list` | 列出项目与条目 |

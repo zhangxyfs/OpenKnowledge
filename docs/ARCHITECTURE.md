@@ -139,8 +139,11 @@ OpenKnowledge/
 │   │   ├── retrieve.go            #   Terms（CJK 二元组）
 │   │   └── retrieve_test.go
 │   ├── state/                     # 会话状态
-│   │   ├── state.go               #   Session（触碰文件/已阻断规则/已基础注入）、Clean
+│   │   ├── state.go               #   Session（触碰文件/已阻断规则/已基础注入/wiki 已提示）、Clean
 │   │   └── state_test.go
+│   ├── wiki/                      # wiki 游标与落后计数（叶子包：stdlib + 外部 git 命令）
+│   │   ├── wiki.go                #   Cursor 读写（state/wiki.json）、CheckStatus（git rev-list --count）
+│   │   └── wiki_test.go
 │   ├── enforce/                   # 强制规则
 │   │   ├── enforce.go             #   changelog_required 判定（doublestar 匹配）
 │   │   └── enforce_test.go
@@ -332,7 +335,7 @@ ok search <词>   → 命令行预览检索效果（调试注入质量）
 ok setup
   → os.Executable 取自身绝对路径（hooks 命令不依赖 PATH）
   → 备份 ~/.kimi-code/config.toml → 标记块幂等写入 3 条 hook
-  → 安装 openknowledge-init/on/off 三个技能到 ~/.agents/skills/（烧入 exe 路径）
+  → 安装 openknowledge-init/on/off/propose/capture/wiki 六个技能到 ~/.agents/skills/（烧入 exe 路径）
   → 交互（或 flags）收集 embedding base_url/model/API key
       → 写全局 ~/.openknowledge/config.toml（0600）→ 立即连通性验证
   → 打印引导
@@ -352,6 +355,29 @@ ok setup
 - hook 兜底：daemon 不在时本次请求本地直接处理（hook.Handle* 原逻辑），同时后台拉起 daemon
 - 安装器写 HKCU Run 登录自启；卸载/ok daemon stop/setupx.Uninstall 均可停 daemon
 - kb.db 所有写入收敛到 daemon 单进程；index.Open 另加 busy_timeout(3000) 兜底短暂并发
+
+### 6.6 wiki（项目 wiki 的生成驱动与落后提醒）
+
+```
+openknowledge-wiki 技能（AI 驱动）
+  → 扫描项目，ok add --type reference --tags wiki 写 wiki 条目（直接转正，参与检索）
+  → ok wiki mark：游标写入 state/wiki.json（last_commit + generated_at + entry_count）
+
+ok wiki status
+  → git rev-list --count <游标>..HEAD 得落后计数（无游标按全历史；git 不可用 behind=-1）
+  → 与 [wiki] stale_commits 阈值（默认 20，0=关闭）比较得出 stale
+
+index.Sync 重建 INDEX.md
+  → 追加「## Wiki 目录」节（tags LIKE '%wiki%' 且 draft=0，按 title 排序，描述取 summary）
+  → 无 wiki 条目时省略该节（输出与之前逐字节一致）
+
+hook prompt（基础注入之后）
+  → wikiNudge：stale 且本会话未提示过（session.WikiNudged）→ 输出末尾追加 nudge
+  → 从未生成：建议用 openknowledge-wiki 技能生成 wiki；已生成：提示落后 N 个 commit
+  → 每会话最多一次；非 git 项目/git 不可用 fail-open 静默
+```
+
+**目标**：wiki 由 AI 技能生成、但"该不该更新"由机制提醒——游标 + 阈值把 wiki 新鲜度变成可检查的状态，提示复用现有 prompt 注入通道，不增加新 hook。
 
 ---
 
@@ -404,7 +430,9 @@ ok setup
     ├── knowledge/*.md      # 知识条目（一文件一条，frontmatter + 正文）
     ├── INDEX.md            # 机器生成的轻量索引（标题+类型+tags+摘要，由 index.Sync 重建）
     ├── kb.db               # SQLite 索引库：entries（原文）+ entries_fts（FTS5）+ vectors（向量 blob）
-    └── state/session-*.json # 会话状态（Touched/BlockedRules/BaseInjected）
+    └── state/
+        ├── session-*.json  # 会话状态（Touched/BlockedRules/BaseInjected/WikiNudged，超 7 天 GC）
+        └── wiki.json       # wiki 游标（last_commit/generated_at/entry_count；固定文件名，不受 session 7 天 GC 影响）
 ```
 
 **写入纪律**：INDEX.md 与 kb.db 由工具维护，不手改；knowledge/ 是人工维护区；config.toml 项目级手写（模板含注释示例）。旧版 vectors.json 首次打开 kb.db 时自动导入并改名为 `.bak`。
@@ -517,7 +545,7 @@ go build ./...         # 编译检查
 
 | 命令 | 作用 | 关键行为 |
 |------|------|----------|
-| `ok setup` | 首次引导 | 写 hooks 配置（标记块幂等）+ 装 5 个 kimi 技能 + 交互配 embedding + 连通性验证 |
+| `ok setup` | 首次引导 | 写 hooks 配置（标记块幂等）+ 装 6 个 kimi 技能 + 交互配 embedding + 连通性验证 |
 | `ok gui` | 启动 Web 管理界面 | 无参数运行同效；127.0.0.1:17888 + 令牌鉴权（由常驻 daemon 承载），自动开浏览器后即退；页面关闭不退出进程 |
 | `ok daemon [stop]` | 常驻进程管理 | 无参启动常驻 daemon（承载 GUI 与 hook 转发，端口 17888 即单实例锁）；`stop` 停止 daemon |
 | `ok init [名字]` | 注册当前项目 | 名字缺省取目录基名；建 KB 骨架；幂等写入/更新 hooks 配置（复用 setup 逻辑，失败仅提示） |
@@ -525,6 +553,7 @@ go build ./...         # 编译检查
 | `ok propose --title …` | AI 提议草稿条目 | `--type/--tags/--summary/--file|--body`；写 `draft:true`，只同步 INDEX 不算向量，不参与检索 |
 | `ok approve <文件>` | 批准草稿转正 | draft=false 并同步 INDEX 与向量；非草稿/缺文件报错 |
 | `ok capture [propose\|auto]` | 查看/切换沉淀模式 | 无参打印当前模式与 turn_interval；带参写项目 `[capture]` 小节（幂等替换） |
+| `ok wiki status` / `ok wiki mark [commit]` | wiki 游标管理 | `status` 输出 JSON（has_wiki/behind/stale/threshold，git 不可用 behind=-1）；`mark` 记游标（缺省 HEAD）并统计 wiki 条目数 |
 | `ok search <词>` | 检索预览 | 命令行输出打分排序（调试用） |
 | `ok index` | 同步索引库 | 增量同步 kb.db 并重建 INDEX.md、打印条目数（无 key 时向量跳过，退出码 1） |
 | `ok list` | 列出项目与条目 | `*` 标记 mandatory |
@@ -794,6 +823,7 @@ os.ReadDir(knowledge/)                # 只拿文件名，不读内容
 |------|------|
 | `capture.mode` | 经验沉淀模式：`propose`（默认，AI 主动提议草稿人批准）或 `auto`（Stop hook 周期阻断强制自省）；`ok capture <mode>` 或 GUI 沉淀卡写入 |
 | `capture.turn_interval` | auto 模式的自省间隔（Stop 次数，默认 5）；仅项目/全局配置手改 |
+| `wiki.stale_commits` | wiki 落后多少 commit 触发 prompt 提示（默认 20，0 = 关闭） |
 | `[[enforce]].type` | 规则类型，v1 仅 `changelog_required` |
 | `[[enforce]].code_globs` | "算改代码"的 glob 列表。**一律小写**；doublestar 语法，`**/*.go` 可匹配根目录文件 |
 | `[[enforce]].changelog_glob` | "算写日志"的 glob，如 `docs/changelogs/**` |
