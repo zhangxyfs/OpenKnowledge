@@ -85,12 +85,17 @@ func FocusWindow(hwnd uintptr) {
 	if fg == 0 {
 		return
 	}
-	var fgTid uint32
-	procGetWindowThreadProcessId.Call(fg, uintptr(unsafe.Pointer(&fgTid)))
+	// GetWindowThreadProcessId 的线程 ID 是返回值（第二参是进程 ID 出参，不用）
+	fgTid, _, _ := procGetWindowThreadProcessId.Call(fg, 0)
+	if fgTid == 0 {
+		return
+	}
 	curTid, _, _ := procGetCurrentThreadId.Call()
-	procAttachThreadInput.Call(curTid, uintptr(fgTid), 1)
+	if r, _, _ := procAttachThreadInput.Call(curTid, fgTid, 1); r == 0 {
+		return // attach 失败就不 detach（配对原则），直接放弃兜底
+	}
 	procSetForegroundWindow.Call(hwnd)
-	procAttachThreadInput.Call(curTid, uintptr(fgTid), 0)
+	procAttachThreadInput.Call(curTid, fgTid, 0)
 }
 
 // findWindowsByTitle 按 Z 序返回所有可见、标题包含 substr 且属于浏览器进程的
