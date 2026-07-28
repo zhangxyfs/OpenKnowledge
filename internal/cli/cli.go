@@ -101,20 +101,21 @@ func Init(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// Add: ok add --title T --type rule --tags a,b --mandatory [--file body.md]
+// Add: ok add --title T --type rule --tags a,b --summary S --mandatory [--file body.md]
 func Add(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("add", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	title := fs.String("title", "", "条目标题（必填）")
 	typ := fs.String("type", "note", "rule|pitfall|note|reference")
 	tags := fs.String("tags", "", "逗号分隔")
+	summary := fs.String("summary", "", "一句话摘要（缺省取标题）")
 	mandatory := fs.Bool("mandatory", false, "每会话首次提问全文注入")
 	file := fs.String("file", "", "正文来源文件；缺省生成模板")
 	if err := fs.Parse(args); err != nil {
 		return 1
 	}
 	if *title == "" || !entry.ValidType(*typ) {
-		fmt.Fprintln(stderr, "用法: ok add --title <标题> --type <rule|pitfall|note|reference> [--tags a,b] [--mandatory] [--file 正文.md]")
+		fmt.Fprintln(stderr, "用法: ok add --title <标题> --type <rule|pitfall|note|reference> [--tags a,b] [--summary 摘要] [--mandatory] [--file 正文.md]")
 		return 1
 	}
 	pc, code := resolveFromCwd(stderr)
@@ -130,7 +131,11 @@ func Add(args []string, stdout, stderr io.Writer) int {
 		}
 		body = string(data)
 	}
-	e := &entry.Entry{Title: *title, Type: *typ, Mandatory: *mandatory, Summary: *title, Body: strings.TrimSpace(body)}
+	sum := *summary
+	if sum == "" {
+		sum = *title
+	}
+	e := &entry.Entry{Title: *title, Type: *typ, Mandatory: *mandatory, Summary: sum, Body: strings.TrimSpace(body)}
 	if *tags != "" {
 		for _, t := range strings.Split(*tags, ",") {
 			e.Tags = append(e.Tags, strings.TrimSpace(t))

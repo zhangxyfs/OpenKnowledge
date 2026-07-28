@@ -240,3 +240,44 @@ func TestWikiStatusAndMark(t *testing.T) {
 		t.Fatalf("after mark: %+v", st)
 	}
 }
+
+// ok add --summary：显式摘要写入 frontmatter；缺省时取标题（wiki 技能依赖此 flag）。
+func TestAddSummaryFlag(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("OK_HOME", home)
+	t.Setenv("OPENAI_API_KEY", "") // 防止真实网络调用，保证测试离线
+	proj := filepath.Join(home, "demo")
+	if err := os.MkdirAll(proj, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	chdir(t, proj)
+	var out, errBuf bytes.Buffer
+	if code := Init([]string{"demo"}, &out, &errBuf); code != 0 {
+		t.Fatalf("init code=%d err=%q", code, errBuf.String())
+	}
+	kb := filepath.Join(home, "projects", "demo", "knowledge")
+
+	out.Reset()
+	if code := Add([]string{"--title", "自定义摘要条目", "--summary", "自定义"}, &out, &errBuf); code != 0 {
+		t.Fatalf("add --summary code=%d err=%q", code, errBuf.String())
+	}
+	data, err := os.ReadFile(filepath.Join(kb, entry.Slug("自定义摘要条目")+".md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "summary: 自定义") {
+		t.Fatalf("frontmatter should contain custom summary, got %q", data)
+	}
+
+	out.Reset()
+	if code := Add([]string{"--title", "默认摘要条目"}, &out, &errBuf); code != 0 {
+		t.Fatalf("add code=%d err=%q", code, errBuf.String())
+	}
+	data, err = os.ReadFile(filepath.Join(kb, entry.Slug("默认摘要条目")+".md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "summary: 默认摘要条目") {
+		t.Fatalf("frontmatter should default summary to title, got %q", data)
+	}
+}
