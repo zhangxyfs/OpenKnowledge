@@ -797,3 +797,23 @@ func TestCaptureRoundTrip(t *testing.T) {
 		t.Fatalf("invalid interval: status = %d, want 400", code)
 	}
 }
+
+func TestStatusVersionAndHome(t *testing.T) {
+	h, _, _ := newEnv(t)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	code, data := do(t, "GET", srv.URL+"/api/status", testToken, nil)
+	if code != 200 {
+		t.Fatalf("code=%d body=%s", code, data)
+	}
+	var s struct {
+		AppVersion string `json:"app_version"`
+		Home       string `json:"home"`
+	}
+	if err := json.Unmarshal(data, &s); err != nil {
+		t.Fatal(err)
+	}
+	if s.AppVersion == "" || s.Home == "" {
+		t.Fatalf("status missing app_version/home: %s", data)
+	}
+}

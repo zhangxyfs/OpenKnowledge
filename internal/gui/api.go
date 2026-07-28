@@ -19,6 +19,7 @@ import (
 	"openknowledge/internal/retrieve"
 	"openknowledge/internal/setupx"
 	"openknowledge/internal/store"
+	"openknowledge/internal/version"
 )
 
 // Handler 是 GUI 的 HTTP 处理器：/ 与静态资源来自 webDir，/api/* 走令牌鉴权。
@@ -290,6 +291,8 @@ func (h *Handler) apiStatus(w http.ResponseWriter, _ *http.Request) {
 		"embeddingConfigured": embeddingConfigured,
 		"embedding":           embedding,
 		"disabled":            registry.HooksDisabled(),
+		"app_version":         version.Version,
+		"home":                registry.Home(),
 	})
 }
 
