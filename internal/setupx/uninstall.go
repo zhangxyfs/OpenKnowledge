@@ -26,12 +26,14 @@ func Uninstall() (*UninstallResult, error) {
 	// 0. 停止常驻 daemon（不存在则忽略）
 	daemonx.StopDaemon()
 
-	// 1. 移除所有已注册 agent 的 hooks 集成
+	// 1. 移除所有已注册 agent 的 hooks 集成（单 agent 失败不影响其余，错误聚合到最后统一返回）
 	hooksRemoved := false
+	var hookErrs []string
 	for _, a := range agentx.All() {
 		removed, err := a.RemoveHooks()
 		if err != nil {
-			return r, fmt.Errorf("移除 %s hooks: %w", a.ID(), err)
+			hookErrs = append(hookErrs, fmt.Sprintf("%s: %v", a.ID(), err))
+			continue
 		}
 		hooksRemoved = hooksRemoved || removed
 	}
@@ -55,6 +57,9 @@ func Uninstall() (*UninstallResult, error) {
 		return r, fmt.Errorf("移除 embedding 配置: %w", err)
 	}
 	r.EmbeddingRemoved = removed
+	if len(hookErrs) > 0 {
+		return r, fmt.Errorf("移除 hooks 失败: %s", strings.Join(hookErrs, "; "))
+	}
 	return r, nil
 }
 

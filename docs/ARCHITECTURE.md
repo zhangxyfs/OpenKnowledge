@@ -244,7 +244,7 @@ v1 仅 `changelog_required`：触碰文件中存在匹配 `code_globs` 的 且 �
 
 三个 handler 共享同一套防御结构：**第一行检查全局开关 → 解析事件 → 路由项目 → 各自逻辑 → 任何错误只记 ok.log 并 exit 0**。
 
-- hook 入口自愈：开关开启时每次 hook 触发先跑 `selfHealHooks`——遍历 `agentx.Detected()` 逐 agent 调 `EnsureHooks`（kimi 标记块被 kimi-code 清掉时自动备份并重写；pi 扩展内容过期时重写，文件不存在则不动），错误只记 ok.log（fail-open）
+- hook 入口自愈：开关开启时仅在 `HandlePrompt`（hook prompt）入口先跑 `selfHealHooks`——遍历 `agentx.Detected()` 逐 agent 调 `EnsureHooks`（kimi 标记块被 kimi-code 清掉时自动备份并重写；pi 扩展内容过期时重写，文件不存在则不动），错误只记 ok.log（fail-open）
 
 - `Event` 的 `Prompt` 是 `json.RawMessage`，`PromptText()` 兼容两种真实载荷形态（字符串 / `[{"type":"text","text":"..."}]` 数组）
 - `FilePath()` 取 `tool_input.path`（kimi 实际字段），兼容 `file_path`

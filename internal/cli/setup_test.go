@@ -51,6 +51,7 @@ func TestInitTemplateHasNoActiveEmbedding(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("OK_HOME", home)
 	t.Setenv("KIMI_CODE_HOME", filepath.Join(home, "kimi")) // 隔离真实 kimi 配置，Init 会写 hooks
+	t.Setenv("PI_CODING_AGENT_DIR", t.TempDir())
 	proj := filepath.Join(home, "demo")
 	if err := os.MkdirAll(proj, 0o755); err != nil {
 		t.Fatal(err)

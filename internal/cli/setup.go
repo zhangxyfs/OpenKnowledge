@@ -74,7 +74,8 @@ func resolveExe() (string, error) {
 }
 
 // writeHooks 对目标 agent 幂等写入 hooks 集成（targets 为 nil 时取全部已检测
-// agent），供 setup 与 init 共用。
+// agent），供 setup 与 init 共用。单 agent 失败不影响其余：失败逐项收集，
+// 全部尝试后汇总到 stderr 并返回 1。
 func writeHooks(targets []agentx.Agent, exe string, stdout, stderr io.Writer) int {
 	if targets == nil {
 		targets = agentx.Detected()
@@ -83,12 +84,17 @@ func writeHooks(targets []agentx.Agent, exe string, stdout, stderr io.Writer) in
 		fmt.Fprintln(stdout, "未检测到支持的 agent（kimi / pi），跳过 hooks 写入")
 		return 0
 	}
+	var failed []string
 	for _, a := range targets {
 		if err := a.InstallHooks(exe); err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
+			failed = append(failed, fmt.Sprintf("%s: %v", a.ID(), err))
+			continue
 		}
 		fmt.Fprintf(stdout, "hooks 配置已写入 %s\n", a.HooksTarget())
+	}
+	if len(failed) > 0 {
+		fmt.Fprintf(stderr, "部分 agent hooks 写入失败：\n%s\n", strings.Join(failed, "\n"))
+		return 1
 	}
 	return 0
 }

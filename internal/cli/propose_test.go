@@ -19,6 +19,7 @@ func setupProject(t *testing.T) (home, kb string) {
 	home = t.TempDir()
 	t.Setenv("OK_HOME", home)
 	t.Setenv("KIMI_CODE_HOME", filepath.Join(home, "kimi")) // 隔离真实 kimi 配置，Init 会写 hooks
+	t.Setenv("PI_CODING_AGENT_DIR", t.TempDir())
 	t.Setenv("OPENAI_API_KEY", "") // 防止真实网络调用，保证测试离线
 	proj := filepath.Join(home, "demo")
 	if err := os.MkdirAll(proj, 0o755); err != nil {

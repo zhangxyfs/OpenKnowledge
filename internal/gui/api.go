@@ -781,7 +781,8 @@ func (h *Handler) apiUninstall(w http.ResponseWriter, _ *http.Request) {
 // ---------- 安装与配置 ----------
 
 // apiSetupHooks 安装 hooks：body 可指定 {"agent":"<id>"}（未知 id → 400），
-// 缺省为全部已检测 agent；响应列出每个 agent 的安装目标。
+// 缺省为全部已检测 agent；响应列出每个 agent 的安装目标。单 agent 失败不影响
+// 其余（成功项保持落盘，幂等可重试），全部尝试后有失败则 500 聚合报告。
 func (h *Handler) apiSetupHooks(w http.ResponseWriter, r *http.Request) {
 	exe, err := exePath()
 	if err != nil {
@@ -808,12 +809,17 @@ func (h *Handler) apiSetupHooks(w http.ResponseWriter, r *http.Request) {
 		targets = agentx.Detected()
 	}
 	installed := make([]map[string]string, 0, len(targets))
+	var failed []string
 	for _, a := range targets {
 		if err := a.InstallHooks(exe); err != nil {
-			writeErr(w, http.StatusInternalServerError, err.Error())
-			return
+			failed = append(failed, fmt.Sprintf("%s: %v", a.ID(), err))
+			continue
 		}
 		installed = append(installed, map[string]string{"agent": a.ID(), "path": a.HooksTarget()})
+	}
+	if len(failed) > 0 {
+		writeErr(w, http.StatusInternalServerError, "agent hook 安装失败: "+strings.Join(failed, "; "))
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "installed": installed})
 }

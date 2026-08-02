@@ -13,8 +13,8 @@ import (
 	"openknowledge/internal/state"
 )
 
-// TestMain 隔离 KIMI_CODE_HOME：HandlePrompt 的 hooks 自愈会写 kimi config.toml，
-// 测试绝不可触碰真实配置。
+// TestMain 隔离 KIMI_CODE_HOME 与 PI_CODING_AGENT_DIR：HandlePrompt 的 hooks 自愈
+// 会写 kimi config.toml / pi 扩展，测试绝不可触碰真实配置。
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "hook-test-kimi-home")
 	if err != nil {
@@ -22,6 +22,12 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	os.Setenv("KIMI_CODE_HOME", dir)
+	piDir, err := os.MkdirTemp("", "hook-test-pi-home")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	os.Setenv("PI_CODING_AGENT_DIR", piDir)
 	os.Exit(m.Run())
 }
 
