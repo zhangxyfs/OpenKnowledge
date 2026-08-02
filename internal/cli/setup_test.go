@@ -66,3 +66,58 @@ func TestInitTemplateHasNoActiveEmbedding(t *testing.T) {
 		t.Fatalf("project template should leave embedding empty for global inheritance, got %+v", cfg.Embedding)
 	}
 }
+
+func TestSetupUnknownAgent(t *testing.T) {
+	t.Setenv("OK_HOME", t.TempDir())
+	t.Setenv("KIMI_CODE_HOME", t.TempDir())
+	t.Setenv("OK_SKILLS_HOME", t.TempDir())
+	t.Setenv("PI_CODING_AGENT_DIR", t.TempDir())
+	var out, errBuf bytes.Buffer
+	code := Setup([]string{"--agent", "nope"}, strings.NewReader(""), &out, &errBuf)
+	if code != 1 {
+		t.Fatalf("expected code 1, got %d", code)
+	}
+	if !strings.Contains(errBuf.String(), "未知 agent") {
+		t.Fatalf("stderr should mention unknown agent: %q", errBuf.String())
+	}
+}
+
+func TestSetupAgentKimiOnly(t *testing.T) {
+	kimiHome := t.TempDir()
+	piHome := t.TempDir()
+	t.Setenv("OK_HOME", t.TempDir())
+	t.Setenv("KIMI_CODE_HOME", kimiHome)
+	t.Setenv("OK_SKILLS_HOME", t.TempDir())
+	t.Setenv("PI_CODING_AGENT_DIR", piHome)
+	var out, errBuf bytes.Buffer
+	code := Setup([]string{"--agent", "kimi"}, strings.NewReader("\n\n\n"), &out, &errBuf)
+	if code != 0 {
+		t.Fatalf("setup code=%d err=%q", code, errBuf.String())
+	}
+	if _, err := os.Stat(filepath.Join(kimiHome, "config.toml")); err != nil {
+		t.Fatal("kimi hooks should be written")
+	}
+	if _, err := os.Stat(filepath.Join(piHome, "extensions", "openknowledge.ts")); !os.IsNotExist(err) {
+		t.Fatal("pi extension should NOT be written with --agent kimi")
+	}
+}
+
+func TestSetupAllDetectedAgents(t *testing.T) {
+	kimiHome := t.TempDir()
+	piHome := t.TempDir()
+	t.Setenv("OK_HOME", t.TempDir())
+	t.Setenv("KIMI_CODE_HOME", kimiHome)
+	t.Setenv("OK_SKILLS_HOME", t.TempDir())
+	t.Setenv("PI_CODING_AGENT_DIR", piHome)
+	var out, errBuf bytes.Buffer
+	code := Setup(nil, strings.NewReader("\n\n\n"), &out, &errBuf)
+	if code != 0 {
+		t.Fatalf("setup code=%d err=%q", code, errBuf.String())
+	}
+	if _, err := os.Stat(filepath.Join(kimiHome, "config.toml")); err != nil {
+		t.Fatal("kimi hooks should be written")
+	}
+	if _, err := os.Stat(filepath.Join(piHome, "extensions", "openknowledge.ts")); err != nil {
+		t.Fatal("pi extension should be written")
+	}
+}

@@ -21,15 +21,28 @@ func Setup(args []string, in io.Reader, stdout, stderr io.Writer) int {
 	baseURL := fs.String("embedding-base-url", "", "embedding base_url")
 	model := fs.String("embedding-model", "", "embedding model")
 	apiKey := fs.String("embedding-key", "", "embedding API key")
+	agentID := fs.String("agent", "", "只安装指定 agent 的 hooks（kimi|pi）；缺省为全部已检测 agent")
 	if err := fs.Parse(args); err != nil {
 		return 1
+	}
+	var targets []agentx.Agent
+	if *agentID != "" {
+		a, ok := agentx.Find(*agentID)
+		if !ok {
+			fmt.Fprintf(stderr, "未知 agent %q（可用：%s）\n", *agentID, agentIDs())
+			return 1
+		}
+		if !a.Detect() {
+			fmt.Fprintf(stderr, "提示：未检测到 %s，仍将写入其配置\n", a.DisplayName())
+		}
+		targets = []agentx.Agent{a}
 	}
 	exe, err := resolveExe()
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	if code := writeHooks(nil, exe, stdout, stderr); code != 0 {
+	if code := writeHooks(targets, exe, stdout, stderr); code != 0 {
 		return code
 	}
 	if err := setupx.InstallSkills(exe); err != nil {
@@ -117,3 +130,12 @@ const guideText = `
   2. 用 ok add 添加知识条目
   3. 新开 kimi 会话即可生效；ok off / ok on 可随时全局开关
 `
+
+// agentIDs 返回已注册 agent 的 id 列表（用于报错提示）。
+func agentIDs() string {
+	ids := make([]string, 0, len(agentx.All()))
+	for _, a := range agentx.All() {
+		ids = append(ids, a.ID())
+	}
+	return strings.Join(ids, " / ")
+}
