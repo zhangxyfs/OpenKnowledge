@@ -31,9 +31,10 @@ func newEnv(t *testing.T) (*Handler, string, string) {
 	t.Setenv("PI_CODING_AGENT_DIR", t.TempDir())
 	webDir := t.TempDir()
 	files := map[string]string{
-		"index.html": "<html>token={{TOKEN}}</html>",
-		"app.js":     "console.log(1)",
-		"style.css":  "body{}",
+		"index.html":  "<html>token={{TOKEN}}</html>",
+		"app.js":      "console.log(1)",
+		"style.css":   "body{}",
+		"favicon.ico": "ico",
 	}
 	for name, content := range files {
 		if err := os.WriteFile(filepath.Join(webDir, name), []byte(content), 0o644); err != nil {
@@ -184,7 +185,7 @@ func TestStaticAllowlist(t *testing.T) {
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 
-	for _, p := range []string{"/app.js", "/style.css"} {
+	for _, p := range []string{"/app.js", "/style.css", "/favicon.ico"} {
 		if code, _ := do(t, "GET", srv.URL+p, "", nil); code != 200 {
 			t.Fatalf("GET %s: status = %d", p, code)
 		}

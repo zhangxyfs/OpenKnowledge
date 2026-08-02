@@ -46,6 +46,7 @@ func NewHandler(webDir, token string, beats chan<- struct{}) *Handler {
 	mux.HandleFunc("GET /index.html", h.serveIndex)
 	mux.HandleFunc("GET /app.js", h.serveStatic)
 	mux.HandleFunc("GET /style.css", h.serveStatic)
+	mux.HandleFunc("GET /favicon.ico", h.serveStatic)
 	api := func(pattern string, fn http.HandlerFunc) {
 		mux.HandleFunc(pattern, h.withAuth(fn))
 	}
