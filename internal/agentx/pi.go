@@ -65,8 +65,14 @@ func (piAgent) HooksInstalled() bool {
 
 func (piAgent) InstallHooks(exe string) error {
 	path := piExtensionPath()
-	if data, err := os.ReadFile(path); err == nil && !strings.Contains(string(data), piExtensionMarker) {
-		_ = os.WriteFile(path+".bak-openknowledge", data, 0o644)
+	if data, err := os.ReadFile(path); err == nil {
+		if !strings.Contains(string(data), piExtensionMarker) {
+			if err := os.WriteFile(path+".bak-openknowledge", data, 0o644); err != nil {
+				return fmt.Errorf("备份既有扩展失败: %w", err)
+			}
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("读取既有扩展失败: %w", err)
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err

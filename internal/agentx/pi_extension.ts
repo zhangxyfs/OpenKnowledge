@@ -65,10 +65,14 @@ export default function (pi: ExtensionAPI) {
     );
     const reason = r.stderr.trim();
     if (r.code === 2 && reason) {
-      pi.sendMessage(
-        { customType: "openknowledge", content: reason, display: true },
-        { triggerTurn: true },
-      );
+      try {
+        pi.sendMessage(
+          { customType: "openknowledge", content: reason, display: true },
+          { triggerTurn: true },
+        );
+      } catch {
+        // fail-open
+      }
     }
   });
 }
