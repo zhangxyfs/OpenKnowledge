@@ -68,15 +68,19 @@
     </section>
 
     <section id="page-guide" class="page hidden">
+      <div class="agent-bar">
+        <label for="agent-select">Agent：</label>
+        <select id="agent-select"></select>
+      </div>
       <div class="cards">
         <div class="card">
           <div class="card-head"><h3>hooks 配置</h3><span id="badge-hooks" class="badge badge-off">未配置</span></div>
-          <p class="card-desc muted">把 3 条 hook 写入 kimi 配置，知识注入与强制检查的入口。</p>
+          <p class="card-desc muted">把 3 条 hook 写入 <span id="hooks-agent-name">agent</span> 配置，知识注入与强制检查的入口。</p>
           <div class="card-actions"><button id="btn-hooks" type="button" class="btn">写入 hooks 配置</button></div>
         </div>
         <div class="card">
           <div class="card-head"><h3>技能</h3><span id="badge-skills" class="badge badge-off">未配置</span></div>
-          <p class="card-desc muted">5 个 kimi 技能：init / on / off / propose / capture。</p>
+          <p class="card-desc muted">6 个技能：init / on / off / propose / capture / wiki，装入共享目录，Kimi Code 与 Pi 均可读。</p>
           <div class="card-actions"><button id="btn-skills" type="button" class="btn">安装技能</button></div>
         </div>
         <div class="card">

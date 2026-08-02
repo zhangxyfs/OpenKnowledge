@@ -394,3 +394,6 @@ main {
 .entries-footer {
   margin-top: auto;
 }
+
+.agent-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.agent-bar select { padding: 4px 8px; font-size: 14px; }

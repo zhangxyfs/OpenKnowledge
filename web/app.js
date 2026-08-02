@@ -16,6 +16,7 @@
     pageSize: 20,
     lastVersion: 0 // 最近一次自动刷新见到的 kb.db 版本（mtime）
   };
+  state.agent = localStorage.getItem("ok.agent") || "";
 
   // ---------- 工具 ----------
 
@@ -370,13 +371,43 @@
     el.classList.toggle("badge-off", !ok);
   }
 
+  function currentAgent() {
+    var agents = (state.status && state.status.agents) || [];
+    for (var i = 0; i < agents.length; i++) {
+      if (agents[i].id === state.agent) return agents[i];
+    }
+    return null;
+  }
+
+  function renderAgentSelect(agents) {
+    var sel = $("agent-select");
+    sel.innerHTML = "";
+    agents.forEach(function (a) {
+      var opt = document.createElement("option");
+      opt.value = a.id;
+      opt.textContent = a.name + (a.detected ? "" : "（未安装）");
+      opt.disabled = !a.detected;
+      sel.appendChild(opt);
+    });
+    var ids = agents.map(function (a) { return a.id; });
+    if (ids.indexOf(state.agent) < 0) {
+      var first = agents.filter(function (a) { return a.detected; })[0] || agents[0];
+      state.agent = first ? first.id : "";
+    }
+    sel.value = state.agent;
+  }
+
   function renderGuide(s) {
-    setBadge("badge-hooks", s.hooksInstalled, "已安装", "未配置");
+    var agents = s.agents || [];
+    renderAgentSelect(agents);
+    var cur = currentAgent();
+    setBadge("badge-hooks", !!(cur && cur.hooksInstalled), "已安装", "未配置");
+    $("hooks-agent-name").textContent = cur ? cur.name : "agent";
+    $("btn-hooks").textContent = cur ? ("写入 " + cur.name + " hooks 配置") : "写入 hooks 配置";
     setBadge("badge-skills", s.skillsInstalled, "已安装", "未配置");
     setBadge("badge-embedding", s.embeddingConfigured, "已配置", "未配置");
     setBadge("badge-toggle", !s.disabled, "已开启", "已关闭");
     $("btn-toggle").textContent = s.disabled ? "开启" : "关闭";
-    // 回填已保存的 embedding 配置（key 不回显，留空表示保持不变）
     if (s.embedding) {
       if (s.embedding.base_url) $("emb-base-url").value = s.embedding.base_url;
       if (s.embedding.model) $("emb-model").value = s.embedding.model;
@@ -445,8 +476,14 @@
       .catch(function (err) { showError(err.message); });
   });
 
+  $("agent-select").addEventListener("change", function () {
+    state.agent = this.value;
+    localStorage.setItem("ok.agent", state.agent);
+    if (state.status) renderGuide(state.status);
+  });
+
   $("btn-hooks").addEventListener("click", function () {
-    api("/api/setup/hooks", { method: "POST" })
+    api("/api/setup/hooks", { method: "POST", body: { agent: state.agent } })
       .then(function () { refreshStatus(); })
       .catch(function (err) { showError(err.message); });
   });
