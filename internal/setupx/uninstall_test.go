@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"openknowledge/internal/agentx"
 	"openknowledge/internal/daemonx"
 )
 
@@ -22,13 +23,13 @@ func setupUninstallEnv(t *testing.T) (kimiHome, okHome string) {
 	t.Setenv("OK_SKILLS_HOME", t.TempDir())
 
 	// kimi config：用户内容 + 标记块 + 用户内容
-	kimiCfg := "default_model = \"kimi\"\n\n" + MarkerBegin + "\n[[hooks]]\nevent = \"Stop\"\n" + MarkerEnd + "\n\n[providers]\n"
+	kimiCfg := "default_model = \"kimi\"\n\n" + agentx.MarkerBegin + "\n[[hooks]]\nevent = \"Stop\"\n" + agentx.MarkerEnd + "\n\n[providers]\n"
 	if err := os.WriteFile(filepath.Join(kimiHome, "config.toml"), []byte(kimiCfg), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	// 技能目录
 	for name := range skillTemplates {
-		dir := filepath.Join(SkillsHome(), name)
+		dir := filepath.Join(agentx.SkillsHome(), name)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -66,7 +67,7 @@ func TestUninstall(t *testing.T) {
 	// hooks 标记块移除，用户内容保留
 	data, _ := os.ReadFile(filepath.Join(kimiHome, "config.toml"))
 	got := string(data)
-	if strings.Contains(got, MarkerBegin) || strings.Contains(got, "[[hooks]]") {
+	if strings.Contains(got, agentx.MarkerBegin) || strings.Contains(got, "[[hooks]]") {
 		t.Fatalf("hooks block should be removed: %q", got)
 	}
 	if !strings.Contains(got, "default_model") || !strings.Contains(got, "[providers]") {
@@ -75,7 +76,7 @@ func TestUninstall(t *testing.T) {
 
 	// 技能目录删除
 	for name := range skillTemplates {
-		if _, err := os.Stat(filepath.Join(SkillsHome(), name)); !os.IsNotExist(err) {
+		if _, err := os.Stat(filepath.Join(agentx.SkillsHome(), name)); !os.IsNotExist(err) {
 			t.Fatalf("skill %s should be removed", name)
 		}
 	}
@@ -126,7 +127,7 @@ timeout = 3
 	}
 	out, _ := os.ReadFile(cfgPath)
 	got := string(out)
-	if strings.Contains(got, "ok.exe hook") || strings.Contains(got, MarkerBegin) {
+	if strings.Contains(got, "ok.exe hook") || strings.Contains(got, agentx.MarkerBegin) {
 		t.Fatalf("ok hooks should be removed: %q", got)
 	}
 	if !strings.Contains(got, "other-tool run") {

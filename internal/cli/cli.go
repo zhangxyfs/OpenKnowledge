@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"openknowledge/internal/agentx"
 	"openknowledge/internal/config"
 	"openknowledge/internal/embed"
 	"openknowledge/internal/entry"
@@ -20,7 +21,6 @@ import (
 	"openknowledge/internal/project"
 	"openknowledge/internal/registry"
 	"openknowledge/internal/retrieve"
-	"openknowledge/internal/setupx"
 	"openknowledge/internal/store"
 	"openknowledge/internal/wiki"
 )
@@ -95,7 +95,7 @@ func Init(args []string, stdout, stderr io.Writer) int {
 	// 幂等写入 hooks 配置（已存在则覆盖 exe 路径并去重）；失败不阻断注册结果
 	if exe, err := resolveExe(); err != nil {
 		fmt.Fprintf(stderr, "hooks 配置写入失败（可运行 ok setup 重试）: %v\n", err)
-	} else if code := writeHooks(exe, stdout, stderr); code != 0 {
+	} else if code := writeHooks(nil, exe, stdout, stderr); code != 0 {
 		fmt.Fprintln(stderr, "hooks 配置写入失败（可运行 ok setup 重试）")
 	}
 	return 0
@@ -324,7 +324,7 @@ func Doctor(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	fmt.Fprintf(stdout, "注册表: %d 个项目\n", len(reg.Projects))
-	if data, err := os.ReadFile(filepath.Join(setupx.KimiHome(), "config.toml")); err != nil || !strings.Contains(string(data), setupx.MarkerBegin) {
+	if data, err := os.ReadFile(filepath.Join(agentx.KimiHome(), "config.toml")); err != nil || !strings.Contains(string(data), agentx.MarkerBegin) {
 		fmt.Fprintln(stdout, "hooks 未安装（运行 ok setup）")
 		healthy = false
 	} else {

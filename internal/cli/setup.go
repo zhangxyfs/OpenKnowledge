@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"openknowledge/internal/agentx"
 	"openknowledge/internal/registry"
 	"openknowledge/internal/setupx"
 )
@@ -28,14 +29,14 @@ func Setup(args []string, in io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	if code := writeHooks(exe, stdout, stderr); code != 0 {
+	if code := writeHooks(nil, exe, stdout, stderr); code != 0 {
 		return code
 	}
 	if err := setupx.InstallSkills(exe); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "技能已安装到 %s (openknowledge-init/on/off/propose/capture)\n", setupx.SkillsHome())
+	fmt.Fprintf(stdout, "技能已安装到 %s (openknowledge-init/on/off/propose/capture)\n", agentx.SkillsHome())
 	setupEmbedding(fs.NFlag() > 0, *baseURL, *model, *apiKey, in, stdout)
 	fmt.Fprint(stdout, guideText+"\n")
 	return 0
@@ -53,18 +54,23 @@ func resolveExe() (string, error) {
 	return exe, nil
 }
 
-// writeHooks 备份并幂等写入 kimi hooks 配置（自动清除存量重复的 ok hooks），
-// 供 setup 与 init 共用。
-func writeHooks(exe string, stdout, stderr io.Writer) int {
-	cfgPath := filepath.Join(setupx.KimiHome(), "config.toml")
-	if data, err := os.ReadFile(cfgPath); err == nil {
-		_ = os.WriteFile(cfgPath+".bak-openknowledge", data, 0o644)
+// writeHooks 对目标 agent 幂等写入 hooks 集成（targets 为 nil 时取全部已检测
+// agent），供 setup 与 init 共用。
+func writeHooks(targets []agentx.Agent, exe string, stdout, stderr io.Writer) int {
+	if targets == nil {
+		targets = agentx.Detected()
 	}
-	if err := setupx.UpsertHooksBlock(cfgPath, setupx.HooksBlockFor(exe)); err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
+	if len(targets) == 0 {
+		fmt.Fprintln(stdout, "未检测到支持的 agent（kimi / pi），跳过 hooks 写入")
+		return 0
 	}
-	fmt.Fprintf(stdout, "hooks 配置已写入 %s\n", cfgPath)
+	for _, a := range targets {
+		if err := a.InstallHooks(exe); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "hooks 配置已写入 %s\n", a.HooksTarget())
+	}
 	return 0
 }
 

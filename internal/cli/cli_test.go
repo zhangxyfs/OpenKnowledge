@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"openknowledge/internal/agentx"
 	"openknowledge/internal/entry"
 	"openknowledge/internal/registry"
-	"openknowledge/internal/setupx"
 )
 
 // chdir 切换工作目录并在结束时还原。
@@ -31,6 +31,10 @@ func TestInitAddSearchList(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("OK_HOME", home)
 	t.Setenv("KIMI_CODE_HOME", filepath.Join(home, "kimi"))
+	// KIMI_CODE_HOME 目录需存在（模拟已安装 kimi），否则 agent 检测为假、init 跳过 hooks 写入
+	if err := os.MkdirAll(filepath.Join(home, "kimi"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("OPENAI_API_KEY", "") // 防止真实网络调用，保证测试离线
 	proj := filepath.Join(home, "demo")
 	if err := os.MkdirAll(proj, 0o755); err != nil {
@@ -53,7 +57,7 @@ func TestInitAddSearchList(t *testing.T) {
 	if err != nil {
 		t.Fatalf("init should write kimi config: %v", err)
 	}
-	if !strings.Contains(string(kimiCfg), setupx.MarkerBegin) || strings.Count(string(kimiCfg), "[[hooks]]") != 3 {
+	if !strings.Contains(string(kimiCfg), agentx.MarkerBegin) || strings.Count(string(kimiCfg), "[[hooks]]") != 3 {
 		t.Fatalf("kimi config should contain one marker block with 3 hooks: %q", kimiCfg)
 	}
 

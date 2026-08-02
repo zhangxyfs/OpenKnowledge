@@ -54,6 +54,10 @@ func runOK(t *testing.T, home, cwd, stdin string, args ...string) (string, strin
 
 func TestEndToEnd(t *testing.T) {
 	home := t.TempDir()
+	// KIMI_CODE_HOME 目录需存在（模拟已安装 kimi），否则 agent 检测为假、init 跳过 hooks 写入
+	if err := os.MkdirAll(filepath.Join(home, "kimi"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	proj := filepath.Join(home, "demo")
 	if err := os.MkdirAll(proj, 0o755); err != nil {
 		t.Fatal(err)

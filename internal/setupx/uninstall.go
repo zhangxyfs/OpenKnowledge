@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"openknowledge/internal/agentx"
 	"openknowledge/internal/daemonx"
 	"openknowledge/internal/registry"
 )
@@ -25,33 +26,20 @@ func Uninstall() (*UninstallResult, error) {
 	// 0. 停止常驻 daemon（不存在则忽略）
 	daemonx.StopDaemon()
 
-	// 1. 移除 kimi config.toml 中的 hooks 标记块与无标记的存量 ok hooks
-	cfgPath := filepath.Join(KimiHome(), "config.toml")
-	data, err := os.ReadFile(cfgPath)
-	if err == nil {
-		content := string(data)
-		orig := content
-		i := strings.Index(content, MarkerBegin)
-		j := strings.Index(content, MarkerEnd)
-		if i >= 0 && j > i {
-			tail := strings.TrimPrefix(content[j+len(MarkerEnd):], "\n")
-			head := strings.TrimRight(content[:i], "\n")
-			content = head + "\n" + tail
+	// 1. 移除所有已注册 agent 的 hooks 集成
+	hooksRemoved := false
+	for _, a := range agentx.All() {
+		removed, err := a.RemoveHooks()
+		if err != nil {
+			return r, fmt.Errorf("移除 %s hooks: %w", a.ID(), err)
 		}
-		content = StripLegacyOKHooks(content)
-		if content != orig {
-			if err := os.WriteFile(cfgPath, []byte(content), 0o644); err != nil {
-				return r, fmt.Errorf("移除 hooks 配置: %w", err)
-			}
-			r.HooksRemoved = true
-		}
-	} else if !os.IsNotExist(err) {
-		return r, err
+		hooksRemoved = hooksRemoved || removed
 	}
+	r.HooksRemoved = hooksRemoved
 
 	// 2. 删除已安装的技能目录（仅 skillTemplates 中登记的）
 	for name := range skillTemplates {
-		dir := filepath.Join(SkillsHome(), name)
+		dir := filepath.Join(agentx.SkillsHome(), name)
 		if _, err := os.Stat(dir); err == nil {
 			if err := os.RemoveAll(dir); err != nil {
 				return r, fmt.Errorf("删除技能 %s: %w", name, err)

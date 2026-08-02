@@ -11,13 +11,13 @@ import (
 	"strings"
 	"time"
 
+	"openknowledge/internal/agentx"
 	"openknowledge/internal/embed"
 	"openknowledge/internal/enforce"
 	"openknowledge/internal/index"
 	"openknowledge/internal/project"
 	"openknowledge/internal/registry"
 	"openknowledge/internal/retrieve"
-	"openknowledge/internal/setupx"
 	"openknowledge/internal/state"
 	"openknowledge/internal/store"
 	"openknowledge/internal/wiki"
@@ -93,7 +93,7 @@ func logErr(format string, args ...any) {
 	fmt.Fprintf(f, time.Now().Format("2006-01-02 15:04:05 ")+format+"\n", args...)
 }
 
-// selfHealHooks 自检 hooks 标记块：被 kimi-code 清掉标记时自动备份并重写修复。fail-open。
+// selfHealHooks 逐 agent 自检 hooks 集成（如 kimi 清掉标记块时自动修复）。fail-open。
 func selfHealHooks() {
 	exe, err := os.Executable()
 	if err != nil {
@@ -102,9 +102,10 @@ func selfHealHooks() {
 	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
 		exe = resolved
 	}
-	cfgPath := filepath.Join(setupx.KimiHome(), "config.toml")
-	if err := setupx.EnsureHooksBlock(cfgPath, exe); err != nil {
-		logErr("prompt self-heal hooks: %v", err)
+	for _, a := range agentx.Detected() {
+		if err := a.EnsureHooks(exe); err != nil {
+			logErr("self-heal hooks (%s): %v", a.ID(), err)
+		}
 	}
 }
 

@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"openknowledge/internal/agentx"
 	"openknowledge/internal/backup"
 	"openknowledge/internal/config"
 	"openknowledge/internal/embed"
@@ -272,12 +273,12 @@ func (h *Handler) apiStatus(w http.ResponseWriter, _ *http.Request) {
 		projects = append(projects, projectJSON{Name: p.Name, Paths: p.Paths})
 	}
 	hooksInstalled := false
-	if data, err := os.ReadFile(filepath.Join(setupx.KimiHome(), "config.toml")); err == nil {
-		hooksInstalled = strings.Contains(string(data), setupx.MarkerBegin)
+	if a, ok := agentx.Find("kimi"); ok {
+		hooksInstalled = a.HooksInstalled()
 	}
 	skillsInstalled := true
-	for _, name := range []string{"openknowledge-init", "openknowledge-on", "openknowledge-off", "openknowledge-propose", "openknowledge-capture"} {
-		if _, err := os.Stat(filepath.Join(setupx.SkillsHome(), name, "SKILL.md")); err != nil {
+	for _, name := range setupx.SkillNames() {
+		if _, err := os.Stat(filepath.Join(agentx.SkillsHome(), name, "SKILL.md")); err != nil {
 			skillsInstalled = false
 			break
 		}
@@ -780,15 +781,16 @@ func (h *Handler) apiSetupHooks(w http.ResponseWriter, _ *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	cfgPath := filepath.Join(setupx.KimiHome(), "config.toml")
-	if data, err := os.ReadFile(cfgPath); err == nil {
-		_ = os.WriteFile(cfgPath+".bak-openknowledge", data, 0o644)
+	a, ok := agentx.Find("kimi")
+	if !ok {
+		writeErr(w, http.StatusInternalServerError, "kimi agent 未注册")
+		return
 	}
-	if err := setupx.UpsertHooksBlock(cfgPath, setupx.HooksBlockFor(exe)); err != nil {
+	if err := a.InstallHooks(exe); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "path": cfgPath})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "path": a.HooksTarget()})
 }
 
 func (h *Handler) apiSetupSkills(w http.ResponseWriter, _ *http.Request) {
@@ -801,7 +803,7 @@ func (h *Handler) apiSetupSkills(w http.ResponseWriter, _ *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "dir": setupx.SkillsHome()})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "dir": agentx.SkillsHome()})
 }
 
 func (h *Handler) apiSetupEmbedding(w http.ResponseWriter, r *http.Request) {

@@ -13,9 +13,9 @@ import (
 	"strings"
 	"testing"
 
+	"openknowledge/internal/agentx"
 	"openknowledge/internal/entry"
 	"openknowledge/internal/registry"
-	"openknowledge/internal/setupx"
 )
 
 const testToken = "0123456789abcdef0123456789abcdef"
@@ -408,11 +408,11 @@ func TestSetupHooksAndSkills(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("setup/hooks: status = %d, body %s", code, data)
 	}
-	cfg, err := os.ReadFile(filepath.Join(setupx.KimiHome(), "config.toml"))
+	cfg, err := os.ReadFile(filepath.Join(agentx.KimiHome(), "config.toml"))
 	if err != nil {
 		t.Fatalf("hooks config not written: %v", err)
 	}
-	if !strings.Contains(string(cfg), setupx.MarkerBegin) || !strings.Contains(string(cfg), "hook prompt") {
+	if !strings.Contains(string(cfg), agentx.MarkerBegin) || !strings.Contains(string(cfg), "hook prompt") {
 		t.Fatalf("hooks block missing: %s", cfg)
 	}
 
@@ -420,7 +420,7 @@ func TestSetupHooksAndSkills(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("setup/skills: status = %d, body %s", code, data)
 	}
-	skill, err := os.ReadFile(filepath.Join(setupx.SkillsHome(), "openknowledge-init", "SKILL.md"))
+	skill, err := os.ReadFile(filepath.Join(agentx.SkillsHome(), "openknowledge-init", "SKILL.md"))
 	if err != nil {
 		t.Fatalf("skill not installed: %v", err)
 	}
