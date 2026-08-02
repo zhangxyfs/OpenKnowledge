@@ -21,7 +21,7 @@ func Setup(args []string, in io.Reader, stdout, stderr io.Writer) int {
 	baseURL := fs.String("embedding-base-url", "", "embedding base_url")
 	model := fs.String("embedding-model", "", "embedding model")
 	apiKey := fs.String("embedding-key", "", "embedding API key")
-	agentID := fs.String("agent", "", "只安装指定 agent 的 hooks（kimi|pi）；缺省为全部已检测 agent")
+	agentID := fs.String("agent", "", "只安装指定 agent 的 hooks（"+strings.ReplaceAll(agentIDs(), " / ", "|")+"）；缺省为全部已检测 agent")
 	if err := fs.Parse(args); err != nil {
 		return 1
 	}
@@ -50,7 +50,13 @@ func Setup(args []string, in io.Reader, stdout, stderr io.Writer) int {
 		return 1
 	}
 	fmt.Fprintf(stdout, "技能已安装到 %s (openknowledge-init/on/off/propose/capture)\n", agentx.SkillsHome())
-	setupEmbedding(fs.NFlag() > 0, *baseURL, *model, *apiKey, in, stdout)
+	embeddingSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if strings.HasPrefix(f.Name, "embedding-") {
+			embeddingSet = true
+		}
+	})
+	setupEmbedding(embeddingSet, *baseURL, *model, *apiKey, in, stdout)
 	fmt.Fprint(stdout, guideText+"\n")
 	return 0
 }

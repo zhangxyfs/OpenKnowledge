@@ -14,6 +14,7 @@ func TestSetupWithEmbeddingFlags(t *testing.T) {
 	t.Setenv("OK_HOME", t.TempDir())
 	t.Setenv("KIMI_CODE_HOME", filepath.Join(t.TempDir(), "kimi"))
 	t.Setenv("OK_SKILLS_HOME", t.TempDir())
+	t.Setenv("PI_CODING_AGENT_DIR", t.TempDir())
 	var out, errBuf bytes.Buffer
 	code := Setup([]string{"--embedding-base-url", "https://g.example.com/v1", "--embedding-model", "m1", "--embedding-key", "sk-test"}, strings.NewReader(""), &out, &errBuf)
 	if code != 0 {
@@ -34,6 +35,7 @@ func TestSetupInteractiveSkipKeepsGlobal(t *testing.T) {
 	t.Setenv("OK_HOME", home)
 	t.Setenv("KIMI_CODE_HOME", filepath.Join(t.TempDir(), "kimi"))
 	t.Setenv("OK_SKILLS_HOME", t.TempDir())
+	t.Setenv("PI_CODING_AGENT_DIR", t.TempDir())
 	var out, errBuf bytes.Buffer
 	// 三行全回车 → 跳过 embedding 配置，且不得创建/破坏全局配置
 	code := Setup(nil, strings.NewReader("\n\n\n"), &out, &errBuf)
@@ -119,5 +121,27 @@ func TestSetupAllDetectedAgents(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(piHome, "extensions", "openknowledge.ts")); err != nil {
 		t.Fatal("pi extension should be written")
+	}
+}
+
+func TestSetupAgentUndetectedStillWrites(t *testing.T) {
+	piHome := filepath.Join(t.TempDir(), "pi-agent") // 不存在 → Detect()=false
+	t.Setenv("OK_HOME", t.TempDir())
+	t.Setenv("KIMI_CODE_HOME", t.TempDir())
+	t.Setenv("OK_SKILLS_HOME", t.TempDir())
+	t.Setenv("PI_CODING_AGENT_DIR", piHome)
+	var out, errBuf bytes.Buffer
+	code := Setup([]string{"--agent", "pi"}, strings.NewReader("\n\n\n"), &out, &errBuf)
+	if code != 0 {
+		t.Fatalf("setup code=%d err=%q", code, errBuf.String())
+	}
+	if !strings.Contains(errBuf.String(), "未检测到") {
+		t.Fatalf("stderr should warn about undetected agent: %q", errBuf.String())
+	}
+	if _, err := os.Stat(filepath.Join(piHome, "extensions", "openknowledge.ts")); err != nil {
+		t.Fatal("pi extension should be written even when undetected")
+	}
+	if _, err := os.Stat(filepath.Join(os.Getenv("KIMI_CODE_HOME"), "config.toml")); !os.IsNotExist(err) {
+		t.Fatal("kimi config should NOT be written with --agent pi")
 	}
 }
