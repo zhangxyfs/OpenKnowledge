@@ -28,6 +28,7 @@ func newEnv(t *testing.T) (*Handler, string, string) {
 	t.Setenv("OK_HOME", okHome)
 	t.Setenv("KIMI_CODE_HOME", t.TempDir())
 	t.Setenv("OK_SKILLS_HOME", t.TempDir())
+	t.Setenv("PI_CODING_AGENT_DIR", t.TempDir())
 	webDir := t.TempDir()
 	files := map[string]string{
 		"index.html": "<html>token={{TOKEN}}</html>",
@@ -96,21 +97,29 @@ func TestStatusEmptyRegistry(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("status = %d, body %s", code, data)
 	}
-	var st struct {
-		Projects            []any  `json:"projects"`
-		HooksInstalled      bool   `json:"hooksInstalled"`
-		SkillsInstalled     bool   `json:"skillsInstalled"`
-		EmbeddingConfigured bool   `json:"embeddingConfigured"`
-		Disabled            bool   `json:"disabled"`
+	var res struct {
+		Projects []any `json:"projects"`
+		Agents   []struct {
+			ID             string `json:"id"`
+			Name           string `json:"name"`
+			Detected       bool   `json:"detected"`
+			HooksInstalled bool   `json:"hooksInstalled"`
+		} `json:"agents"`
+		SkillsInstalled     bool `json:"skillsInstalled"`
+		EmbeddingConfigured bool `json:"embeddingConfigured"`
+		Disabled            bool `json:"disabled"`
 	}
-	if err := json.Unmarshal(data, &st); err != nil {
+	if err := json.Unmarshal(data, &res); err != nil {
 		t.Fatal(err)
 	}
-	if len(st.Projects) != 0 {
-		t.Fatalf("expected empty projects, got %v", st.Projects)
+	if len(res.Projects) != 0 {
+		t.Fatalf("expected empty projects, got %v", res.Projects)
 	}
-	if st.HooksInstalled || st.SkillsInstalled || st.EmbeddingConfigured || st.Disabled {
-		t.Fatalf("expected all flags false, got %+v", st)
+	if len(res.Agents) != 2 {
+		t.Fatalf("expected 2 agents, got %d: %s", len(res.Agents), data)
+	}
+	if res.SkillsInstalled || res.EmbeddingConfigured || res.Disabled {
+		t.Fatalf("expected flags false, got %+v", res)
 	}
 }
 
@@ -414,6 +423,22 @@ func TestSetupHooksAndSkills(t *testing.T) {
 	}
 	if !strings.Contains(string(cfg), agentx.MarkerBegin) || !strings.Contains(string(cfg), "hook prompt") {
 		t.Fatalf("hooks block missing: %s", cfg)
+	}
+
+	code, data = do(t, "POST", srv.URL+"/api/setup/hooks", testToken, map[string]any{"agent": "pi"})
+	if code != 200 {
+		t.Fatalf("setup/hooks pi: status = %d, body %s", code, data)
+	}
+	ext, err := os.ReadFile(filepath.Join(agentx.PiHome(), "extensions", "openknowledge.ts"))
+	if err != nil {
+		t.Fatalf("pi extension not written: %v", err)
+	}
+	if !strings.Contains(string(ext), `"hook", "prompt"`) {
+		t.Fatalf("unexpected pi extension content: %.200s", ext)
+	}
+	code, _ = do(t, "POST", srv.URL+"/api/setup/hooks", testToken, map[string]any{"agent": "nope"})
+	if code != 400 {
+		t.Fatalf("unknown agent should be 400, got %d", code)
 	}
 
 	code, data = do(t, "POST", srv.URL+"/api/setup/skills", testToken, nil)

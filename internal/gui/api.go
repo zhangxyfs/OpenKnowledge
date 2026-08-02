@@ -272,9 +272,14 @@ func (h *Handler) apiStatus(w http.ResponseWriter, _ *http.Request) {
 	for _, p := range reg.Projects {
 		projects = append(projects, projectJSON{Name: p.Name, Paths: p.Paths})
 	}
-	hooksInstalled := false
-	if a, ok := agentx.Find("kimi"); ok {
-		hooksInstalled = a.HooksInstalled()
+	agents := make([]map[string]any, 0, len(agentx.All()))
+	for _, a := range agentx.All() {
+		agents = append(agents, map[string]any{
+			"id":             a.ID(),
+			"name":           a.DisplayName(),
+			"detected":       a.Detect(),
+			"hooksInstalled": a.HooksInstalled(),
+		})
 	}
 	skillsInstalled := true
 	for _, name := range setupx.SkillNames() {
@@ -293,7 +298,7 @@ func (h *Handler) apiStatus(w http.ResponseWriter, _ *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"projects":            projects,
-		"hooksInstalled":      hooksInstalled,
+		"agents":              agents,
 		"skillsInstalled":     skillsInstalled,
 		"embeddingConfigured": embeddingConfigured,
 		"embedding":           embedding,
@@ -775,22 +780,42 @@ func (h *Handler) apiUninstall(w http.ResponseWriter, _ *http.Request) {
 
 // ---------- 安装与配置 ----------
 
-func (h *Handler) apiSetupHooks(w http.ResponseWriter, _ *http.Request) {
+// apiSetupHooks 安装 hooks：body 可指定 {"agent":"<id>"}（未知 id → 400），
+// 缺省为全部已检测 agent；响应列出每个 agent 的安装目标。
+func (h *Handler) apiSetupHooks(w http.ResponseWriter, r *http.Request) {
 	exe, err := exePath()
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a, ok := agentx.Find("kimi")
-	if !ok {
-		writeErr(w, http.StatusInternalServerError, "kimi agent 未注册")
-		return
+	var req struct {
+		Agent string `json:"agent"`
 	}
-	if err := a.InstallHooks(exe); err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
-		return
+	if r.Body != nil && r.ContentLength != 0 {
+		if !decodeJSON(w, r, &req) {
+			return
+		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "path": a.HooksTarget()})
+	var targets []agentx.Agent
+	if req.Agent != "" {
+		a, ok := agentx.Find(req.Agent)
+		if !ok {
+			writeErr(w, http.StatusBadRequest, "未知 agent: "+req.Agent)
+			return
+		}
+		targets = []agentx.Agent{a}
+	} else {
+		targets = agentx.Detected()
+	}
+	installed := make([]map[string]string, 0, len(targets))
+	for _, a := range targets {
+		if err := a.InstallHooks(exe); err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		installed = append(installed, map[string]string{"agent": a.ID(), "path": a.HooksTarget()})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "installed": installed})
 }
 
 func (h *Handler) apiSetupSkills(w http.ResponseWriter, _ *http.Request) {
