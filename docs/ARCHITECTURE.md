@@ -240,9 +240,11 @@ func (e Embedding) ResolvedAPIKey() string  // api_key 字段 > api_key_env 环�
 
 v1 仅 `changelog_required`：触碰文件中存在匹配 `code_globs` 的 且 不存在匹配 `changelog_glob` 的 → 阻断并返回用户配置的 message。用 doublestar 做 `**` glob 匹配（`**/*.go` 可匹配根目录文件）。刻意**不理解**变更日志的细则——细则写在知识条目里由注入教给 AI，hook 只做机械检查。
 
-### 5.9 hook — hooks 事件处理（264 行，全项目最大文件）
+### 5.9 hook — hooks 事件处理（337 行）
 
 三个 handler 共享同一套防御结构：**第一行检查全局开关 → 解析事件 → 路由项目 → 各自逻辑 → 任何错误只记 ok.log 并 exit 0**。
+
+- hook 入口自愈：开关开启时每次 hook 触发先跑 `selfHealHooks`——遍历 `agentx.Detected()` 逐 agent 调 `EnsureHooks`（kimi 标记块被 kimi-code 清掉时自动备份并重写；pi 扩展内容过期时重写，文件不存在则不动），错误只记 ok.log（fail-open）
 
 - `Event` 的 `Prompt` 是 `json.RawMessage`，`PromptText()` 兼容两种真实载荷形态（字符串 / `[{"type":"text","text":"..."}]` 数组）
 - `FilePath()` 取 `tool_input.path`（kimi 实际字段），兼容 `file_path`
@@ -250,13 +252,13 @@ v1 仅 `changelog_required`：触碰文件中存在匹配 `code_globs` 的 且 �
 - `HandlePostTool`：记录触碰文件（经 `relativize` 转项目相对、小写、`/` 分隔）
 - `HandleStop`：先按 `[capture]` 配置评估 **auto 自省**——`mode = "auto"` 且本轮有触碰文件、距上次提醒满 `turn_interval` 个 Stop 时，输出自省提醒并以 exit 2 阻断一次（强制 AI 复盘本轮经验、值得沉淀则当场 `ok propose` 草稿）；随后评估 enforce 规则，命中即 `MarkBlocked` → 保存状态 → stderr 输出 message → **exit 2**（全项目唯一非零出口）
 
-### 5.10 cli — 管理命令（cli.go 369 行 + setup.go 210 行 + toggle.go 38 行）
+### 5.10 cli — 管理命令（cli.go 369 行 + setup.go 147 行 + toggle.go 38 行）
 
 - `cli.go`：`Init`（项目名缺省取目录基名）、`Add`（重复条目拒绝；后接索引库同步）、`Propose`（AI 面向的草稿写入：`draft:true`、只同步 INDEX 不算向量）、`Approve`（草稿转正，同步 INDEX 并补算向量；同一秒内 mtime 不变时手动推进一秒防 diff 漏判）、`CaptureCmd`（打印或设置项目 `[capture]` 模式，整段替换幂等写入）、`Search`（检索预览，走 `index.Query`）、`Index`（索引库增量同步并打印条目数）、`List`（文件扫描，人用命令开销可忽略）、`Doctor`（注册表/配置/embedding 连通性/hooks 安装状态/开关状态）
 - `setup.go`：见第 6.4 节
 - `toggle.go`：`On`/`Off` 即删除/创建 `~/.openknowledge/hooks-disabled` 标志文件
 
-### 5.11 gui — Web 管理界面（server.go 27 行 + window_*.go + api.go 864 行）
+### 5.11 gui — Web 管理界面（server.go 27 行 + window_*.go + api.go 891 行）
 
 `ok gui` 或无参数运行（双击 exe）启动的本地 Web 管理界面，供不熟悉命令行的用户完成首次引导与日常知识维护。
 
@@ -267,7 +269,7 @@ API 一览：
 
 | 方法 | 路径 | 作用 |
 |------|------|------|
-| GET | `/api/status` | 项目列表 + hooks/技能/embedding 安装状态 + 全局开关状态 + `app_version`（构建期注入版本）与 `home`（KB 根目录）（前端据此决定默认标签页） |
+| GET | `/api/status` | 项目列表 + `agents` 数组（每个已注册 agent 的 `id/name/detected/hooksInstalled`，顶层 `hooksInstalled` 已移除）+ `skillsInstalled` + embedding 安装状态 + 全局开关状态 + `app_version`（构建期注入版本）与 `home`（KB 根目录）（前端据此决定默认标签页） |
 | GET | `/api/projects` | 注册表项目列表 |
 | GET | `/api/entries?project=` | 项目条目摘要列表 |
 | GET | `/api/entry?project=&file=` | 条目详情（含正文） |
@@ -278,7 +280,7 @@ API 一览：
 | POST | `/api/approve` | `{"project","file"}` 草稿转正（等价 `ok approve`；缺文件/非草稿 400）→ 同步索引与向量 |
 | GET | `/api/capture?project=` | 当前捕获模式 `{mode, turn_interval}`（合并配置） |
 | POST | `/api/capture` | `{"project","mode"}` 写项目 `[capture]` 小节（等价 `ok capture <mode>`；非法模式 400） |
-| POST | `/api/setup/hooks` | 等价 `ok setup` 的 hooks 步骤（备份 + 标记块幂等写入） |
+| POST | `/api/setup/hooks` | 等价 `ok setup` 的 hooks 步骤；body 可指定 `{"agent":"<id>"}` 只装单个 agent（未知 id 400），缺省为全部已检测 agent；响应 `installed` 列出每个 agent 的写入目标 |
 | POST | `/api/setup/skills` | 安装五个 kimi 技能 |
 | POST | `/api/setup/embedding` | 保存 embedding 配置并当场连通性验证（`{"ok":bool,"error":…}`） |
 | POST | `/api/toggle` | `{"on":bool}` 全局开关（等价 `ok on`/`ok off`） |
@@ -348,16 +350,20 @@ ok search <词>   → 命令行预览检索效果（调试注入质量）
 ### 6.4 首次引导（ok setup）
 
 ```
-ok setup
+ok setup [--agent <id>]
   → os.Executable 取自身绝对路径（hooks 命令不依赖 PATH）
-  → 备份 ~/.kimi-code/config.toml → 标记块幂等写入 3 条 hook
+  → 对目标 agent 写入 hooks 集成：缺省 = 全部已检测 agent（agentx.Detected()）；
+    --agent 指定单个（未知 id 报错并列出可用 id；未检测到该 agent 也写入并提示）；
+    一个都未检测到时跳过 hooks 写入继续后续步骤
+      kimi：备份 ~/.kimi-code/config.toml → 标记块幂等写入 3 条 hook
+      pi：渲染 TS 扩展写入 ~/.pi/agent/extensions/openknowledge.ts（既有非本工具文件先备份）
   → 安装 openknowledge-init/on/off/propose/capture/wiki 六个技能到 ~/.agents/skills/（烧入 exe 路径）
   → 交互（或 flags）收集 embedding base_url/model/API key
       → 写全局 ~/.openknowledge/config.toml（0600）→ 立即连通性验证
   → 打印引导
 ```
 
-幂等性由"先清除存量 ok hooks + 标记块原位替换"保证：写入前 `StripLegacyOKHooks` 移除所有指向 ok hook 的无标记 `[[hooks]]` 表（历史手动粘贴遗留），重复执行或更换 exe 路径只覆盖更新、绝不重复堆积；标记损坏（有头无尾）时报错拒绝修改，不破坏用户配置。`ok init` 复用同一写入逻辑（写失败不阻断注册），卸载时同样清除无标记存量。daemon 化后 `ok gui` 不再阻塞，GUI 页面关闭不退出进程（原 30s 心跳看门狗已随 daemon 化移除）。
+幂等性由"先清除存量 ok hooks + 标记块原位替换"保证：写入前 `StripLegacyOKHooks` 移除所有指向 ok hook 的无标记 `[[hooks]]` 表（历史手动粘贴遗留），重复执行或更换 exe 路径只覆盖更新、绝不重复堆积；标记损坏（有头无尾）时报错拒绝修改，不破坏用户配置。`ok init` 复用同一写入逻辑（`writeHooks`，写失败不阻断注册）；卸载遍历 `agentx.All()` 逐 agent `RemoveHooks`（kimi 清除标记块与无标记存量，pi 只删本工具生成的扩展文件）。daemon 化后 `ok gui` 不再阻塞，GUI 页面关闭不退出进程（原 30s 心跳看门狗已随 daemon 化移除）。
 
 ### 6.5 常驻 daemon（单进程架构）
 
@@ -470,7 +476,44 @@ hook prompt（基础注入之后）
 
 关键实测结论（记录在规格附录 A）：**SessionStart 的 stdout 不进入上下文**（观察型事件），因此基础注入放在首次 UserPromptSubmit；Windows 上 hook 命令由系统 shell 执行，`sh -c` 不可用，绝对路径 exe 可用。
 
-### 9.2 OpenAI 兼容 embedding API
+### 9.2 多 agent 抽象（agentx）
+
+`internal/agentx` 把"AI 编码 agent 的 hook 集成"抽象为适配器注册表：CLI（`ok setup`/`ok init`）、GUI API 与 hook 入口自愈统一经注册表驱动；新增 agent = 实现 `Agent` 接口并在适配器文件的 `init` 中 `Register`。
+
+```go
+type Agent interface {
+    ID() string                   // 稳定标识："kimi" / "pi"，CLI/GUI/API 统一使用
+    DisplayName() string          // 展示名："Kimi Code" / "Pi"
+    Detect() bool                 // 本机是否已安装该 agent
+    HooksInstalled() bool         // hooks 集成是否已安装且为当前版本
+    InstallHooks(exe string) error
+    RemoveHooks() (bool, error)   // 返回是否真的移除了内容
+    EnsureHooks(exe string) error // hook 入口自愈；错误由调用方 fail-open 处理
+    HooksTarget() string          // hook 写入目标的展示路径
+    SkillsDir() string            // 技能目录（当前均返回共享 SkillsHome）
+}
+```
+
+注册表：`Register` / `All` / `Find(id)` / `Detected()`（本机已安装的 agent）；技能安装目录为各 agent 共享的 `SkillsHome()`（`OK_SKILLS_HOME` 优先，默认 `~/.agents/skills`）。
+
+两种注入形态：
+
+| agent | 注入形态 | 写入目标 | "已安装且为当前版本"判定 |
+|-------|----------|----------|--------------------------|
+| kimi | TOML 标记块（3 条 `[[hooks]]`） | `~/.kimi-code/config.toml`（`KIMI_CODE_HOME` 优先） | 标记块 `# >>> openknowledge hooks >>>` 存在 |
+| pi | TypeScript 扩展（三事件回调） | `~/.pi/agent/extensions/openknowledge.ts`（`PI_CODING_AGENT_DIR` 优先） | 头标记 + `// fingerprint:` 行与当前模板指纹一致 |
+
+pi 扩展由内嵌模板 `pi_extension.ts`（`go:embed`）渲染：`{{EXE}}` 占位替换为 ok 绝对路径，文件头写头标记（`// openknowledge hooks (managed by ok.exe; do not edit)`）与指纹行（指纹 = 模板内容 sha256 前 12 位十六进制，随模板升级变化）。安装时若目标已存在**非本工具生成**的同名文件，先备份为 `.bak-openknowledge`（备份失败则中止安装）；`RemoveHooks` 只删本工具生成的文件，非本工具文件不动。扩展对 ok 的调用全部 fail-open（超时/异常静默），不拖累 pi 会话。
+
+pi 事件 → ok hook 映射：
+
+| pi 事件 | ok 子命令 | 对应 kimi 事件 | 语义差异 |
+|---------|-----------|----------------|----------|
+| `before_agent_start` | `ok hook prompt` | `UserPromptSubmit` | stdout 非空时以 `display:false` 自定义消息注入上下文 |
+| `tool_result`（toolName = `write`/`edit`） | `ok hook post-tool` | `PostToolUse`（matcher `Write\|Edit`） | 无 |
+| `agent_settled` | `ok hook stop` | `Stop` | pi 无法阻断已结束的回合：ok 以 exit 2 + stderr 表达"阻断"时，扩展改为 `sendMessage({content: stderr}, {triggerTurn: true})` 把提示注入会话，驱动 agent 当场完成自省/补日志 |
+
+### 9.3 OpenAI 兼容 embedding API
 
 - 端点：`POST {base_url}/embeddings`，请求 `{model, input}`，响应 `{data:[{embedding}]}`
 - key 解析：`api_key` 字段（全局/项目）→ `api_key_env` 环境变量 → 无（纯关键词）
@@ -853,9 +896,12 @@ os.ReadDir(knowledge/)                # 只拿文件名，不读内容
 | `OK_HOME` | KB 根目录（默认 `~/.openknowledge`）；测试隔离也用它 |
 | `KIMI_CODE_HOME` | kimi 配置目录（`ok setup` 写 hooks 时定位 config.toml） |
 | `OK_SKILLS_HOME` | 技能安装目录（默认 `~/.agents/skills`） |
+| `PI_CODING_AGENT_DIR` | pi 配置根目录（默认 `~/.pi/agent`；`ok setup` 写扩展时定位 extensions/） |
 | `api_key_env` 指向的变量 | embedding key 的环境变量通道（如 `OPENAI_API_KEY`） |
 
-### 18.4 hooks 配置（`~/.kimi-code/config.toml`，由 `ok setup` 维护）
+### 18.4 hooks 配置（由 `ok setup` 维护）
+
+**kimi**：写入 `~/.kimi-code/config.toml`（`KIMI_CODE_HOME` 优先）的标记块：
 
 | 字段 | 当前值 | 说明 |
 |------|--------|------|
@@ -863,6 +909,8 @@ os.ReadDir(knowledge/)                # 只拿文件名，不读内容
 | `matcher` | 仅 PostToolUse 用 `"Write\|Edit"` | 工具名正则过滤 |
 | `command` | `"<exe> hook prompt\|post-tool\|stop"` | `ok setup` 烧入绝对路径 |
 | `timeout` | `10` / `5` / `5` 秒 | prompt 必须 > `embedding.timeout_sec`（默认 5），否则慢 API 会被 kimi 强杀 |
+
+**pi**：写入 `~/.pi/agent/extensions/openknowledge.ts`（`PI_CODING_AGENT_DIR` 优先）。文件头为头标记（`// openknowledge hooks (managed by ok.exe; do not edit)`）+ `// fingerprint: <模板 sha256 前 12 位>` 行；`HooksInstalled` 要求头标记存在且指纹等于当前模板指纹——模板升级后旧扩展判为"非当前版本"，由 hook 入口 `EnsureHooks` 自愈重写。安装时既有非本工具生成的同名文件先备份为 `.bak-openknowledge`，卸载只删本工具生成的文件。
 
 ### 18.5 合并与解析顺序速查
 
