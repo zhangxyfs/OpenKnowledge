@@ -13,6 +13,18 @@ import (
 	"openknowledge/internal/state"
 )
 
+// TestMain 隔离 KIMI_CODE_HOME：HandlePrompt 的 hooks 自愈会写 kimi config.toml，
+// 测试绝不可触碰真实配置。
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "hook-test-kimi-home")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	os.Setenv("KIMI_CODE_HOME", dir)
+	os.Exit(m.Run())
+}
+
 // setupProject 在临时 OK_HOME 下注册项目并返回项目目录与 KB 根。
 func setupProject(t *testing.T) (projDir, kbRoot string) {
 	t.Helper()

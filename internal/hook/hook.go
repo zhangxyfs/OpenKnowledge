@@ -17,6 +17,7 @@ import (
 	"openknowledge/internal/project"
 	"openknowledge/internal/registry"
 	"openknowledge/internal/retrieve"
+	"openknowledge/internal/setupx"
 	"openknowledge/internal/state"
 	"openknowledge/internal/store"
 	"openknowledge/internal/wiki"
@@ -92,6 +93,21 @@ func logErr(format string, args ...any) {
 	fmt.Fprintf(f, time.Now().Format("2006-01-02 15:04:05 ")+format+"\n", args...)
 }
 
+// selfHealHooks 自检 hooks 标记块：被 kimi-code 清掉标记时自动备份并重写修复。fail-open。
+func selfHealHooks() {
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+	cfgPath := filepath.Join(setupx.KimiHome(), "config.toml")
+	if err := setupx.EnsureHooksBlock(cfgPath, exe); err != nil {
+		logErr("prompt self-heal hooks: %v", err)
+	}
+}
+
 // HandlePrompt 基础注入（每会话首次：mandatory 全文 + 索引）+ 检索注入（每次）。
 // 检索前先对 kb.db 做增量同步（按 filename+mtime，仅为变化条目重算向量）。
 // embedding 失败降级为关键词检索；任何内部错误 fail-open。
@@ -99,6 +115,7 @@ func HandlePrompt(r io.Reader, w io.Writer) int {
 	if registry.HooksDisabled() {
 		return 0
 	}
+	selfHealHooks()
 	ev, err := ParseEvent(r)
 	if err != nil {
 		logErr("prompt parse: %v", err)

@@ -146,6 +146,68 @@ func TestUpsertHooksBlockCorruptMarkerWithOKCommands(t *testing.T) {
 	}
 }
 
+func TestEnsureHooksBlock(t *testing.T) {
+	t.Run("markers present: untouched", func(t *testing.T) {
+		cfg := filepath.Join(t.TempDir(), "config.toml")
+		initial := "default_model = \"kimi\"\n\n" + MarkerBegin + "\n" + HooksBlockFor("D:/old/ok.exe") + MarkerEnd + "\n"
+		if err := os.WriteFile(cfg, []byte(initial), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := EnsureHooksBlock(cfg, "D:/new/ok.exe"); err != nil {
+			t.Fatal(err)
+		}
+		data, _ := os.ReadFile(cfg)
+		if string(data) != initial {
+			t.Fatalf("file should be untouched when markers exist: %q", data)
+		}
+		if _, err := os.Stat(cfg + ".bak-openknowledge"); !os.IsNotExist(err) {
+			t.Fatal("no backup should be written when untouched")
+		}
+	})
+
+	t.Run("markers stripped by kimi-code: self-heal", func(t *testing.T) {
+		cfg := filepath.Join(t.TempDir(), "config.toml")
+		// kimi-code 删掉标记注释后剩下的孤儿 ok hook 表 + 其它工具的 hook
+		orphan := "default_model = \"kimi\"\n\n" + HooksBlockFor("D:/old/ok.exe") + `
+[[hooks]]
+event = "SessionStart"
+command = "other-tool run"
+timeout = 3
+`
+		if err := os.WriteFile(cfg, []byte(orphan), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := EnsureHooksBlock(cfg, "D:/new/ok.exe"); err != nil {
+			t.Fatal(err)
+		}
+		data, _ := os.ReadFile(cfg)
+		got := string(data)
+		if c := strings.Count(got, MarkerBegin); c != 1 {
+			t.Fatalf("expected exactly one marker block after heal, got %d: %q", c, got)
+		}
+		if c := strings.Count(got, "[[hooks]]"); c != 4 {
+			t.Fatalf("expected 3 new + 1 foreign hook tables, got %d: %q", c, got)
+		}
+		if !strings.Contains(got, "D:/new/ok.exe hook prompt") || strings.Contains(got, "D:/old/ok.exe") {
+			t.Fatalf("orphan ok hooks should be replaced by new block: %q", got)
+		}
+		if !strings.Contains(got, "other-tool run") || !strings.Contains(got, `default_model = "kimi"`) {
+			t.Fatalf("user content should be preserved: %q", got)
+		}
+		bak, err := os.ReadFile(cfg + ".bak-openknowledge")
+		if err != nil || string(bak) != orphan {
+			t.Fatalf("backup should hold the pre-heal content: %v %q", err, bak)
+		}
+	})
+
+	t.Run("config missing: error for fail-open caller", func(t *testing.T) {
+		cfg := filepath.Join(t.TempDir(), "config.toml")
+		if err := EnsureHooksBlock(cfg, "D:/new/ok.exe"); err == nil {
+			t.Fatal("expected error for missing config")
+		}
+	})
+}
+
 func TestInstallSkills(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("OK_SKILLS_HOME", dir)

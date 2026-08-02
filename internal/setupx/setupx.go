@@ -157,6 +157,21 @@ func UpsertHooksBlock(configPath, block string) error {
 	return os.WriteFile(configPath, []byte(out), 0o644)
 }
 
+// EnsureHooksBlock hook 入口自检：kimi-code 有时会清掉标记注释行，使标记块丢失
+// （孤儿 hook 表仍在、hook 照常运行，但下次 setup 的去重依据没了）。标记块缺失时
+// 自动备份并重新 Upsert 修复；标记块存在则不动。调用方按 fail-open 处理返回错误。
+func EnsureHooksBlock(configPath, exe string) error {
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return err
+	}
+	if strings.Contains(string(data), MarkerBegin) {
+		return nil
+	}
+	_ = os.WriteFile(configPath+".bak-openknowledge", data, 0o644)
+	return UpsertHooksBlock(configPath, HooksBlockFor(exe))
+}
+
 // InstallSkills 把技能模板（烘焙 exe 路径）写入 SkillsHome。
 func InstallSkills(exe string) error {
 	for name, tpl := range skillTemplates {
