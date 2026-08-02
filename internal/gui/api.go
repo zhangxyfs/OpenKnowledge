@@ -97,11 +97,15 @@ func (h *Handler) serveIndex(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
 	_, _ = w.Write([]byte(strings.ReplaceAll(string(data), "{{TOKEN}}", h.token)))
 }
 
 // serveStatic 只服务 webDir 白名单内的静态文件（路由本身是字面量，无路径参数）。
+// no-cache 强制每次重验证（配合 Last-Modified 走 304，成本极低），防止升级后
+// 浏览器继续用旧 app.js 与新 index.html 错配（agents 下拉失去数据填充）。
 func (h *Handler) serveStatic(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-cache")
 	http.ServeFile(w, r, filepath.Join(h.webDir, filepath.Base(r.URL.Path)))
 }
 

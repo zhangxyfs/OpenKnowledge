@@ -141,6 +141,26 @@ func TestAuthRequired(t *testing.T) {
 	}
 }
 
+// TestStaticNoCache 静态页与 index 必须禁缓存：升级后浏览器若继续用旧 app.js，
+// 新 index.html 的控件（如 agents 下拉）会失去数据填充，界面"空掉"。
+func TestStaticNoCache(t *testing.T) {
+	h, _, _ := newEnv(t)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	for _, p := range []string{"/", "/app.js", "/style.css"} {
+		res, err := http.Get(srv.URL + p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cc := res.Header.Get("Cache-Control")
+		res.Body.Close()
+		if !strings.Contains(cc, "no-cache") {
+			t.Fatalf("GET %s: Cache-Control = %q, want no-cache", p, cc)
+		}
+	}
+}
+
 func TestIndexTokenInjection(t *testing.T) {
 	h, _, _ := newEnv(t)
 	srv := httptest.NewServer(h)
