@@ -68,6 +68,8 @@ func NewHandler(webDir, token string, beats chan<- struct{}) *Handler {
 	api("POST /api/setup/skills", h.apiSetupSkills)
 	api("POST /api/setup/embedding", h.apiSetupEmbedding)
 	api("POST /api/toggle", h.apiToggle)
+	api("GET /api/changelog", h.apiChangelog)
+	api("POST /api/changelog/seen", h.apiChangelogSeen)
 	api("GET /api/export", h.apiExport)
 	api("POST /api/import", h.apiImport)
 	h.mux = mux
