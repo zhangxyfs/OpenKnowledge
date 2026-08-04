@@ -240,13 +240,19 @@ func Search(args []string, stdout, stderr io.Writer) int {
 			queryVec = vec
 		}
 	}
-	hits, err := db.Query(retrieve.Terms(query), queryVec, pc.Config.Retrieve)
+	terms := retrieve.Terms(query)
+	hits, err := db.Query(terms, queryVec, pc.Config.Retrieve)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
 	for _, h := range hits {
 		fmt.Fprintf(stdout, "%.2f\t%s (%s)\n", h.Score, h.Title, h.Filename)
+	}
+	// wiki 覆盖兜底提示：无 wiki 条目命中该主题时，提示可经 openknowledge-wiki 补充。
+	// fail-open：检查失败不提示，search 主输出格式不变。
+	if covered, err := db.HasWikiMatch(terms); err == nil && !covered {
+		fmt.Fprintln(stdout, "提示：该主题暂无 wiki 条目覆盖；若内容属于新功能/新模块，建议用 openknowledge-wiki 技能补充 wiki。")
 	}
 	return 0
 }
