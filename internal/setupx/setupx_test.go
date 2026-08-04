@@ -44,3 +44,13 @@ func TestInstallWikiSkillContent(t *testing.T) {
 		t.Fatal("exe placeholder not baked")
 	}
 }
+
+// propose 技能模板必须包含"先分类"指引与 wiki 覆盖提示的联动说明。
+func TestProposeSkillTemplateHasClassification(t *testing.T) {
+	tpl := skillTemplates["openknowledge-propose"]
+	for _, want := range []string{"先分类", "结构型", "openknowledge-wiki", "暂无 wiki 条目覆盖"} {
+		if !strings.Contains(tpl, want) {
+			t.Fatalf("propose skill template missing %q", want)
+		}
+	}
+}

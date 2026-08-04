@@ -16,7 +16,7 @@
 
 ## 组件 1：propose 技能文案
 
-文件：`internal/setupx/skills/openknowledge-propose/SKILL.md`（go:embed 进 ok.exe，经 `ok setup` / GUI"安装技能"分发到 `~/.agents/skills/`）。
+位置：`internal/setupx/setupx.go` 内联模板 `skillTemplates["openknowledge-propose"]`（仅 wiki 技能是 `skills/` 目录独立文件，其余 5 个技能都是该文件内的 Go 字符串字面量；`{{EXE}}` 占位在 `InstallSkills` 时烘焙为 ok 绝对路径，经 `ok setup` / GUI"安装技能"分发到 `~/.agents/skills/`）。
 
 新增"先分类"指引（放在"何时提议"之前）：
 
