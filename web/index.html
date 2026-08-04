@@ -76,8 +76,19 @@
       <div class="cards">
         <div class="card">
           <div class="card-head"><h3>hooks 配置</h3><span id="badge-hooks" class="badge badge-off">未配置</span></div>
-          <p class="card-desc muted">把 3 条 hook 写入 <span id="hooks-agent-name">agent</span> 配置，知识注入与强制检查的入口。</p>
+          <p class="card-desc muted">把 3 条 hook 写入 <span id="hooks-agent-name">agent</span> 配置，知识注入与强制检查的入口。超时为全局统一设置，见下方"hook 超时"卡。</p>
           <div class="card-actions"><button id="btn-hooks" type="button" class="btn">写入 hooks 配置</button></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>hook 超时</h3></div>
+          <p class="card-desc muted">全局统一（不是按 agent 分别配置），对所有 agent 的 3 条 hook 生效。过短会在高负载下被宿主静默杀死（默认 10 秒）。保存后自动重写所有已检测 agent 的 hooks 配置。</p>
+          <div class="card-actions">
+            <span class="form-inline">
+              <label for="hooks-timeout">超时（秒）</label>
+              <input id="hooks-timeout" type="number" min="1" max="60" value="10">
+              <button id="btn-hooks-timeout" type="button" class="btn">保存并应用</button>
+            </span>
+          </div>
         </div>
         <div class="card">
           <div class="card-head"><h3>技能</h3><span id="badge-skills" class="badge badge-off">未配置</span></div>

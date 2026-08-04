@@ -404,6 +404,7 @@
     setBadge("badge-hooks", !!(cur && cur.hooksInstalled), "已安装", "未配置");
     $("hooks-agent-name").textContent = cur ? cur.name : "agent";
     $("btn-hooks").textContent = cur ? ("写入 " + cur.name + " hooks 配置") : "写入 hooks 配置";
+    $("hooks-timeout").value = s.hooksTimeout || 10;
     setBadge("badge-skills", s.skillsInstalled, "已安装", "未配置");
     setBadge("badge-embedding", s.embeddingConfigured, "已配置", "未配置");
     setBadge("badge-toggle", !s.disabled, "已开启", "已关闭");
@@ -484,6 +485,18 @@
 
   $("btn-hooks").addEventListener("click", function () {
     api("/api/setup/hooks", { method: "POST", body: { agent: state.agent } })
+      .then(function () { refreshStatus(); })
+      .catch(function (err) { showError(err.message); });
+  });
+
+  // hook 超时为全局统一设置：保存后对所有已检测 agent 重写 hooks（不传 agent）。
+  $("btn-hooks-timeout").addEventListener("click", function () {
+    var timeout = parseInt($("hooks-timeout").value, 10);
+    if (!timeout || timeout < 1 || timeout > 60) {
+      showError("hook 超时必须是 1~60 的整数");
+      return;
+    }
+    api("/api/setup/hooks", { method: "POST", body: { timeout_sec: timeout } })
       .then(function () { refreshStatus(); })
       .catch(function (err) { showError(err.message); });
   });

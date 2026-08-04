@@ -63,7 +63,7 @@ timeout = 3
 	if err := os.WriteFile(cfg, []byte(legacy), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := UpsertHooksBlock(cfg, HooksBlockFor(`D:\new\ok.exe`)); err != nil {
+	if err := UpsertHooksBlock(cfg, HooksBlockFor(`D:\new\ok.exe`, 10)); err != nil {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(cfg)
@@ -108,11 +108,11 @@ func TestUpsertHooksBlockCorruptMarker(t *testing.T) {
 
 func TestUpsertHooksBlockReplacesMarkerInPlace(t *testing.T) {
 	cfg := filepath.Join(t.TempDir(), "config.toml")
-	initial := "default_model = \"kimi\"\n\n" + MarkerBegin + "\n" + HooksBlockFor("D:/old/ok.exe") + MarkerEnd + "\n\n[providers]\n"
+	initial := "default_model = \"kimi\"\n\n" + MarkerBegin + "\n" + HooksBlockFor("D:/old/ok.exe", 10) + MarkerEnd + "\n\n[providers]\n"
 	if err := os.WriteFile(cfg, []byte(initial), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := UpsertHooksBlock(cfg, HooksBlockFor("D:/new/ok.exe")); err != nil {
+	if err := UpsertHooksBlock(cfg, HooksBlockFor("D:/new/ok.exe", 10)); err != nil {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(cfg)
@@ -133,11 +133,11 @@ func TestUpsertHooksBlockReplacesMarkerInPlace(t *testing.T) {
 
 func TestUpsertHooksBlockCorruptMarkerWithOKCommands(t *testing.T) {
 	cfg := filepath.Join(t.TempDir(), "config.toml")
-	initial := MarkerBegin + "\n" + HooksBlockFor("D:/x/ok.exe")
+	initial := MarkerBegin + "\n" + HooksBlockFor("D:/x/ok.exe", 10)
 	if err := os.WriteFile(cfg, []byte(initial), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := UpsertHooksBlock(cfg, HooksBlockFor("D:/new/ok.exe")); err == nil {
+	if err := UpsertHooksBlock(cfg, HooksBlockFor("D:/new/ok.exe", 10)); err == nil {
 		t.Fatal("expected corrupt marker error")
 	}
 	data, _ := os.ReadFile(cfg)
@@ -149,7 +149,7 @@ func TestUpsertHooksBlockCorruptMarkerWithOKCommands(t *testing.T) {
 func TestEnsureHooksBlock(t *testing.T) {
 	t.Run("markers present: untouched", func(t *testing.T) {
 		cfg := filepath.Join(t.TempDir(), "config.toml")
-		initial := "default_model = \"kimi\"\n\n" + MarkerBegin + "\n" + HooksBlockFor("D:/old/ok.exe") + MarkerEnd + "\n"
+		initial := "default_model = \"kimi\"\n\n" + MarkerBegin + "\n" + HooksBlockFor("D:/old/ok.exe", 10) + MarkerEnd + "\n"
 		if err := os.WriteFile(cfg, []byte(initial), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -168,7 +168,7 @@ func TestEnsureHooksBlock(t *testing.T) {
 	t.Run("markers stripped by kimi-code: self-heal", func(t *testing.T) {
 		cfg := filepath.Join(t.TempDir(), "config.toml")
 		// kimi-code 删掉标记注释后剩下的孤儿 ok hook 表 + 其它工具的 hook
-		orphan := "default_model = \"kimi\"\n\n" + HooksBlockFor("D:/old/ok.exe") + `
+		orphan := "default_model = \"kimi\"\n\n" + HooksBlockFor("D:/old/ok.exe", 10) + `
 [[hooks]]
 event = "SessionStart"
 command = "other-tool run"

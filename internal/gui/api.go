@@ -295,11 +295,15 @@ func (h *Handler) apiStatus(w http.ResponseWriter, _ *http.Request) {
 	}
 	embeddingConfigured := false
 	embedding := map[string]any{"base_url": "", "model": "", "has_key": false}
+	hooksTimeout := 10
 	if cfg, err := config.LoadMerged("", filepath.Join(registry.Home(), "config.toml")); err == nil {
 		embeddingConfigured = cfg.Embedding.BaseURL != "" && cfg.Embedding.ResolvedAPIKey() != ""
 		embedding["base_url"] = cfg.Embedding.BaseURL
 		embedding["model"] = cfg.Embedding.Model
 		embedding["has_key"] = cfg.Embedding.ResolvedAPIKey() != ""
+		if cfg.Hooks.TimeoutSec > 0 {
+			hooksTimeout = cfg.Hooks.TimeoutSec
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"projects":            projects,
@@ -307,6 +311,7 @@ func (h *Handler) apiStatus(w http.ResponseWriter, _ *http.Request) {
 		"skillsInstalled":     skillsInstalled,
 		"embeddingConfigured": embeddingConfigured,
 		"embedding":           embedding,
+		"hooksTimeout":        hooksTimeout,
 		"disabled":            registry.HooksDisabled(),
 		"app_version":         version.Version,
 		"home":                registry.Home(),
@@ -786,7 +791,8 @@ func (h *Handler) apiUninstall(w http.ResponseWriter, _ *http.Request) {
 // ---------- 安装与配置 ----------
 
 // apiSetupHooks 安装 hooks：body 可指定 {"agent":"<id>"}（未知 id → 400），
-// 缺省为全部已检测 agent；响应列出每个 agent 的安装目标。单 agent 失败不影响
+// 缺省为全部已检测 agent；可带 {"timeout_sec":N}（1~60）先写入全局配置再安装，
+// 三条 hook 统一使用该超时；响应列出每个 agent 的安装目标。单 agent 失败不影响
 // 其余（成功项保持落盘，幂等可重试），全部尝试后有失败则 500 聚合报告。
 func (h *Handler) apiSetupHooks(w http.ResponseWriter, r *http.Request) {
 	exe, err := exePath()
@@ -795,10 +801,21 @@ func (h *Handler) apiSetupHooks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Agent string `json:"agent"`
+		Agent      string `json:"agent"`
+		TimeoutSec int    `json:"timeout_sec"`
 	}
 	if r.Body != nil && r.ContentLength != 0 {
 		if !decodeJSON(w, r, &req) {
+			return
+		}
+	}
+	if req.TimeoutSec != 0 {
+		if req.TimeoutSec < 1 || req.TimeoutSec > 60 {
+			writeErr(w, http.StatusBadRequest, "timeout_sec 必须是 1~60 的整数")
+			return
+		}
+		if err := setupx.SaveHooksTimeout(req.TimeoutSec); err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	}

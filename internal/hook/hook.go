@@ -222,20 +222,25 @@ func HandlePrompt(r io.Reader, w io.Writer) int {
 }
 
 // HandlePostTool 记录触碰的文件（相对项目根、小写、"/" 分隔）。
+// 各静默分支均记 ok.log（2026-08-04 曾出现整会话 touched 丢失且无迹可查）：
+// 若无任何 post-tool 日志，说明 kimi 未派发或 hook 进程被超时杀死。
 func HandlePostTool(r io.Reader) int {
 	if registry.HooksDisabled() {
 		return 0
 	}
 	ev, err := ParseEvent(r)
 	if err != nil {
+		logErr("post-tool parse: %v", err)
 		return 0
 	}
 	pc, err := project.FromCwd(ev.Cwd)
 	if err != nil {
+		logErr("post-tool project (cwd=%q): %v", ev.Cwd, err)
 		return 0
 	}
 	rel := relativize(pc, ev.FilePath())
 	if rel == "" {
+		logErr("post-tool skip: tool=%s path=%q 不在项目 %s 的路径内", ev.ToolName, ev.FilePath(), pc.Project.Name)
 		return 0
 	}
 	st := state.Load(pc.Store.StateDir(), ev.SessionID)

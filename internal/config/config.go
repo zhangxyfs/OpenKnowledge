@@ -56,6 +56,12 @@ type Wiki struct {
 	StaleCommits int `toml:"stale_commits"` // 落后多少 commit 提示；0 = 关闭
 }
 
+// Hooks 控制写入 agent 配置的 hook 超时（秒）。2026-08-04 曾出现 Windows 高负载下
+// 5s 超时导致 PostToolUse 整个会话静默丢失，故默认 10 且可在 GUI 引导页调整。
+type Hooks struct {
+	TimeoutSec int `toml:"timeout_sec"`
+}
+
 type Config struct {
 	Embedding Embedding     `toml:"embedding"`
 	Inject    Inject        `toml:"inject"`
@@ -63,6 +69,7 @@ type Config struct {
 	Enforce   []EnforceRule `toml:"enforce"`
 	Capture   Capture       `toml:"capture"`
 	Wiki      Wiki          `toml:"wiki"`
+	Hooks     Hooks         `toml:"hooks"`
 }
 
 func Default() Config {
@@ -72,6 +79,7 @@ func Default() Config {
 		Retrieve:  Retrieve{Alpha: 1.0, Beta: 1.0, TopN: 2},
 		Capture:   Capture{Mode: "propose", TurnInterval: 5},
 		Wiki:      Wiki{StaleCommits: 20},
+		Hooks:     Hooks{TimeoutSec: 10},
 	}
 }
 

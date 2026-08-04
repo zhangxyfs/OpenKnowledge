@@ -69,6 +69,28 @@ func SaveEmbedding(baseURL, model, apiKey string) error {
 	return nil
 }
 
+
+// SaveHooksTimeout 把 hooks 超时（秒）写入全局配置 [hooks] timeout_sec；
+// 下次写入/自愈 hooks 块（含 GUI 引导页安装）时生效。
+func SaveHooksTimeout(sec int) error {
+	globalPath := filepath.Join(registry.Home(), "config.toml")
+	cfg, err := config.LoadMerged("", globalPath)
+	if err != nil {
+		return fmt.Errorf("全局配置读取失败: %w", err)
+	}
+	cfg.Hooks.TimeoutSec = sec
+	var buf strings.Builder
+	if err := toml.NewEncoder(&buf).Encode(cfg); err != nil {
+		return fmt.Errorf("全局配置编码失败: %w", err)
+	}
+	if err := os.MkdirAll(registry.Home(), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(globalPath, []byte(buf.String()), 0o600); err != nil {
+		return fmt.Errorf("全局配置写入失败: %w", err)
+	}
+	return nil
+}
 // TestEmbedding 以 10s 超时做 embedding 连通性检查。
 func TestEmbedding(baseURL, model, apiKey string) error {
 	client := &embed.OpenAIClient{BaseURL: baseURL, APIKey: apiKey, Model: model, Timeout: 10 * time.Second}

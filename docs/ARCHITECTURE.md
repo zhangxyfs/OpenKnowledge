@@ -908,7 +908,7 @@ os.ReadDir(knowledge/)                # 只拿文件名，不读内容
 | `event` | `UserPromptSubmit` / `PostToolUse` / `Stop` | 三个注入/追踪/强制时机 |
 | `matcher` | 仅 PostToolUse 用 `"Write\|Edit"` | 工具名正则过滤 |
 | `command` | `"<exe> hook prompt\|post-tool\|stop"` | `ok setup` 烧入绝对路径 |
-| `timeout` | `10` / `5` / `5` 秒 | prompt 必须 > `embedding.timeout_sec`（默认 5），否则慢 API 会被 kimi 强杀 |
+| `timeout` | 三条统一，默认 `10` 秒 | 取全局配置 `[hooks] timeout_sec`（GUI 引导页可调，1~60）；prompt 必须 > `embedding.timeout_sec`（默认 5），否则慢 API 会被 kimi 强杀；post-tool/stop 过短会在高负载下被 kimi 静默杀死（2026-08-04 整会话 touched 丢失事故） |
 
 **pi**：写入 `~/.pi/agent/extensions/openknowledge.ts`（`PI_CODING_AGENT_DIR` 优先）。文件头为头标记（`// openknowledge hooks (managed by ok.exe; do not edit)`）+ `// fingerprint: <模板 sha256 前 12 位>` 行；`HooksInstalled` 要求头标记存在且指纹等于当前模板指纹——模板升级后旧扩展判为"非当前版本"，由 hook 入口 `EnsureHooks` 自愈重写。安装时既有非本工具生成的同名文件先备份为 `.bak-openknowledge`，卸载只删本工具生成的文件。
 

@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"openknowledge/internal/config"
+	"openknowledge/internal/registry"
 )
 
 const MarkerBegin = "# >>> openknowledge hooks >>>"
@@ -23,25 +26,36 @@ func KimiHome() string {
 
 func kimiConfigPath() string { return filepath.Join(KimiHome(), "config.toml") }
 
-// HooksBlockFor 生成指向 exe 的 hooks 配置块。
-func HooksBlockFor(exe string) string {
+// HooksBlockFor 生成指向 exe 的 hooks 配置块；三条 hook 统一使用 timeoutSec 秒超时
+// （Windows 上 ok.exe 冷启动 + daemon 转发在高负载下可超过 5s，超时会被 kimi 静默杀死）。
+func HooksBlockFor(exe string, timeoutSec int) string {
 	exe = filepath.ToSlash(exe)
 	return fmt.Sprintf(`[[hooks]]
 event = "UserPromptSubmit"
 command = "%s hook prompt"
-timeout = 10
+timeout = %d
 
 [[hooks]]
 event = "PostToolUse"
 matcher = "Write|Edit"
 command = "%s hook post-tool"
-timeout = 5
+timeout = %d
 
 [[hooks]]
 event = "Stop"
 command = "%s hook stop"
-timeout = 5
-`, exe, exe, exe)
+timeout = %d
+`, exe, timeoutSec, exe, timeoutSec, exe, timeoutSec)
+}
+
+// HookTimeoutSec 返回写入 hooks 的超时秒数：全局配置 [hooks] timeout_sec，
+// 读取失败或未配置时回退 10（与 config.Default 一致）。
+func HookTimeoutSec() int {
+	cfg, err := config.LoadMerged("", filepath.Join(registry.Home(), "config.toml"))
+	if err != nil || cfg.Hooks.TimeoutSec <= 0 {
+		return 10
+	}
+	return cfg.Hooks.TimeoutSec
 }
 
 // okHookCommand 匹配指向 ok hook 的 command 行（如 "ok hook prompt"、"D:/x/ok.exe hook stop"）。
@@ -152,7 +166,7 @@ func EnsureHooksBlock(configPath, exe string) error {
 		return nil
 	}
 	_ = os.WriteFile(configPath+".bak-openknowledge", data, 0o644)
-	return UpsertHooksBlock(configPath, HooksBlockFor(exe))
+	return UpsertHooksBlock(configPath, HooksBlockFor(exe, HookTimeoutSec()))
 }
 
 // kimiAgent kimiCode 适配器。
@@ -180,7 +194,7 @@ func (kimiAgent) InstallHooks(exe string) error {
 	if data, err := os.ReadFile(cfgPath); err == nil {
 		_ = os.WriteFile(cfgPath+".bak-openknowledge", data, 0o644)
 	}
-	return UpsertHooksBlock(cfgPath, HooksBlockFor(exe))
+	return UpsertHooksBlock(cfgPath, HooksBlockFor(exe, HookTimeoutSec()))
 }
 
 func (kimiAgent) RemoveHooks() (bool, error) {
