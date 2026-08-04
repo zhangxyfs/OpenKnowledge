@@ -169,3 +169,22 @@ func (db *DB) WikiCount() (int, error) {
 	err := db.sql.QueryRow(`SELECT COUNT(*) FROM entries WHERE draft = 0 AND tags LIKE '%wiki%'`).Scan(&n)
 	return n, err
 }
+
+// HasWikiMatch 报告检索词是否有 wiki 条目（draft=0 且 tags 含 wiki）覆盖。
+// 仅看 FTS 关键词、不看向量——兜底启发式，供 ok search 输出提示；terms 为空返回 true。
+func (db *DB) HasWikiMatch(terms []string) (bool, error) {
+	match := buildMatch(terms)
+	if match == "" {
+		return true, nil
+	}
+	var exists bool
+	err := db.sql.QueryRow(
+		`SELECT EXISTS(
+			SELECT 1 FROM entries_fts JOIN entries e ON e.filename = entries_fts.filename
+			WHERE entries_fts MATCH ? AND e.draft = 0 AND e.tags LIKE '%wiki%'
+		)`, match).Scan(&exists)
+	if err != nil {
+		return false, err
+	}
+	return exists, nil
+}
