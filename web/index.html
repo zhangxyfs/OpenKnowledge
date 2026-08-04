@@ -162,6 +162,11 @@
           <p id="misc-import-result" class="card-desc muted"></p>
         </div>
         <div class="card">
+          <div class="card-head"><h3>更新日志</h3></div>
+          <p class="card-desc muted">查看各版本的新功能与修复；升级后首次打开会自动弹出。</p>
+          <div class="card-actions"><button id="btn-changelog" type="button" class="btn">查看更新日志</button></div>
+        </div>
+        <div class="card">
           <div class="card-head"><h3>关于</h3></div>
           <p id="misc-version" class="card-desc muted"></p>
           <p id="misc-home" class="card-desc muted"></p>
@@ -193,6 +198,16 @@
           <button id="f-cancel" type="button" class="btn">关闭</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <div id="changelog-modal" class="modal hidden">
+    <div class="modal-box changelog-box">
+      <h3 id="changelog-modal-title">更新日志</h3>
+      <div id="changelog-content" class="changelog-content"></div>
+      <div class="modal-actions">
+        <button id="changelog-close" type="button" class="btn btn-primary">知道了</button>
+      </div>
     </div>
   </div>
 

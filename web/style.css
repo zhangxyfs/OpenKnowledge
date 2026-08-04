@@ -342,6 +342,14 @@ input:focus, select:focus, textarea:focus {
 
 .modal-actions { display: flex; gap: 10px; margin-top: 14px; }
 
+.changelog-box { width: 92%; max-height: 82vh; display: flex; flex-direction: column; overflow: hidden; }
+.changelog-content { overflow-y: auto; text-align: left; }
+.changelog-content h3 { margin: 14px 0 8px; }
+.changelog-content h4 { margin: 12px 0 6px; }
+.changelog-content p { margin: 6px 0; }
+.changelog-content ul { margin: 6px 0; padding-left: 20px; }
+.changelog-content hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
+
 /* ---------- 排序与分页 ---------- */
 
 th.sortable {

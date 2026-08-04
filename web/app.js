@@ -314,6 +314,65 @@
   }
 
   function closeForm() { $("entry-modal").classList.add("hidden"); }
+
+  // ---------- 更新日志 ----------
+
+  // renderMd 极简 markdown 渲染：# / ## 标题、- 列表、**粗体**、`行内代码`；先 esc 转义防注入。
+  function renderMd(md) {
+    function inline(s) {
+      return esc(s)
+        .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+        .replace(/`([^`]+)`/g, "<code>$1</code>");
+    }
+    var html = [];
+    var inList = false;
+    function closeList() { if (inList) { html.push("</ul>"); inList = false; } }
+    md.split(/\r?\n/).forEach(function (line) {
+      var t = line.trim();
+      if (t.indexOf("## ") === 0) { closeList(); html.push("<h4>" + inline(t.slice(3)) + "</h4>"); }
+      else if (t.indexOf("# ") === 0) { closeList(); html.push("<h3>" + inline(t.slice(2)) + "</h3>"); }
+      else if (t.indexOf("- ") === 0) { if (!inList) { html.push("<ul>"); inList = true; } html.push("<li>" + inline(t.slice(2)) + "</li>"); }
+      else if (t === "") { closeList(); }
+      else { closeList(); html.push("<p>" + inline(t) + "</p>"); }
+    });
+    closeList();
+    return html.join("");
+  }
+
+  function openChangelogModal(title, entries) {
+    $("changelog-modal-title").textContent = title;
+    var content = $("changelog-content");
+    if (!entries || entries.length === 0) {
+      content.innerHTML = '<p class="muted">暂无更新日志</p>';
+    } else {
+      content.innerHTML = entries.map(function (e) { return renderMd(e.log); }).join("<hr>");
+    }
+    $("changelog-modal").classList.remove("hidden");
+  }
+
+  // checkChangelog 启动时拉取：pending 非空弹升级日志；结果缓存供常驻入口使用。
+  function checkChangelog() {
+    api("/api/changelog").then(function (c) {
+      state.changelog = c;
+      if (c.pending && c.pending.length > 0) {
+        var latest = c.pending[c.pending.length - 1].version;
+        var title = c.pending.length > 1
+          ? ("已更新到 v" + latest + "（含最近 " + c.pending.length + " 个版本）")
+          : ("新版本 v" + latest + " 更新内容");
+        openChangelogModal(title, c.pending);
+      }
+    }).catch(function () { /* 拉取失败不阻断主界面 */ });
+  }
+
+  $("changelog-close").addEventListener("click", function () {
+    $("changelog-modal").classList.add("hidden");
+    api("/api/changelog/seen", { method: "POST" }).catch(function (err) { showError(err.message); });
+  });
+
+  $("btn-changelog").addEventListener("click", function () {
+    openChangelogModal("更新日志", state.changelog ? state.changelog.all : null);
+  });
+
   $("f-cancel").addEventListener("click", closeForm);
   $("btn-new").addEventListener("click", function () { openForm(null, false); });
 
@@ -612,5 +671,5 @@
     if (state.status && state.status.projects && state.status.projects.length > 0) {
       switchTab("manage");
     }
-  });
+  }).then(checkChangelog);
 })();
