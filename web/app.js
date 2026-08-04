@@ -339,6 +339,9 @@
     return html.join("");
   }
 
+  // changelogFromPending 标记当前弹窗是否由升级弹窗（pending）打开：仅此时关闭才 POST seen；常驻入口只查看、不影响 seen 状态。
+  var changelogFromPending = false;
+
   function openChangelogModal(title, entries) {
     $("changelog-modal-title").textContent = title;
     var content = $("changelog-content");
@@ -359,6 +362,7 @@
         var title = c.pending.length > 1
           ? ("已更新到 v" + latest + "（含最近 " + c.pending.length + " 个版本）")
           : ("新版本 v" + latest + " 更新内容");
+        changelogFromPending = true;
         openChangelogModal(title, c.pending);
       }
     }).catch(function () { /* 拉取失败不阻断主界面 */ });
@@ -366,10 +370,13 @@
 
   $("changelog-close").addEventListener("click", function () {
     $("changelog-modal").classList.add("hidden");
+    if (!changelogFromPending) return;
+    changelogFromPending = false;
     api("/api/changelog/seen", { method: "POST" }).catch(function (err) { showError(err.message); });
   });
 
   $("btn-changelog").addEventListener("click", function () {
+    changelogFromPending = false;
     openChangelogModal("更新日志", state.changelog ? state.changelog.all : null);
   });
 

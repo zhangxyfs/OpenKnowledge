@@ -85,7 +85,7 @@ func TestChangelogAPI(t *testing.T) {
 	writeChangelog(t, cl, "2.9.0.md", "# 2.9.0\n\n## 修复\n- 九\n")
 	writeChangelog(t, cl, "2.2.3.md", "# 2.2.3\n\n- 三\n")
 	writeChangelog(t, cl, "2026-07-22-v1.1-setup-toggle.md", "# 旧格式\n") // 应被过滤
-	writeChangelog(t, cl, "README.txt", "noise")                            // 应被过滤
+	writeChangelog(t, cl, "README.txt", "noise")                        // 应被过滤
 
 	// all：数值升序（2.10.0 > 2.9.0，非字典序），只含 N.N.N.md
 	body := doJSON(t, h, "GET", "/api/changelog")
