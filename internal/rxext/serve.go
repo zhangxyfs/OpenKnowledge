@@ -7,7 +7,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 
+	"openknowledge/internal/agentx"
+	"openknowledge/internal/hook"
+	"openknowledge/internal/project"
 	extension "openknowledge/internal/rxext/sdk"
 	"openknowledge/internal/version"
 )
@@ -39,9 +45,57 @@ func (h *handler) Initialize(_ context.Context, p extension.InitializeParams) (*
 	}, nil
 }
 
-// onInput input.receive 拦截器（Task 4/5 点亮注入与 enforce）。
-func (h *handler) onInput(_ context.Context, _ string, _ json.RawMessage) (*extension.InterceptResult, error) {
-	return extension.Continue(), nil
+// onInput input.receive 拦截器：检索注入（replace 前缀 <ok-context>）。
+// enforce 分支由 Task 5 加入。fail-open：panic/错误一律 Continue。
+func (h *handler) onInput(_ context.Context, _ string, payload json.RawMessage) (res *extension.InterceptResult, err error) {
+	defer continueOnPanic(&res, &err)
+	res = extension.Continue()
+	selfHealHooks()
+	var in struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(payload, &in); err != nil || strings.TrimSpace(in.Text) == "" {
+		return res, nil
+	}
+	pc, err := project.FromCwd(h.cwd)
+	if err != nil {
+		return res, nil
+	}
+	prefix := hook.InjectForPrompt(pc, h.sessionID, h.cwd, in.Text)
+	if strings.TrimSpace(prefix) == "" {
+		return res, nil
+	}
+	return buildInputReplacement(in.Text, []string{prefix})
+}
+
+// buildInputReplacement 把若干注入片段合并为一个 <ok-context> 块前缀进原输入。
+func buildInputReplacement(original string, parts []string) (*extension.InterceptResult, error) {
+	var b strings.Builder
+	b.WriteString("<ok-context>\n")
+	for _, p := range parts {
+		if strings.TrimSpace(p) == "" {
+			continue
+		}
+		b.WriteString(strings.TrimRight(p, "\n"))
+		b.WriteString("\n\n")
+	}
+	b.WriteString("</ok-context>\n\n")
+	b.WriteString(original)
+	return extension.Replace(map[string]string{"text": b.String()})
+}
+
+// selfHealHooks 逐 agent 自检 hooks/插件集成（如 ok.exe 迁移后重写登记）。fail-open。
+func selfHealHooks() {
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+	for _, a := range agentx.Detected() {
+		_ = a.EnsureHooks(exe)
+	}
 }
 
 // onToolAfter tool.after 拦截器（Task 6 点亮 touched 追踪）。
@@ -55,9 +109,13 @@ func (h *handler) onToolAfter(_ context.Context, _ string, _ json.RawMessage) (*
 //		defer continueOnPanic(&res, &err)
 //		...
 //	}
+//
+// panic 时 err 必须置 nil：SDK 对非 nil err 会丢弃 result 改回 JSON-RPC 错误，
+// 而 fail-open 要的是 Continue。panic 痕迹写 stderr（由宿主脱敏留尾）。
 func continueOnPanic(res **extension.InterceptResult, err *error) {
 	if r := recover(); r != nil {
 		*res = extension.Continue()
-		*err = fmt.Errorf("rxext panic: %v", r)
+		*err = nil
+		fmt.Fprintf(os.Stderr, "rxext panic: %v\n", r)
 	}
 }
