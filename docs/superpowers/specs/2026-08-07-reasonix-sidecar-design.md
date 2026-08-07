@@ -91,7 +91,8 @@ ok.exe extension-serve（新子命令 = sidecar 模式，internal/rxext）
   4. enforce 评估（复用现有 enforce 包 + per-session state）：
      - `changelog_required` 命中 → 按配置 `block` 或 prepend（见 4.4 三档表）
      - auto 自省提醒命中 → 按配置 prepend 或 block
-  5. 产出 `Replace{text: "<ok-context>…</ok-context>\n\n" + 原文}`；无任何注入/检查结果时 `Continue`
+     - 判定为 `block` 时直接返回 `Block{原因}`，不再注入（用户修正后重发输入时自然获得注入）
+  5. 产出 `Replace{text: "<ok-context>…</ok-context>\n\n" + 原文}`：知识注入与软提醒合并为**一个** `<ok-context>` 块后前缀；无任何注入/检查结果时 `Continue`
   6. **任何内部错误 → `Continue`**（fail-open 铁律），错误写 `ok.log`
 - `tool.after` 拦截器：`name ∈ {write_file, edit_file, multi_edit, notebook_edit}` 且 `!isError` → 从 `arguments`（JSON 字符串）取 `path` 记 touched（复用 post-tool 核心）→ 一律 `Continue`
 
@@ -168,7 +169,7 @@ ok.exe extension-serve（新子命令 = sidecar 模式，internal/rxext）
 
 ## 6. 性能与 prompt 缓存
 
-- `input.receive` 位于回合热路径（默认 5s 预算）：本地 BM25 检索 <1s；embedding 走现有 `Embedding.TimeoutSec`，超时降级纯 BM25
+- `input.receive` 位于回合热路径（协议默认 5s；ok 在 manifest 写 `timeoutMillis = HookTimeoutSec()*1000`，默认 10s）：本地 BM25 检索 <1s；embedding 走现有 `Embedding.TimeoutSec`，超时降级纯 BM25
 - 注入内容包 `<ok-context>` 标签、置于**用户输入文本前部**（该消息本身处于上下文尾部）→ 不破坏历史消息前缀缓存（Reasonix 文档"动态数据应尽量留在当前回合尾部"的合规做法）
 - 检索预算沿用现有 800 字符 / 2 条上限
 
