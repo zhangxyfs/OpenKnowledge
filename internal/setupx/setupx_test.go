@@ -10,6 +10,7 @@ import (
 func TestInstallSkills(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("OK_SKILLS_HOME", dir)
+	t.Setenv("OK_ZCODE_HOME", filepath.Join(t.TempDir(), "nonexistent-zcode"))
 	if err := InstallSkills(`D:\bin\ok.exe`); err != nil {
 		t.Fatal(err)
 	}
@@ -27,6 +28,7 @@ func TestInstallSkills(t *testing.T) {
 func TestInstallWikiSkillContent(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("OK_SKILLS_HOME", dir)
+	t.Setenv("OK_ZCODE_HOME", filepath.Join(t.TempDir(), "nonexistent-zcode"))
 	if err := InstallSkills(`D:\bin\ok.exe`); err != nil {
 		t.Fatal(err)
 	}

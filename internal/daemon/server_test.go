@@ -23,6 +23,7 @@ func setupProject(t *testing.T) string {
 	t.Setenv("OK_HOME", home)
 	t.Setenv("KIMI_CODE_HOME", filepath.Join(home, "kimi"))
 	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(home, "pi"))
+	t.Setenv("OK_ZCODE_HOME", filepath.Join(t.TempDir(), "nonexistent-zcode"))
 	t.Setenv("OPENAI_API_KEY", "")
 	proj := filepath.Join(home, "demo")
 	if err := os.MkdirAll(proj, 0o755); err != nil {
@@ -164,5 +165,81 @@ func TestHookStopBlocksViaHTTP(t *testing.T) {
 	}
 	if hr := post("/api/hook/stop", stopEv); hr.Code != 0 {
 		t.Fatalf("second stop should pass: %+v", hr)
+	}
+}
+
+// TestHookClaudeFormatViaHTTP ?format=claude 透传：prompt 注入包成 hookSpecificOutput
+// JSON，stop 阻断走 stdout decision:block + code 0（ZCode 协议）。
+func TestHookClaudeFormatViaHTTP(t *testing.T) {
+	proj := setupProject(t)
+	home := filepath.Dir(proj)
+	cfgPath := filepath.Join(home, "projects", "demo", "config.toml")
+	cfg := "\n[[enforce]]\ntype = \"changelog_required\"\ncode_globs = [\"**/*.go\"]\nchangelog_glob = \"docs/changelogs/**\"\nmessage = \"请补变更日志\"\n"
+	f, _ := os.OpenFile(cfgPath, os.O_APPEND|os.O_WRONLY, 0o644)
+	fmt.Fprint(f, cfg)
+	f.Close()
+
+	srv := newTestMux(t)
+	defer srv.Close()
+	post := func(path string, ev []byte) HookResponse {
+		t.Helper()
+		req, _ := http.NewRequest("POST", srv.URL+path, bytes.NewReader(ev))
+		req.Header.Set("X-Ok-Token", "tok")
+		resp, err := srv.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var hr HookResponse
+		if err := json.NewDecoder(resp.Body).Decode(&hr); err != nil {
+			t.Fatal(err)
+		}
+		return hr
+	}
+
+	// prompt：stdout 是 hookSpecificOutput JSON
+	hr := post("/api/hook/prompt?format=claude", promptEvent(t, proj, "git 提交规范"))
+	if hr.Code != 0 {
+		t.Fatalf("prompt: %+v", hr)
+	}
+	var wrapper struct {
+		HookSpecificOutput struct {
+			HookEventName     string `json:"hookEventName"`
+			AdditionalContext string `json:"additionalContext"`
+		} `json:"hookSpecificOutput"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(hr.Stdout)), &wrapper); err != nil {
+		t.Fatalf("prompt stdout 应为 JSON: %v (%q)", err, hr.Stdout)
+	}
+	if wrapper.HookSpecificOutput.HookEventName != "UserPromptSubmit" ||
+		!strings.Contains(wrapper.HookSpecificOutput.AdditionalContext, "git.md") {
+		t.Fatalf("prompt 包装内容不对: %+v", wrapper)
+	}
+
+	// stop：阻断走 stdout decision:block，code 0，stderr 空
+	codeFile := filepath.Join(proj, "main.go")
+	toolEv, _ := json.Marshal(map[string]any{
+		"hook_event_name": "PostToolUse", "session_id": "s9", "cwd": proj,
+		"tool_name": "Write", "tool_input": map[string]string{"file_path": codeFile},
+	})
+	if hr := post("/api/hook/post-tool?format=claude", toolEv); hr.Code != 0 {
+		t.Fatalf("post-tool: %+v", hr)
+	}
+	stopEv, _ := json.Marshal(map[string]any{
+		"hook_event_name": "Stop", "session_id": "s9", "cwd": proj,
+	})
+	hr = post("/api/hook/stop?format=claude", stopEv)
+	if hr.Code != 0 || hr.Stderr != "" {
+		t.Fatalf("claude stop 应 code 0 且 stderr 空: %+v", hr)
+	}
+	var block struct {
+		Decision string `json:"decision"`
+		Reason   string `json:"reason"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(hr.Stdout)), &block); err != nil {
+		t.Fatalf("stop stdout 应为 JSON: %v (%q)", err, hr.Stdout)
+	}
+	if block.Decision != "block" || !strings.Contains(block.Reason, "请补变更日志") {
+		t.Fatalf("stop 应阻断并带原因: %+v", block)
 	}
 }

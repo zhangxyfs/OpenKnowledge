@@ -39,14 +39,16 @@ func Uninstall() (*UninstallResult, error) {
 	}
 	r.HooksRemoved = hooksRemoved
 
-	// 2. 删除已安装的技能目录（仅 skillTemplates 中登记的）
-	for name := range skillTemplates {
-		dir := filepath.Join(agentx.SkillsHome(), name)
-		if _, err := os.Stat(dir); err == nil {
-			if err := os.RemoveAll(dir); err != nil {
-				return r, fmt.Errorf("删除技能 %s: %w", name, err)
+	// 2. 删除已安装的技能目录（全部注册 agent 的技能目录并集，仅 skillTemplates 中登记的）
+	for _, home := range AllSkillDirs() {
+		for name := range skillTemplates {
+			dir := filepath.Join(home, name)
+			if _, err := os.Stat(dir); err == nil {
+				if err := os.RemoveAll(dir); err != nil {
+					return r, fmt.Errorf("删除技能 %s: %w", name, err)
+				}
+				r.SkillsRemoved++
 			}
-			r.SkillsRemoved++
 		}
 	}
 

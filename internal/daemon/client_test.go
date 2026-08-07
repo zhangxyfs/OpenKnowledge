@@ -57,7 +57,7 @@ func TestForwardHookOK(t *testing.T) {
 	defer srv.Close()
 	saveInfo(t, srv.Listener.Addr().(*net.TCPAddr).Port, fp)
 	var out, errOut bytes.Buffer
-	handled, code := ForwardHook("prompt", []byte(`{}`), &out, &errOut)
+	handled, code := ForwardHook("prompt", "", []byte(`{}`), &out, &errOut)
 	if !handled || code != 0 || out.String() != "注入内容" {
 		t.Fatalf("handled=%v code=%d out=%q", handled, code, out.String())
 	}
@@ -68,7 +68,7 @@ func TestForwardHookStaleDaemonFallsBack(t *testing.T) {
 	calls := stubSpawn(t)
 	saveInfo(t, 1, "fp") // 端口 1 必然不通
 	var out bytes.Buffer
-	handled, _ := ForwardHook("prompt", []byte(`{}`), &out, &out)
+	handled, _ := ForwardHook("prompt", "", []byte(`{}`), &out, &out)
 	if handled {
 		t.Fatal("unreachable daemon should not handle")
 	}
@@ -76,7 +76,7 @@ func TestForwardHookStaleDaemonFallsBack(t *testing.T) {
 		t.Fatalf("expected 1 spawn, got %d", *calls)
 	}
 	// 15s 防抖：第二次不再 spawn
-	handled, _ = ForwardHook("prompt", []byte(`{}`), &out, &out)
+	handled, _ = ForwardHook("prompt", "", []byte(`{}`), &out, &out)
 	if handled || *calls != 1 {
 		t.Fatalf("debounce broken: handled=%v calls=%d", handled, *calls)
 	}
@@ -89,7 +89,7 @@ func TestForwardHookVersionMismatch(t *testing.T) {
 	defer srv.Close()
 	saveInfo(t, srv.Listener.Addr().(*net.TCPAddr).Port, "old-fingerprint")
 	var out bytes.Buffer
-	handled, _ := ForwardHook("prompt", []byte(`{}`), &out, &out)
+	handled, _ := ForwardHook("prompt", "", []byte(`{}`), &out, &out)
 	if handled {
 		t.Fatal("version mismatch should not handle")
 	}
@@ -113,7 +113,7 @@ func TestForwardHookTimeout(t *testing.T) {
 	saveInfo(t, slow.Listener.Addr().(*net.TCPAddr).Port, fp)
 	var out bytes.Buffer
 	start := time.Now()
-	handled, code := ForwardHook("prompt", []byte(`{}`), &out, &out)
+	handled, code := ForwardHook("prompt", "", []byte(`{}`), &out, &out)
 	if handled || code != 0 {
 		t.Fatalf("timeout should fail-open: handled=%v code=%d", handled, code)
 	}

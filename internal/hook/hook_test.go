@@ -28,6 +28,12 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	os.Setenv("PI_CODING_AGENT_DIR", piDir)
+	zcodeDir, err := os.MkdirTemp("", "hook-test-zcode-home")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	os.Setenv("OK_ZCODE_HOME", zcodeDir)
 	os.Exit(m.Run())
 }
 
@@ -93,7 +99,7 @@ func TestFirstPromptInjectsBaseOnce(t *testing.T) {
 	}
 	var out bytes.Buffer
 	// 首次提问：基础注入（mandatory 全文 + 索引）+ 检索命中
-	if code := HandlePrompt(strings.NewReader(mkPrompt("git 提交规范是什么")), &out); code != 0 {
+	if code := HandlePrompt(strings.NewReader(mkPrompt("git 提交规范是什么")), &out, ""); code != 0 {
 		t.Fatalf("exit %d", code)
 	}
 	got := out.String()
@@ -108,7 +114,7 @@ func TestFirstPromptInjectsBaseOnce(t *testing.T) {
 	}
 	// 第二次提问（同会话）：不再重复基础注入，检索仍生效
 	out.Reset()
-	if code := HandlePrompt(strings.NewReader(mkPrompt("git 提交规范是什么")), &out); code != 0 {
+	if code := HandlePrompt(strings.NewReader(mkPrompt("git 提交规范是什么")), &out, ""); code != 0 {
 		t.Fatalf("exit %d", code)
 	}
 	got = out.String()
@@ -128,7 +134,7 @@ func TestPromptStringFormCompat(t *testing.T) {
 	writeEntry(t, kbRoot, "git.md", gitEntry)
 	in := fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":"git 提交"}`, projDir)
 	var out bytes.Buffer
-	if code := HandlePrompt(strings.NewReader(in), &out); code != 0 {
+	if code := HandlePrompt(strings.NewReader(in), &out, ""); code != 0 {
 		t.Fatalf("exit %d", code)
 	}
 	if !strings.Contains(out.String(), "提交信息格式") {
@@ -141,7 +147,7 @@ func TestPromptKeywordFallback(t *testing.T) {
 	writeEntry(t, kbRoot, "git.md", gitEntry)
 	in := fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":[{"type":"text","text":"git 提交规范是什么"}]}`, projDir)
 	var out bytes.Buffer
-	if code := HandlePrompt(strings.NewReader(in), &out); code != 0 {
+	if code := HandlePrompt(strings.NewReader(in), &out, ""); code != 0 {
 		t.Fatalf("exit %d", code)
 	}
 	if !strings.Contains(out.String(), "提交信息格式") {
@@ -167,7 +173,7 @@ timeout_sec = 1
 	t.Setenv("OK_TEST_EMBED_KEY", "dummy")
 	in := fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":[{"type":"text","text":"git 提交"}]}`, projDir)
 	var out bytes.Buffer
-	code := HandlePrompt(strings.NewReader(in), &out)
+	code := HandlePrompt(strings.NewReader(in), &out, "")
 	if code != 0 {
 		t.Fatalf("exit %d", code)
 	}
@@ -188,7 +194,7 @@ func TestFirstPromptSkipsBadEntry(t *testing.T) {
 	in := fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":[{"type":"text","text":"随便问问"}]}`, projDir)
 	var out bytes.Buffer
 	// 同步容忍损坏条目（跳过坏文件、其余提交）：一个 YAML 笔误不能压制全部注入
-	if code := HandlePrompt(strings.NewReader(in), &out); code != 0 {
+	if code := HandlePrompt(strings.NewReader(in), &out, ""); code != 0 {
 		t.Fatalf("exit %d", code)
 	}
 	if !strings.Contains(out.String(), "改完代码先写日志。") {
@@ -202,7 +208,7 @@ func TestPromptSkipsBadEntry(t *testing.T) {
 	writeEntry(t, kbRoot, "broken.md", "---\ntitle: x\ntype: bogus\n---\n")
 	in := fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":[{"type":"text","text":"git 提交"}]}`, projDir)
 	var out bytes.Buffer
-	if code := HandlePrompt(strings.NewReader(in), &out); code != 0 {
+	if code := HandlePrompt(strings.NewReader(in), &out, ""); code != 0 {
 		t.Fatalf("exit %d", code)
 	}
 	if !strings.Contains(out.String(), "提交信息格式") {
@@ -214,7 +220,7 @@ func TestPromptUnregisteredProjectSilent(t *testing.T) {
 	t.Setenv("OK_HOME", t.TempDir())
 	in := `{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":"/nowhere","prompt":[{"type":"text","text":"git"}]}`
 	var out bytes.Buffer
-	if code := HandlePrompt(strings.NewReader(in), &out); code != 0 || out.Len() != 0 {
+	if code := HandlePrompt(strings.NewReader(in), &out, ""); code != 0 || out.Len() != 0 {
 		t.Fatalf("expected silent 0, got %d %q", code, out.String())
 	}
 }
@@ -238,7 +244,7 @@ message = "请补变更日志"
 	}
 	stop := fmt.Sprintf(`{"hook_event_name":"Stop","session_id":"s1","cwd":%q}`, projDir)
 	var stderr bytes.Buffer
-	if code := HandleStop(strings.NewReader(stop), &stderr); code != 2 {
+	if code := HandleStop(strings.NewReader(stop), &stderr, &bytes.Buffer{}, ""); code != 2 {
 		t.Fatalf("expected block(2), got %d", code)
 	}
 	if !strings.Contains(stderr.String(), "请补变更日志") {
@@ -246,7 +252,7 @@ message = "请补变更日志"
 	}
 	// 第二次 Stop 放行（防死循环）
 	stderr.Reset()
-	if code := HandleStop(strings.NewReader(stop), &stderr); code != 0 {
+	if code := HandleStop(strings.NewReader(stop), &stderr, &bytes.Buffer{}, ""); code != 0 {
 		t.Fatalf("expected pass on second stop, got %d", code)
 	}
 	// 新会话：触碰代码 + 触碰变更日志 → 放行
@@ -257,7 +263,7 @@ message = "请补变更日志"
 	_ = HandlePostTool(strings.NewReader(post3))
 	stderr.Reset()
 	stop2 := fmt.Sprintf(`{"hook_event_name":"Stop","session_id":"s2","cwd":%q}`, projDir)
-	if code := HandleStop(strings.NewReader(stop2), &stderr); code != 0 {
+	if code := HandleStop(strings.NewReader(stop2), &stderr, &bytes.Buffer{}, ""); code != 0 {
 		t.Fatalf("expected pass after changelog, got %d (%q)", code, stderr.String())
 	}
 }
@@ -266,7 +272,7 @@ func TestStopWithoutEnforceRulesPass(t *testing.T) {
 	projDir, _ := setupProject(t)
 	stop := fmt.Sprintf(`{"hook_event_name":"Stop","session_id":"s3","cwd":%q}`, projDir)
 	var stderr bytes.Buffer
-	if code := HandleStop(strings.NewReader(stop), &stderr); code != 0 {
+	if code := HandleStop(strings.NewReader(stop), &stderr, &bytes.Buffer{}, ""); code != 0 {
 		t.Fatalf("expected 0 without enforce rules, got %d", code)
 	}
 }
@@ -293,7 +299,7 @@ func stopOnce(t *testing.T, projDir, sessionID string) (int, string) {
 	t.Helper()
 	stop := fmt.Sprintf(`{"hook_event_name":"Stop","session_id":%q,"cwd":%q}`, sessionID, projDir)
 	var stderr bytes.Buffer
-	code := HandleStop(strings.NewReader(stop), &stderr)
+	code := HandleStop(strings.NewReader(stop), &stderr, &bytes.Buffer{}, "")
 	return code, stderr.String()
 }
 
@@ -392,7 +398,7 @@ message = "请补变更日志"
 	}
 	in := fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":[{"type":"text","text":"git 提交"}]}`, projDir)
 	var out bytes.Buffer
-	if code := HandlePrompt(strings.NewReader(in), &out); code != 0 || out.Len() != 0 {
+	if code := HandlePrompt(strings.NewReader(in), &out, ""); code != 0 || out.Len() != 0 {
 		t.Fatalf("disabled prompt: code=%d out=%q", code, out.String())
 	}
 	codeFile := filepath.Join(projDir, "main.go")
@@ -402,7 +408,7 @@ message = "请补变更日志"
 	}
 	stop := fmt.Sprintf(`{"hook_event_name":"Stop","session_id":"s9","cwd":%q}`, projDir)
 	var stderr bytes.Buffer
-	if code := HandleStop(strings.NewReader(stop), &stderr); code != 0 {
+	if code := HandleStop(strings.NewReader(stop), &stderr, &bytes.Buffer{}, ""); code != 0 {
 		t.Fatalf("disabled stop should pass, got %d (%q)", code, stderr.String())
 	}
 }
@@ -437,7 +443,7 @@ message = "请补变更日志"
 	stop := fmt.Sprintf(`{"hook_event_name":"Stop","session_id":"s1","cwd":%q}`, projDir)
 	var stderr bytes.Buffer
 	// 第 1 次 Stop：auto 自省先触发（不是 enforce 文案）
-	if code := HandleStop(strings.NewReader(stop), &stderr); code != 2 {
+	if code := HandleStop(strings.NewReader(stop), &stderr, &bytes.Buffer{}, ""); code != 2 {
 		t.Fatalf("first stop should block with extraction reminder, got %d (%q)", code, stderr.String())
 	}
 	if !strings.Contains(stderr.String(), "ok propose") {
@@ -445,7 +451,7 @@ message = "请补变更日志"
 	}
 	// 第 2 次 Stop：自省间隔未满跳过，enforce 触发
 	stderr.Reset()
-	if code := HandleStop(strings.NewReader(stop), &stderr); code != 2 {
+	if code := HandleStop(strings.NewReader(stop), &stderr, &bytes.Buffer{}, ""); code != 2 {
 		t.Fatalf("second stop should block with enforce message, got %d (%q)", code, stderr.String())
 	}
 	if !strings.Contains(stderr.String(), "请补变更日志") {
@@ -453,7 +459,7 @@ message = "请补变更日志"
 	}
 	// 第 3 次 Stop：enforce 已阻断过（BlockedRules），自省间隔未满 → 放行
 	stderr.Reset()
-	if code := HandleStop(strings.NewReader(stop), &stderr); code != 0 {
+	if code := HandleStop(strings.NewReader(stop), &stderr, &bytes.Buffer{}, ""); code != 0 {
 		t.Fatalf("third stop should pass, got %d (%q)", code, stderr.String())
 	}
 }
@@ -495,7 +501,7 @@ func TestPromptWikiNudge(t *testing.T) {
 	}
 	var out bytes.Buffer
 	// 达阈值：第一次提示，且提示在输出末尾
-	if code := HandlePrompt(strings.NewReader(mkPrompt()), &out); code != 0 {
+	if code := HandlePrompt(strings.NewReader(mkPrompt()), &out, ""); code != 0 {
 		t.Fatalf("exit %d", code)
 	}
 	got := out.String()
@@ -507,7 +513,7 @@ func TestPromptWikiNudge(t *testing.T) {
 	}
 	// 第二次（同会话）：不再提示
 	out.Reset()
-	if code := HandlePrompt(strings.NewReader(mkPrompt()), &out); code != 0 {
+	if code := HandlePrompt(strings.NewReader(mkPrompt()), &out, ""); code != 0 {
 		t.Fatalf("exit %d", code)
 	}
 	if strings.Contains(out.String(), wikiNudgeHint) {
@@ -524,7 +530,7 @@ func TestPromptWikiNudgeDisabled(t *testing.T) {
 	}
 	in := fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":"hello"}`, projDir)
 	var out bytes.Buffer
-	if code := HandlePrompt(strings.NewReader(in), &out); code != 0 {
+	if code := HandlePrompt(strings.NewReader(in), &out, ""); code != 0 {
 		t.Fatalf("exit %d", code)
 	}
 	if strings.Contains(out.String(), wikiNudgeHint) {
@@ -540,7 +546,7 @@ func TestPromptWikiNudgeNonGitSilent(t *testing.T) {
 	in := fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":"hello"}`, projDir)
 	var out bytes.Buffer
 	// fail-open：非 git 目录静默，退出码不变
-	if code := HandlePrompt(strings.NewReader(in), &out); code != 0 {
+	if code := HandlePrompt(strings.NewReader(in), &out, ""); code != 0 {
 		t.Fatalf("exit %d", code)
 	}
 	if strings.Contains(out.String(), wikiNudgeHint) {

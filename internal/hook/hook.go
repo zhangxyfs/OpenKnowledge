@@ -84,6 +84,44 @@ func (e *Event) FilePath() string {
 	return ti.FilePath
 }
 
+// FormatClaude 是 hook 输出的 Claude/ZCode JSON 协议格式（空串 = 纯文本，kimi/pi 用）。
+// ZCode 只把以 { 开头的合法 JSON stdout 解析为协议结果，纯文本 stdout 不进模型上下文。
+const FormatClaude = "claude"
+
+// writeClaudeContext 以 Claude 协议把注入文本包成 hookSpecificOutput JSON 写 stdout。
+func writeClaudeContext(w io.Writer, context string) {
+	data, err := json.Marshal(map[string]any{
+		"hookSpecificOutput": map[string]string{
+			"hookEventName":     "UserPromptSubmit",
+			"additionalContext": context,
+		},
+	})
+	if err != nil {
+		return
+	}
+	fmt.Fprintln(w, string(data))
+}
+
+// writeClaudeBlock 以 Claude 协议表达 Stop 阻断（decision:block + reason），exit 0。
+func writeClaudeBlock(w io.Writer, reason string) {
+	data, err := json.Marshal(map[string]string{"decision": "block", "reason": reason})
+	if err != nil {
+		return
+	}
+	fmt.Fprintln(w, string(data))
+}
+
+// stopBlock 按格式输出 Stop 阻断：claude 协议 JSON 走 stdout + exit 0；
+// 纯文本走 stderr + exit 2（kimi/pi 的阻断语义）。
+func stopBlock(stderr, stdout io.Writer, format, reason string) int {
+	if format == FormatClaude {
+		writeClaudeBlock(stdout, reason)
+		return 0
+	}
+	fmt.Fprintln(stderr, reason)
+	return 2
+}
+
 func logErr(format string, args ...any) {
 	f, err := os.OpenFile(filepath.Join(registry.Home(), "ok.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
@@ -112,7 +150,8 @@ func selfHealHooks() {
 // HandlePrompt 基础注入（每会话首次：mandatory 全文 + 索引）+ 检索注入（每次）。
 // 检索前先对 kb.db 做增量同步（按 filename+mtime，仅为变化条目重算向量）。
 // embedding 失败降级为关键词检索；任何内部错误 fail-open。
-func HandlePrompt(r io.Reader, w io.Writer) int {
+// format 为 claude 时输出包成 Claude 协议 JSON（hookSpecificOutput），否则纯文本。
+func HandlePrompt(r io.Reader, w io.Writer, format string) int {
 	if registry.HooksDisabled() {
 		return 0
 	}
@@ -216,7 +255,11 @@ func HandlePrompt(r io.Reader, w io.Writer) int {
 		out += nudge
 	}
 	if strings.TrimSpace(out) != "" {
-		fmt.Fprintln(w, out)
+		if format == FormatClaude {
+			writeClaudeContext(w, out)
+		} else {
+			fmt.Fprintln(w, out)
+		}
 	}
 	return 0
 }
@@ -266,8 +309,9 @@ func relativize(pc *project.Context, abs string) string {
 	return ""
 }
 
-// HandleStop 先按周期发出 auto 自省提醒，再评估 enforce 规则，需要时以 exit 2 阻断。
-func HandleStop(r io.Reader, stderr io.Writer) int {
+// HandleStop 先按周期发出 auto 自省提醒，再评估 enforce 规则，需要时阻断：
+// 纯文本格式 stderr + exit 2（kimi/pi）；claude 格式 stdout decision:block JSON + exit 0。
+func HandleStop(r io.Reader, stderr, stdout io.Writer, format string) int {
 	if registry.HooksDisabled() {
 		return 0
 	}
@@ -297,8 +341,8 @@ func HandleStop(r io.Reader, stderr io.Writer) int {
 		if err := st.Save(pc.Store.StateDir()); err != nil {
 			logErr("stop save state: %v", err)
 		}
-		fmt.Fprintln(stderr, "本会话修改过文件。请回顾是否有值得记录的经验（非显而易见的坑或解法），有则立即运行 ok propose 记录草稿条目；没有则继续。")
-		return 2
+		reason := "本会话修改过文件。请回顾是否有值得记录的经验（非显而易见的坑或解法），有则立即运行 ok propose 记录草稿条目；没有则继续。"
+		return stopBlock(stderr, stdout, format, reason)
 	}
 	for _, rule := range pc.Config.Enforce {
 		if rule.Type != "changelog_required" {
@@ -309,8 +353,7 @@ func HandleStop(r io.Reader, stderr io.Writer) int {
 			if err := st.Save(pc.Store.StateDir()); err != nil {
 				logErr("stop save state: %v", err)
 			}
-			fmt.Fprintln(stderr, reason)
-			return 2
+			return stopBlock(stderr, stdout, format, reason)
 		}
 	}
 	// 未阻断也要持久化 StopCount

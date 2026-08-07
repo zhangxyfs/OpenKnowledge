@@ -37,31 +37,31 @@ func NewMux(gh http.Handler, token, fingerprint string) http.Handler {
 	mux.HandleFunc("GET /api/health", auth(func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, map[string]string{"fingerprint": fingerprint})
 	}))
-	mux.HandleFunc("POST /api/hook/prompt", auth(hookHandler(func(body []byte) HookResponse {
+	mux.HandleFunc("POST /api/hook/prompt", auth(hookHandler(func(body []byte, format string) HookResponse {
 		var out strings.Builder
-		code := hook.HandlePrompt(bytes.NewReader(body), &out)
+		code := hook.HandlePrompt(bytes.NewReader(body), &out, format)
 		return HookResponse{Stdout: out.String(), Code: code}
 	})))
-	mux.HandleFunc("POST /api/hook/post-tool", auth(hookHandler(func(body []byte) HookResponse {
+	mux.HandleFunc("POST /api/hook/post-tool", auth(hookHandler(func(body []byte, _ string) HookResponse {
 		return HookResponse{Code: hook.HandlePostTool(bytes.NewReader(body))}
 	})))
-	mux.HandleFunc("POST /api/hook/stop", auth(hookHandler(func(body []byte) HookResponse {
-		var errOut strings.Builder
-		code := hook.HandleStop(bytes.NewReader(body), &errOut)
-		return HookResponse{Stderr: errOut.String(), Code: code}
+	mux.HandleFunc("POST /api/hook/stop", auth(hookHandler(func(body []byte, format string) HookResponse {
+		var out, errOut strings.Builder
+		code := hook.HandleStop(bytes.NewReader(body), &errOut, &out, format)
+		return HookResponse{Stdout: out.String(), Stderr: errOut.String(), Code: code}
 	})))
 	mux.Handle("/", gh)
 	return mux
 }
 
-// hookHandler 把"读 body → 业务函数 → HookResponse JSON"的模板收敛到一处。
-func hookHandler(fn func([]byte) HookResponse) http.HandlerFunc {
+// hookHandler 把"读 body + format query → 业务函数 → HookResponse JSON"的模板收敛到一处。
+func hookHandler(fn func([]byte, string) HookResponse) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 		if err != nil {
 			body = nil
 		}
-		writeJSON(w, fn(body))
+		writeJSON(w, fn(body, r.URL.Query().Get("format")))
 	}
 }
 

@@ -29,16 +29,51 @@ func SkillNames() []string {
 	return names
 }
 
-// InstallSkills 把技能模板（烘焙 exe 路径）写入 SkillsHome。
-func InstallSkills(exe string) error {
-	for name, tpl := range skillTemplates {
-		dir := filepath.Join(agentx.SkillsHome(), name)
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return err
+// SkillDirs 返回技能安装目标目录并集：全部已检测 agent 的 SkillsDir() 去重
+// （kimi/pi 共享 SkillsHome，zcode 是独立的 ~/.zcode/skills）；无已检测 agent
+// 时回退共享 SkillsHome（保持原语义）。
+func SkillDirs() []string {
+	seen := map[string]bool{}
+	var dirs []string
+	for _, a := range agentx.Detected() {
+		d := a.SkillsDir()
+		if !seen[d] {
+			seen[d] = true
+			dirs = append(dirs, d)
 		}
-		content := strings.ReplaceAll(tpl, "{{EXE}}", filepath.ToSlash(exe))
-		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o644); err != nil {
-			return err
+	}
+	if len(dirs) == 0 {
+		dirs = append(dirs, agentx.SkillsHome())
+	}
+	return dirs
+}
+
+// AllSkillDirs 返回全部已注册 agent 的技能目录并集（卸载清理用，不问是否检测到）。
+func AllSkillDirs() []string {
+	seen := map[string]bool{}
+	var dirs []string
+	for _, a := range agentx.All() {
+		d := a.SkillsDir()
+		if !seen[d] {
+			seen[d] = true
+			dirs = append(dirs, d)
+		}
+	}
+	return dirs
+}
+
+// InstallSkills 把技能模板（烘焙 exe 路径）写入 SkillDirs() 的每个目录。
+func InstallSkills(exe string) error {
+	for _, home := range SkillDirs() {
+		for name, tpl := range skillTemplates {
+			dir := filepath.Join(home, name)
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return err
+			}
+			content := strings.ReplaceAll(tpl, "{{EXE}}", filepath.ToSlash(exe))
+			if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o644); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

@@ -490,18 +490,21 @@ type Agent interface {
     RemoveHooks() (bool, error)   // 返回是否真的移除了内容
     EnsureHooks(exe string) error // hook 入口自愈；错误由调用方 fail-open 处理
     HooksTarget() string          // hook 写入目标的展示路径
-    SkillsDir() string            // 技能目录（当前均返回共享 SkillsHome）
+    SkillsDir() string            // 技能目录（kimi/pi 共享 SkillsHome；zcode 为 ~/.zcode/skills）
 }
 ```
 
-注册表：`Register` / `All` / `Find(id)` / `Detected()`（本机已安装的 agent）；技能安装目录为各 agent 共享的 `SkillsHome()`（`OK_SKILLS_HOME` 优先，默认 `~/.agents/skills`）。
+注册表：`Register` / `All` / `Find(id)` / `Detected()`（本机已安装的 agent）。技能安装目标为**已检测 agent 的 SkillsDir 并集**（`setupx.SkillDirs()`，kimi/pi 共享 `SkillsHome()`（`OK_SKILLS_HOME` 优先，默认 `~/.agents/skills`），zcode 独立目录）；卸载按全部注册 agent 的并集清理（`setupx.AllSkillDirs()`）。
 
-两种注入形态：
+三种注入形态：
 
 | agent | 注入形态 | 写入目标 | "已安装且为当前版本"判定 |
 |-------|----------|----------|--------------------------|
 | kimi | TOML 标记块（3 条 `[[hooks]]`） | `~/.kimi-code/config.toml`（`KIMI_CODE_HOME` 优先） | 标记块 `# >>> openknowledge hooks >>>` 存在 |
 | pi | TypeScript 扩展（三事件回调） | `~/.pi/agent/extensions/openknowledge.ts`（`PI_CODING_AGENT_DIR` 优先） | 头标记 + `// fingerprint:` 行与当前模板指纹一致 |
+| zcode | 合并写 JSON 配置（`hooks.events` 三事件，`type:"process"`） | `~/.zcode/cli/config.json`（`OK_ZCODE_HOME` 优先，ok 自留测试口） | 三事件的 ok hook 均为当前 exe + `claude` 参数 + 当前 timeoutMs |
+
+zcode 适配器（`zcode.go`）：ZCode 的 hook 输入契约是 Claude 风格 snake_case，与 `hook.ParseEvent` 天然兼容；但**输出侧要求 stdout 为协议 JSON**（纯文本只当诊断不进上下文），故 hook 命令带第三参数 `claude`——`HandlePrompt` 把注入包成 `{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":...}}`，`HandleStop` 阻断改写 stdout `{"decision":"block","reason":...}` + exit 0（kimi/pi 的 stderr + exit 2 语义不变）；daemon 转发经 `?format=` query 透传。配置合并写保留未知字段与用户自有 hook（ok 条目按 `args:["hook",<事件>,...]` 识别，与 exe 路径无关），写前备份 `.bak-openknowledge`；`hooks.enabled` 置 true（ZCode 要求显式开启）。自愈语义：曾装过且内容过期才重写，从未安装不复活。技能进 `~/.zcode/skills`（ZCode 不自动读 `~/.agents/skills`）。
 
 pi 扩展由内嵌模板 `pi_extension.ts`（`go:embed`）渲染：`{{EXE}}` 占位替换为 ok 绝对路径，文件头写头标记（`// openknowledge hooks (managed by ok.exe; do not edit)`）与指纹行（指纹 = 模板内容 sha256 前 12 位十六进制，随模板升级变化）。安装时若目标已存在**非本工具生成**的同名文件，先备份为 `.bak-openknowledge`（备份失败则中止安装）；`RemoveHooks` 只删本工具生成的文件，非本工具文件不动。扩展对 ok 的调用全部 fail-open（超时/异常静默），不拖累 pi 会话。
 

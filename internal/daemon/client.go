@@ -71,14 +71,19 @@ func EnsureCurrent() (*daemonx.Info, bool) {
 	return info, true
 }
 
-// ForwardHook 把 kimi hook 事件转发给 daemon；任何失败都返回 handled=false
-// （调用方走本地兜底），绝不让 kimi 卡住。
-func ForwardHook(name string, payload []byte, stdout, stderr io.Writer) (bool, int) {
+// ForwardHook 把 agent hook 事件转发给 daemon；任何失败都返回 handled=false
+// （调用方走本地兜底），绝不让 agent 卡住。format 为输出协议格式（如 "claude"），
+// 经 query param 透传给 daemon 侧的 hook.Handle*。
+func ForwardHook(name, format string, payload []byte, stdout, stderr io.Writer) (bool, int) {
 	info, ok := EnsureCurrent()
 	if !ok {
 		return false, 0
 	}
-	req, err := http.NewRequest("POST", info.URL()+"/api/hook/"+name, bytes.NewReader(payload))
+	url := info.URL() + "/api/hook/" + name
+	if format != "" {
+		url += "?format=" + format
+	}
+	req, err := http.NewRequest("POST", url, bytes.NewReader(payload))
 	if err != nil {
 		return false, 0
 	}

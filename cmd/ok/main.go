@@ -81,18 +81,23 @@ func runHook(args []string) (code int) {
 	if registry.HooksDisabled() {
 		return 0
 	}
+	// 可选第二参数是输出协议格式（如 zcode 的 "claude" JSON 协议，缺省纯文本）
+	format := ""
+	if len(args) > 1 {
+		format = args[1]
+	}
 	payload, _ := io.ReadAll(io.LimitReader(os.Stdin, 1<<20))
-	if handled, c := daemon.ForwardHook(args[0], payload, os.Stdout, os.Stderr); handled {
+	if handled, c := daemon.ForwardHook(args[0], format, payload, os.Stdout, os.Stderr); handled {
 		return c
 	}
 	r := bytes.NewReader(payload)
 	switch args[0] {
 	case "prompt":
-		return hook.HandlePrompt(r, os.Stdout)
+		return hook.HandlePrompt(r, os.Stdout, format)
 	case "post-tool":
 		return hook.HandlePostTool(r)
 	case "stop":
-		return hook.HandleStop(r, os.Stderr)
+		return hook.HandleStop(r, os.Stderr, os.Stdout, format)
 	}
 	return 0
 }

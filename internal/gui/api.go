@@ -289,10 +289,12 @@ func (h *Handler) apiStatus(w http.ResponseWriter, _ *http.Request) {
 		})
 	}
 	skillsInstalled := true
-	for _, name := range setupx.SkillNames() {
-		if _, err := os.Stat(filepath.Join(agentx.SkillsHome(), name, "SKILL.md")); err != nil {
-			skillsInstalled = false
-			break
+	for _, home := range setupx.SkillDirs() {
+		for _, name := range setupx.SkillNames() {
+			if _, err := os.Stat(filepath.Join(home, name, "SKILL.md")); err != nil {
+				skillsInstalled = false
+				break
+			}
 		}
 	}
 	embeddingConfigured := false
@@ -858,7 +860,7 @@ func (h *Handler) apiSetupSkills(w http.ResponseWriter, _ *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "dir": agentx.SkillsHome()})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "dirs": setupx.SkillDirs()})
 }
 
 func (h *Handler) apiSetupEmbedding(w http.ResponseWriter, r *http.Request) {

@@ -49,7 +49,7 @@ func Setup(args []string, in io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "技能已安装到 %s (openknowledge-init/on/off/propose/capture)\n", agentx.SkillsHome())
+	fmt.Fprintf(stdout, "技能已安装到 %s\n", strings.Join(setupx.SkillDirs(), "；"))
 	embeddingSet := false
 	fs.Visit(func(f *flag.Flag) {
 		if strings.HasPrefix(f.Name, "embedding-") {

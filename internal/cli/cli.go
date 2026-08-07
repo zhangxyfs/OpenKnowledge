@@ -330,11 +330,22 @@ func Doctor(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	fmt.Fprintf(stdout, "注册表: %d 个项目\n", len(reg.Projects))
-	if data, err := os.ReadFile(filepath.Join(agentx.KimiHome(), "config.toml")); err != nil || !strings.Contains(string(data), agentx.MarkerBegin) {
-		fmt.Fprintln(stdout, "hooks 未安装（运行 ok setup）")
+	detectedAny := false
+	for _, a := range agentx.All() {
+		if !a.Detect() {
+			continue
+		}
+		detectedAny = true
+		if a.HooksInstalled() {
+			fmt.Fprintf(stdout, "[%s] hooks 已安装\n", a.ID())
+		} else {
+			fmt.Fprintf(stdout, "[%s] hooks 未安装（运行 ok setup）\n", a.ID())
+			healthy = false
+		}
+	}
+	if !detectedAny {
+		fmt.Fprintln(stdout, "未检测到支持的 agent（kimi / pi / zcode）")
 		healthy = false
-	} else {
-		fmt.Fprintln(stdout, "hooks 已安装")
 	}
 	if registry.HooksDisabled() {
 		fmt.Fprintln(stdout, "hooks 当前为关闭状态（ok on 开启）")
