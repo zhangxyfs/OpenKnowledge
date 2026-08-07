@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"openknowledge/internal/daemon"
 	"openknowledge/internal/hook"
 	"openknowledge/internal/registry"
+	"openknowledge/internal/rxext"
 )
 
 func main() {
@@ -29,6 +31,8 @@ func run(argv []string) int {
 		return runGUI()
 	case "hook":
 		return runHook(argv[2:])
+	case "extension-serve":
+		return runExtensionServe()
 	case "daemon":
 		if len(argv) > 2 && argv[2] == "stop" {
 			return daemon.Stop(os.Stdout, os.Stderr)
@@ -98,6 +102,14 @@ func runHook(args []string) (code int) {
 		return hook.HandlePostTool(r)
 	case "stop":
 		return hook.HandleStop(r, os.Stderr, os.Stdout, format)
+	}
+	return 0
+}
+
+// runExtensionServe Reasonix sidecar 入口：宿主经 stdio 驱动，退出码恒 0（fail-open）。
+func runExtensionServe() int {
+	if err := rxext.Serve(context.Background()); err != nil {
+		fmt.Fprintln(os.Stderr, "extension-serve:", err)
 	}
 	return 0
 }
