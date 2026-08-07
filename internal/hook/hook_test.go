@@ -34,6 +34,12 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	os.Setenv("OK_ZCODE_HOME", zcodeDir)
+	reasonixDir, err := os.MkdirTemp("", "hook-test-reasonix-home")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	os.Setenv("OK_REASONIX_HOME", reasonixDir)
 	os.Exit(m.Run())
 }
 

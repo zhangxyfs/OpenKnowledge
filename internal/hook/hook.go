@@ -1,9 +1,7 @@
 package hook
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,14 +10,9 @@ import (
 	"time"
 
 	"openknowledge/internal/agentx"
-	"openknowledge/internal/embed"
-	"openknowledge/internal/enforce"
-	"openknowledge/internal/index"
 	"openknowledge/internal/project"
 	"openknowledge/internal/registry"
-	"openknowledge/internal/retrieve"
 	"openknowledge/internal/state"
-	"openknowledge/internal/store"
 	"openknowledge/internal/wiki"
 )
 
@@ -147,9 +140,7 @@ func selfHealHooks() {
 	}
 }
 
-// HandlePrompt 基础注入（每会话首次：mandatory 全文 + 索引）+ 检索注入（每次）。
-// 检索前先对 kb.db 做增量同步（按 filename+mtime，仅为变化条目重算向量）。
-// embedding 失败降级为关键词检索；任何内部错误 fail-open。
+// HandlePrompt 解析 hook 事件并输出注入文本；核心逻辑见 InjectForPrompt。
 // format 为 claude 时输出包成 Claude 协议 JSON（hookSpecificOutput），否则纯文本。
 func HandlePrompt(r io.Reader, w io.Writer, format string) int {
 	if registry.HooksDisabled() {
@@ -169,91 +160,7 @@ func HandlePrompt(r io.Reader, w io.Writer, format string) int {
 	if err != nil {
 		return 0
 	}
-	var client embed.Client
-	if key := pc.Config.Embedding.ResolvedAPIKey(); key != "" && pc.Config.Embedding.BaseURL != "" {
-		client = &embed.OpenAIClient{
-			BaseURL: pc.Config.Embedding.BaseURL,
-			APIKey:  key,
-			Model:   pc.Config.Embedding.Model,
-			Timeout: time.Duration(pc.Config.Embedding.TimeoutSec) * time.Second,
-		}
-	}
-	db, err := index.Open(pc.Store.KbPath())
-	if err != nil {
-		logErr("prompt open index: %v", err)
-		return 0
-	}
-	defer db.Close()
-	if err := db.Sync(pc.Store.KnowledgeDir(), client); err != nil {
-		var corrupt *index.CorruptEntriesError
-		switch {
-		case errors.As(err, &corrupt):
-			// 损坏条目已跳过、其余已提交：记日志后继续正常注入（无需降级重试）
-			logErr("prompt sync index: %v", err)
-		case client == nil:
-			logErr("prompt sync index: %v", err)
-			return 0
-		default:
-			// embedding 失败：降级重试（仅同步 INDEX），保证基础注入与关键词检索不被阻断
-			logErr("prompt sync index with embedding: %v", err)
-			if err2 := db.Sync(pc.Store.KnowledgeDir(), nil); err2 != nil {
-				logErr("prompt sync index: %v", err2)
-				if !errors.As(err2, &corrupt) {
-					return 0
-				}
-			}
-		}
-	}
-	st := state.Load(pc.Store.StateDir(), ev.SessionID)
-	var b strings.Builder
-	if !st.BaseInjected {
-		_ = state.Clean(pc.Store.StateDir(), 7*24*time.Hour)
-		base := b.Len()
-		mandatory, err := db.Mandatory()
-		if err != nil {
-			logErr("prompt mandatory: %v", err)
-		}
-		for _, h := range mandatory {
-			fmt.Fprintf(&b, "## %s\n\n%s\n\n", h.Title, h.Body)
-		}
-		if idx, err := os.ReadFile(pc.Store.IndexPath()); err == nil {
-			b.Write(idx)
-		}
-		if b.Len() > base {
-			st.BaseInjected = true
-			if err := st.Save(pc.Store.StateDir()); err != nil {
-				logErr("prompt save state: %v", err)
-			}
-		}
-	}
-	var queryVec []float32
-	if client != nil {
-		if vec, err := client.Embed(context.Background(), promptText); err != nil {
-			logErr("prompt embed: %v", err)
-		} else {
-			queryVec = vec
-		}
-	}
-	hits, err := db.Query(retrieve.Terms(promptText), queryVec, pc.Config.Retrieve)
-	if err != nil {
-		logErr("prompt query: %v", err)
-	}
-	if len(hits) > 0 {
-		b.WriteString("## 相关知识（需要全文时读取对应文件）\n\n")
-		for _, h := range hits {
-			p := filepath.ToSlash(filepath.Join(pc.Store.KnowledgeDir(), h.Filename))
-			if h.Summary != "" {
-				fmt.Fprintf(&b, "- **%s** (%s) — %s（%s）\n", h.Title, h.Type, h.Summary, p)
-			} else {
-				fmt.Fprintf(&b, "- **%s** (%s)（%s）\n", h.Title, h.Type, p)
-			}
-		}
-		b.WriteString("\n")
-	}
-	out := store.TruncateToBudget(b.String(), pc.Config.Inject.MaxTokens)
-	if nudge := wikiNudge(pc, st, ev.Cwd); nudge != "" {
-		out += nudge
-	}
+	out := InjectForPrompt(pc, ev.SessionID, ev.Cwd, promptText)
 	if strings.TrimSpace(out) != "" {
 		if format == FormatClaude {
 			writeClaudeContext(w, out)
@@ -264,9 +171,7 @@ func HandlePrompt(r io.Reader, w io.Writer, format string) int {
 	return 0
 }
 
-// HandlePostTool 记录触碰的文件（相对项目根、小写、"/" 分隔）。
-// 各静默分支均记 ok.log（2026-08-04 曾出现整会话 touched 丢失且无迹可查）：
-// 若无任何 post-tool 日志，说明 kimi 未派发或 hook 进程被超时杀死。
+// HandlePostTool 解析 hook 事件并记录触碰文件；核心逻辑见 TrackTouched。
 func HandlePostTool(r io.Reader) int {
 	if registry.HooksDisabled() {
 		return 0
@@ -281,16 +186,7 @@ func HandlePostTool(r io.Reader) int {
 		logErr("post-tool project (cwd=%q): %v", ev.Cwd, err)
 		return 0
 	}
-	rel := relativize(pc, ev.FilePath())
-	if rel == "" {
-		logErr("post-tool skip: tool=%s path=%q 不在项目 %s 的路径内", ev.ToolName, ev.FilePath(), pc.Project.Name)
-		return 0
-	}
-	st := state.Load(pc.Store.StateDir(), ev.SessionID)
-	st.AddTouched(rel)
-	if err := st.Save(pc.Store.StateDir()); err != nil {
-		logErr("post-tool save state: %v", err)
-	}
+	TrackTouched(pc, ev.SessionID, ev.ToolName, ev.FilePath())
 	return 0
 }
 
@@ -309,8 +205,10 @@ func relativize(pc *project.Context, abs string) string {
 	return ""
 }
 
-// HandleStop 先按周期发出 auto 自省提醒，再评估 enforce 规则，需要时阻断：
-// 纯文本格式 stderr + exit 2（kimi/pi）；claude 格式 stdout decision:block JSON + exit 0。
+// HandleStop 解析 hook 事件，按 CheckStop 评估结果阻断：纯文本格式 stderr + exit 2
+// （kimi/pi）；claude 格式 stdout decision:block JSON + exit 0。
+// isBlock 在本 Handler 不区分——两种结果都走 stopBlock，行为与现状一致；
+// isBlock 供 reasonix sidecar 三档分流用。
 func HandleStop(r io.Reader, stderr, stdout io.Writer, format string) int {
 	if registry.HooksDisabled() {
 		return 0
@@ -323,42 +221,9 @@ func HandleStop(r io.Reader, stderr, stdout io.Writer, format string) int {
 	if err != nil {
 		return 0
 	}
-	// 无 enforce 规则且非 auto 自省模式：无需加载状态，直接放行
-	if len(pc.Config.Enforce) == 0 && pc.Config.Capture.Mode != "auto" {
-		return 0
-	}
-	st := state.Load(pc.Store.StateDir(), ev.SessionID)
-	// auto 自省模式：有文件修改且距上次提醒满 turn_interval 回合 → 阻断一次。
-	// 周期性提醒，不进 BlockedRules；先于 enforce 评估触发。
-	st.StopCount++
-	interval := pc.Config.Capture.TurnInterval
-	if interval <= 0 {
-		interval = 1
-	}
-	if pc.Config.Capture.Mode == "auto" && len(st.Touched) > 0 &&
-		st.StopCount-st.LastExtractReminder >= interval {
-		st.LastExtractReminder = st.StopCount
-		if err := st.Save(pc.Store.StateDir()); err != nil {
-			logErr("stop save state: %v", err)
-		}
-		reason := "本会话修改过文件。请回顾是否有值得记录的经验（非显而易见的坑或解法），有则立即运行 ok propose 记录草稿条目；没有则继续。"
+	reason, _ := CheckStop(pc, ev.SessionID)
+	if reason != "" {
 		return stopBlock(stderr, stdout, format, reason)
-	}
-	for _, rule := range pc.Config.Enforce {
-		if rule.Type != "changelog_required" {
-			continue
-		}
-		if block, reason := enforce.EvalChangelog(rule, st); block {
-			st.MarkBlocked(rule.Type)
-			if err := st.Save(pc.Store.StateDir()); err != nil {
-				logErr("stop save state: %v", err)
-			}
-			return stopBlock(stderr, stdout, format, reason)
-		}
-	}
-	// 未阻断也要持久化 StopCount
-	if err := st.Save(pc.Store.StateDir()); err != nil {
-		logErr("stop save state: %v", err)
 	}
 	return 0
 }
