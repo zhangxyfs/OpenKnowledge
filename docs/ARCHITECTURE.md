@@ -410,6 +410,8 @@ hook prompt（基础注入之后）
 
 **分支感知（v2.6.0）**：wiki 游标按分支记录（`state/wiki.json`：`base_branch` + `cursors` 表，旧单游标格式读取时按 merge-base 可达性惰性迁移，不可达报疑不归错）；CheckStatus 三态检测（分叉/无基线/失效），非基准分支注入附一行 wiki 出处上下文；`ok wiki base` 查看/设置基准分支。分支差异条目属二期。CheckStatus 只读 git 与游标文件、绝不写盘——迁移落盘只发生在 mark/base 写入路径；基准分支上的行为与旧版完全一致。
 
+**分支差异条目（v2.7.0，二期）**：长期并行分支只维护与基准的结构 delta（tags 含 `branch:<名>`）；注入按当前分支过滤（含 INDEX 差异小节裁剪，分支未知不过滤）；`ok wiki diff` 给技能供结构变化素材，非基准分支只写差异条目（写侧防呆）；基准分支检测 merged_branches 提示清理（status 输出 + prompt 每会话一次 nudge）；GUI 管理页分支列+过滤器+sticky 操作列；CheckStatus git 调用收敛为 merge-base 判别。无 `branch:` 标签条目的项目行为与旧版完全一致。
+
 **目标**：wiki 由 AI 技能生成、但"该不该更新"由机制提醒——游标 + 阈值把 wiki 新鲜度变成可检查的状态，提示复用现有 prompt 注入通道，不增加新 hook。
 
 ---
