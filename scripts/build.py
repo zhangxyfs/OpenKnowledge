@@ -58,7 +58,13 @@ def main():
     if web_dist.exists():
         shutil.rmtree(web_dist)
     shutil.copytree(ROOT / "web", web_dist)
-    print("dist/ built: ok.exe + web/")
+    # changelogs 随包分发（GUI 更新日志弹窗的数据源；iss 打的是 dist\changelogs）——
+    # 与 build-dist.sh 保持一致，漏拷会导致安装包内更新日志陈旧
+    cl_dist = ROOT / "dist" / "changelogs"
+    if cl_dist.exists():
+        shutil.rmtree(cl_dist)
+    shutil.copytree(ROOT / "docs" / "changelogs", cl_dist)
+    print("dist/ built: ok.exe + web/ + changelogs/")
 
     # 3. Inno Setup 打包
     if not args.skip_installer:
