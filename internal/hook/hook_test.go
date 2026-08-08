@@ -636,9 +636,9 @@ func TestPromptFiltersOtherBranchEntries(t *testing.T) {
 	initGitRepo(t, projDir, 1) // 当前分支 master
 	writeEntry(t, kbRoot, "共享.md", "---\ntitle: 共享规约\ntype: note\ntags: []\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\n共享正文含线索词 FilterCue。\n")
 	writeEntry(t, kbRoot, "dev差异.md", "---\ntitle: dev 差异经验\ntype: note\ntags: [\"branch:dev\"]\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\ndev 正文也含线索词 FilterCue。\n")
-	// 预置已基础注入：INDEX 主列表按现状收录全部 note 条目（含 branch:dev 标题，
-	// 主列表不按分支过滤是 INDEX 既有行为），本测试只断言检索过滤通道，
-	// 须隔离首次基础注入的 INDEX 噪音，否则标题经主列表泄漏使断言失真
+	// 预置已基础注入：隔离首次基础注入的 INDEX 噪音，只断言检索过滤通道
+	// （带 branch 标签的条目本就不进 INDEX 主列表，但 INDEX 注入仍会带共享条目，
+	// 预置后输出更干净、断言只落在检索通道上）
 	st := state.Load(filepath.Join(kbRoot, "state"), "s1")
 	st.BaseInjected = true
 	if err := st.Save(filepath.Join(kbRoot, "state")); err != nil {
@@ -675,6 +675,58 @@ func TestPromptIndexTrimmedByBranch(t *testing.T) {
 	}
 	if strings.Contains(got, "分支差异（dev）") || strings.Contains(got, "（dev 分支差异）") {
 		t.Errorf("master 会话的 INDEX 注入不得含 dev 差异小节: %q", got)
+	}
+}
+
+// 已并入提示（merged 变体）：基准分支上、dev tip 已并入且其差异条目仍在库中 →
+// 提示一次；同会话第二次不再提示；删掉差异条目后（新会话）不再提示。
+func TestPromptWikiMergedNudge(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	initGitRepo(t, projDir, 2) // 当前在 master
+	runGit(t, projDir, "checkout", "-q", "-b", "dev")
+	runGit(t, projDir, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty", "-m", "d1")
+	devTip := gitHead(t, projDir)
+	runGit(t, projDir, "checkout", "-q", "master")
+	runGit(t, projDir, "-c", "user.email=t@t", "-c", "user.name=t", "merge", "-q", "--no-ff", "dev", "-m", "merge dev")
+	// 基准分支游标 + dev 游标（dev tip 已并入 master）
+	st := &wiki.State{BaseBranch: "master", Cursors: map[string]wiki.BranchCursor{
+		"master": {LastCommit: gitHead(t, projDir)},
+		"dev":    {LastCommit: devTip},
+	}}
+	if err := wiki.SaveState(filepath.Join(kbRoot, "state"), st); err != nil {
+		t.Fatal(err)
+	}
+	// dev 的差异条目仍在库中
+	writeEntry(t, kbRoot, "dev差异.md", "---\ntitle: 架构总览（dev 分支差异）\ntype: reference\ntags: [\"wiki\", \"branch:dev\"]\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\n正文。\n")
+	mkPrompt := func(session string) string {
+		return fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":%q,"cwd":%q,"prompt":"hello"}`, session, projDir)
+	}
+	var out bytes.Buffer
+	if code := HandlePrompt(strings.NewReader(mkPrompt("s1")), &out, ""); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	got := out.String()
+	if !strings.Contains(got, "分支 dev 已并入 master") || !strings.Contains(got, "差异条目已失效") {
+		t.Fatalf("基准分支应提示已并入: %q", got)
+	}
+	// 第二次（同会话）：不再提示
+	out.Reset()
+	if code := HandlePrompt(strings.NewReader(mkPrompt("s1")), &out, ""); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if strings.Contains(out.String(), "已并入") {
+		t.Fatalf("merged nudge 不得在同会话重复: %q", out.String())
+	}
+	// 删掉差异条目后（新会话）：不再提示
+	if err := os.Remove(filepath.Join(kbRoot, "knowledge", "dev差异.md")); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if code := HandlePrompt(strings.NewReader(mkPrompt("s2")), &out, ""); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if strings.Contains(out.String(), "已并入") {
+		t.Fatalf("差异条目删除后不得提示: %q", out.String())
 	}
 }
 

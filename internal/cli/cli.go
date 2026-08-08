@@ -561,7 +561,7 @@ func CaptureCmd(args []string, stdout, stderr io.Writer) int {
 	}
 }
 
-// WikiCmd 处理 ok wiki status|mark|base。
+// WikiCmd 处理 ok wiki status|mark|base|diff。
 func WikiCmd(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("wiki", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -598,6 +598,21 @@ func WikiCmd(args []string, stdout, stderr io.Writer) int {
 		}
 		if st.MergeBase != "" {
 			out["merge_base"] = st.MergeBase
+		}
+		// 已并入检测：仅在基准分支上、存在"tip 已并入且有差异条目"的分支时输出
+		if st.Branch != "" && st.Branch == st.BaseBranch && st.BaseBranch != "" {
+			if s := wiki.LoadState(pc.Store.StateDir()); s != nil {
+				if db, err := index.Open(pc.Store.KbPath()); err == nil {
+					merged := wiki.MergedIntoBase(s, cwd, func(b string) bool {
+						ok, _ := db.HasBranchWiki(b)
+						return ok
+					})
+					db.Close()
+					if len(merged) > 0 {
+						out["merged_branches"] = merged
+					}
+				}
+			}
 		}
 		_ = json.NewEncoder(stdout).Encode(out)
 		return 0
@@ -678,8 +693,25 @@ func WikiCmd(args []string, stdout, stderr io.Writer) int {
 		}
 		fmt.Fprintf(stdout, "基准分支已设为 %s\n", name)
 		return 0
+	case "diff":
+		s := wiki.LoadState(pc.Store.StateDir())
+		base := ""
+		if s != nil {
+			base = s.BaseBranch
+		}
+		out, err := wiki.DiffSummary(cwd, base)
+		if err != nil {
+			fmt.Fprintln(stderr, "diff 计算失败:", err)
+			return 1
+		}
+		if out == "" {
+			fmt.Fprintln(stdout, "无法计算分叉点（非 git / 未设基准分支 / 无共同祖先）")
+			return 0
+		}
+		fmt.Fprint(stdout, out)
+		return 0
 	default:
-		fmt.Fprintln(stderr, "用法: ok wiki <status|mark [commit]|base [分支名]>")
+		fmt.Fprintln(stderr, "用法: ok wiki <status|mark [commit]|base [分支名]|diff>")
 		return 2
 	}
 }

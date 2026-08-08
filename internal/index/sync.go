@@ -242,6 +242,12 @@ func (db *DB) rebuildIndex(dir string) error {
 		if draft == 0 && strings.Contains(tags, "wiki") {
 			continue
 		}
+		// 带 branch: 标签的条目（无论类型）不进全分支共享的主列表：
+		// branch 标签语义=分支专属——wiki 差异条目已在下方差异节，
+		// 非 wiki 分支条目仍可按分支检索命中，只是不进共享目录
+		if BranchOf(splitTags(tags)) != "" {
+			continue
+		}
 		if draft != 0 {
 			title = "【草稿】" + title
 		}

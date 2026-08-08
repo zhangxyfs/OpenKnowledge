@@ -11,6 +11,7 @@ import (
 
 	"openknowledge/internal/agentx"
 	"openknowledge/internal/entry"
+	"openknowledge/internal/index"
 	"openknowledge/internal/registry"
 	"openknowledge/internal/wiki"
 )
@@ -524,6 +525,136 @@ func TestWikiStatusBranchFields(t *testing.T) {
 	}
 	if st["has_wiki"] != true {
 		t.Errorf("has_wiki 语义漂移: %v", st)
+	}
+}
+
+// ok wiki diff：dev 分支相对 master 分叉点的结构变化摘要。
+func TestWikiDiff(t *testing.T) {
+	repo, _ := setupWikiProject(t)
+	runGit(t, repo, "checkout", "-q", "-b", "dev")
+	if err := os.MkdirAll(filepath.Join(repo, "internal", "foo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "internal", "foo", "a.go"), []byte("package foo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "dev work")
+	var out, errb bytes.Buffer
+	if code := WikiCmd([]string{"base", "master"}, &out, &errb); code != 0 {
+		t.Fatalf("base 设置 exit %d err=%q", code, errb.String())
+	}
+	out.Reset()
+	if code := WikiCmd([]string{"diff"}, &out, &errb); code != 0 {
+		t.Fatalf("diff exit %d err=%q", code, errb.String())
+	}
+	got := out.String()
+	for _, want := range []string{"基准分支: master", "当前分支: dev", "internal/foo"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("diff 摘要缺 %q:\n%s", want, got)
+		}
+	}
+}
+
+// ok wiki diff：未设基准分支 → 说明性文本，exit 0（fail-open）。
+func TestWikiDiffNoBase(t *testing.T) {
+	setupWikiProject(t)
+	var out, errb bytes.Buffer
+	if code := WikiCmd([]string{"diff"}, &out, &errb); code != 0 {
+		t.Fatalf("无基准 diff 应 exit 0，got %d err=%q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "无法计算分叉点") {
+		t.Errorf("应打印无法计算分叉点说明: %q", out.String())
+	}
+}
+
+// ok wiki status：基准分支上检出"tip 已并入且有差异条目"的分支 → merged_branches；
+// 差异条目删除后不再报。
+func TestWikiStatusMergedBranches(t *testing.T) {
+	repo, stateDir := setupWikiProject(t)
+	runGit(t, repo, "checkout", "-q", "-b", "dev")
+	runGit(t, repo, "commit", "--allow-empty", "-m", "d1")
+	devTip, err := wiki.HeadCommit(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "checkout", "-q", "master")
+	runGit(t, repo, "merge", "-q", "--no-ff", "dev", "-m", "merge dev")
+	masterTip, err := wiki.HeadCommit(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// dev 差异条目入库（status 的已并入检测只读已同步的索引库）
+	kbRoot := filepath.Dir(stateDir)
+	kdir := filepath.Join(kbRoot, "knowledge")
+	if err := os.MkdirAll(kdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	entryMD := "---\ntitle: 架构总览（dev 分支差异）\ntype: reference\ntags: [wiki, branch:dev]\nsummary: s\ndraft: false\nmandatory: false\n---\n正文\n"
+	if err := os.WriteFile(filepath.Join(kdir, "dev差异.md"), []byte(entryMD), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	syncKB := func() {
+		db, err := index.Open(filepath.Join(kbRoot, "kb.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		if err := db.Sync(kdir, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	syncKB()
+	if err := wiki.SaveState(stateDir, &wiki.State{BaseBranch: "master", Cursors: map[string]wiki.BranchCursor{
+		"master": {LastCommit: masterTip},
+		"dev":    {LastCommit: devTip},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	if code := WikiCmd([]string{"status"}, &out, &errb); code != 0 {
+		t.Fatalf("status exit %d err=%q", code, errb.String())
+	}
+	var st map[string]any
+	if err := json.Unmarshal(out.Bytes(), &st); err != nil {
+		t.Fatal(err)
+	}
+	merged, _ := st["merged_branches"].([]any)
+	if len(merged) != 1 || merged[0] != "dev" {
+		t.Fatalf("应检出 dev 已并入: %v", st)
+	}
+	// 删掉差异条目后不再报
+	if err := os.Remove(filepath.Join(kdir, "dev差异.md")); err != nil {
+		t.Fatal(err)
+	}
+	syncKB()
+	out.Reset()
+	if code := WikiCmd([]string{"status"}, &out, &errb); code != 0 {
+		t.Fatal(code)
+	}
+	st = map[string]any{}
+	if err := json.Unmarshal(out.Bytes(), &st); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := st["merged_branches"]; ok {
+		t.Fatalf("差异条目删除后不得再报 merged_branches: %v", st)
+	}
+	// 非基准分支（dev 上）即使条目存在也不报
+	runGit(t, repo, "checkout", "-q", "dev")
+	if err := os.WriteFile(filepath.Join(kdir, "dev差异.md"), []byte(entryMD), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	syncKB()
+	out.Reset()
+	if code := WikiCmd([]string{"status"}, &out, &errb); code != 0 {
+		t.Fatal(code)
+	}
+	st = map[string]any{}
+	if err := json.Unmarshal(out.Bytes(), &st); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := st["merged_branches"]; ok {
+		t.Fatalf("非基准分支不得报 merged_branches: %v", st)
 	}
 }
 

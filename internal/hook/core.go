@@ -127,6 +127,20 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 	if nudge := wikiNudge(pc, st, ws); nudge != "" {
 		out += nudge
 	}
+	// 已并入提示（merged 变体）：仅在基准分支、有其他分支 tip 已并入且其差异条目
+	// 仍在库中时触发；db 仍在 InjectForPrompt 作用域（defer Close 之前）可直接复用。
+	// 与 wikiNudge 共用 WikiNudged 每会话一次预算（本回合已提示则跳过计算）。
+	if !st.WikiNudged && ws.Branch != "" && ws.Branch == ws.BaseBranch {
+		if s := wiki.LoadState(pc.Store.StateDir()); s != nil {
+			merged := wiki.MergedIntoBase(s, cwd, func(b string) bool {
+				ok, _ := db.HasBranchWiki(b)
+				return ok
+			})
+			if nudge := wikiNudgeMerged(pc, st, ws.BaseBranch, merged); nudge != "" {
+				out += nudge
+			}
+		}
+	}
 	return out
 }
 

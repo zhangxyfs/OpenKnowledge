@@ -160,22 +160,31 @@ func CheckStatus(stateDir, srcDir string, threshold int) *Status {
 		return st
 	}
 	st.LastCommit = cur.LastCommit
-	if cur.LastCommit == "" {
+	lc := cur.LastCommit
+	if lc == "" {
 		return st // 非 git mark 的时间戳游标：无 behind 可算，同旧行为
 	}
-	switch {
-	case !commitExists(srcDir, cur.LastCommit):
-		st.BranchState = "gone"
-	case isAncestor(srcDir, cur.LastCommit, "HEAD"):
+	// 收敛口径：rev-list 对"存在但非祖先"的游标也会成功，不能隐含可达性；
+	// 用 merge-base 一次判别三态（ok 路径 git 调用 4→3：symbolic-ref + merge-base + rev-list）。
+	mb := mergeBase(srcDir, lc, "HEAD")
+	if mb == "" {
+		if !commitExists(srcDir, lc) {
+			st.BranchState = "gone"
+		} else {
+			st.BranchState = "diverged" // 无共同祖先
+		}
+		return st
+	}
+	if mb == lc {
 		st.BranchState = "ok"
-		if n, err := countCommits(srcDir, cur.LastCommit+"..HEAD"); err == nil {
+		if n, err := countCommits(srcDir, lc+"..HEAD"); err == nil {
 			st.Behind = n
 			st.Stale = threshold > 0 && n >= threshold
 		}
-	default:
-		st.BranchState = "diverged"
-		st.MergeBase = mergeBase(srcDir, cur.LastCommit, "HEAD")
+		return st
 	}
+	st.BranchState = "diverged"
+	st.MergeBase = mb
 	return st
 }
 

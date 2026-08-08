@@ -1,6 +1,7 @@
 package index
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -81,6 +82,49 @@ func TestTrimIndexBranchSectionsIdempotent(t *testing.T) {
 	noNL := "# 知识索引\n\n## 分支差异（dev）\n\n- [b](b.md) — s"
 	if got := TrimIndexBranchSections(noNL, "dev"); got != noNL {
 		t.Fatalf("无末换行原文应逐字节不变:\n%q\nwant:\n%q", got, noNL)
+	}
+}
+
+// INDEX 主列表收口：带 branch: 标签的条目（无论类型）不进全分支共享的主列表——
+// wiki 差异条目已在"分支差异（X）"节，非 wiki 分支条目仍可按分支检索命中；
+// 无标签条目不受影响的零回归。
+func TestRebuildIndexSkipsBranchTaggedInMainList(t *testing.T) {
+	root := t.TempDir()
+	kdir := filepath.Join(root, "knowledge")
+	writeEntryFile(t, kdir, "plain.md", "---\ntitle: 普通条目\ntype: note\ntags: []\nsummary: s\ndraft: false\nmandatory: false\n---\n正文\n")
+	writeEntryFile(t, kdir, "brnote.md", "---\ntitle: dev 专属笔记\ntype: note\ntags: [branch:dev]\nsummary: s\ndraft: false\nmandatory: false\n---\n正文\n")
+	writeEntryFile(t, kdir, "brwiki.md", "---\ntitle: 架构总览（dev 分支差异）\ntype: reference\ntags: [wiki, branch:dev]\nsummary: s\ndraft: false\nmandatory: false\n---\n正文\n")
+	db, err := Open(filepath.Join(root, "kb.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := db.Sync(kdir, nil); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "INDEX.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(data)
+	i := strings.Index(s, "## Wiki 目录")
+	if i < 0 {
+		t.Fatalf("INDEX.md missing wiki section:\n%s", s)
+	}
+	main := s[:i]
+	if !strings.Contains(main, "普通条目") {
+		t.Errorf("无标签 note 应留在主列表:\n%s", main)
+	}
+	if strings.Contains(main, "dev 专属笔记") || strings.Contains(main, "架构总览（dev 分支差异）") {
+		t.Errorf("带 branch 标签的条目不得进主列表:\n%s", main)
+	}
+	// wiki 差异条目仍在差异节（链接形式）；非 wiki 分支条目不进任何节目录
+	section := s[i:]
+	if !strings.Contains(section, "## 分支差异（dev）") || !strings.Contains(section, "[架构总览（dev 分支差异）](brwiki.md)") {
+		t.Errorf("wiki 差异条目应在差异节:\n%s", section)
+	}
+	if strings.Contains(section, "dev 专属笔记") {
+		t.Errorf("非 wiki 分支条目不进 Wiki 目录/差异节:\n%s", section)
 	}
 }
 

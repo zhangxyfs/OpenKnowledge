@@ -269,6 +269,21 @@ func wikiNudge(pc *project.Context, st *state.Session, s *wiki.Status) string {
 	return "\n" + msg + "\n"
 }
 
+// wikiNudgeMerged 返回"分支已并入基准、其差异条目已失效"的清理提示（每会话一次，
+// 与 wikiNudge 共用 WikiNudged 预算；不受 stale_commits 阈值门控——条目失效与
+// 落后计数无关）。merged 为空或基准未知时不提示。检测本身只读（spec §7/§10）。
+func wikiNudgeMerged(pc *project.Context, st *state.Session, base string, merged []string) string {
+	if st.WikiNudged || len(merged) == 0 || base == "" {
+		return ""
+	}
+	msg := fmt.Sprintf("[OpenKnowledge] 分支 %s 已并入 %s，其差异条目已失效，建议用 openknowledge-wiki 技能清理。", strings.Join(merged, "、"), base)
+	st.WikiNudged = true
+	if err := st.Save(pc.Store.StateDir()); err != nil {
+		logErr("prompt save state: %v", err)
+	}
+	return "\n" + msg + "\n"
+}
+
 // wikiContextLine 返回 standing 分支上下文行：当前分支有 wiki 内容注入、
 // 但 wiki 基准不在本分支时提示出处；基准分支/无 wiki/非 git 返回空串。
 func wikiContextLine(s *wiki.Status) string {
