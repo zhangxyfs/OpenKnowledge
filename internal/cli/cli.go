@@ -561,7 +561,7 @@ func CaptureCmd(args []string, stdout, stderr io.Writer) int {
 	}
 }
 
-// WikiCmd 处理 ok wiki status|mark。
+// WikiCmd 处理 ok wiki status|mark|base。
 func WikiCmd(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("wiki", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -587,6 +587,18 @@ func WikiCmd(args []string, stdout, stderr io.Writer) int {
 		if st.LastCommit != "" {
 			out["last_commit"] = st.LastCommit
 		}
+		if st.Branch != "" {
+			out["branch"] = st.Branch
+		}
+		if st.BaseBranch != "" {
+			out["base_branch"] = st.BaseBranch
+		}
+		if st.BranchState != "" {
+			out["branch_state"] = st.BranchState
+		}
+		if st.MergeBase != "" {
+			out["merge_base"] = st.MergeBase
+		}
 		_ = json.NewEncoder(stdout).Encode(out)
 		return 0
 	case "mark":
@@ -601,8 +613,20 @@ func WikiCmd(args []string, stdout, stderr io.Writer) int {
 			}
 			db.Close()
 		}
-		c := &wiki.Cursor{LastCommit: commit, GeneratedAt: time.Now(), EntryCount: count}
-		if err := wiki.SaveCursor(pc.Store.StateDir(), c); err != nil {
+		branch := wiki.CurrentBranch(cwd) // 非 git 为 ""：游标挂在 "" 键下（与旧单游标等价）
+		s := wiki.LoadState(pc.Store.StateDir())
+		if s == nil {
+			s = &wiki.State{}
+		}
+		if s.Cursors == nil {
+			s.Cursors = map[string]wiki.BranchCursor{}
+		}
+		// mark 即用户显式表态：游标归入当前分支，旧格式 Legacy 在此收敛（不落盘）
+		s.Cursors[branch] = wiki.BranchCursor{LastCommit: commit, GeneratedAt: time.Now(), EntryCount: count}
+		if s.BaseBranch == "" {
+			s.BaseBranch = branch
+		}
+		if err := wiki.SaveState(pc.Store.StateDir(), s); err != nil {
 			fmt.Fprintln(stderr, "写游标失败:", err)
 			return 1
 		}
@@ -615,10 +639,33 @@ func WikiCmd(args []string, stdout, stderr io.Writer) int {
 		}
 		fmt.Fprintf(stdout, "已记录 wiki 游标 %s（%d 条 wiki 条目）\n", short, count)
 		return 0
+	case "base":
+		s := wiki.LoadState(pc.Store.StateDir())
+		name := fs.Arg(1)
+		if name == "" {
+			base := ""
+			if s != nil {
+				base = s.BaseBranch
+			}
+			if base == "" {
+				fmt.Fprintln(stdout, "(未设置基准分支)")
+			} else {
+				fmt.Fprintln(stdout, base)
+			}
+			return 0
+		}
+		if s == nil {
+			s = &wiki.State{}
+		}
+		s.BaseBranch = name
+		if err := wiki.SaveState(pc.Store.StateDir(), s); err != nil {
+			fmt.Fprintln(stderr, "写基准分支失败:", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "基准分支已设为 %s\n", name)
+		return 0
 	default:
-		fmt.Fprintln(stderr, "用法: ok wiki <status|mark [commit]>")
+		fmt.Fprintln(stderr, "用法: ok wiki <status|mark [commit]|base [分支名]>")
 		return 2
 	}
 }
-
-

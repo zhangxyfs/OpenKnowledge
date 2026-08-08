@@ -14,40 +14,8 @@ import (
 	"openknowledge/internal/procx"
 )
 
-// Cursor 记录上次 wiki 生成到的位置。
-type Cursor struct {
-	LastCommit  string    `json:"last_commit"`
-	GeneratedAt time.Time `json:"generated_at"`
-	EntryCount  int       `json:"entry_count"` // 纯展示用
-}
-
 // CursorPath 返回游标文件路径（固定文件名，不受 state 目录 session-* GC 影响）。
 func CursorPath(stateDir string) string { return filepath.Join(stateDir, "wiki.json") }
-
-// LoadCursor 读游标；不存在或损坏返回 nil。
-func LoadCursor(stateDir string) *Cursor {
-	data, err := os.ReadFile(CursorPath(stateDir))
-	if err != nil {
-		return nil
-	}
-	var c Cursor
-	if json.Unmarshal(data, &c) != nil {
-		return nil
-	}
-	return &c
-}
-
-// SaveCursor 写游标（必要时创建 state 目录）。
-func SaveCursor(stateDir string, c *Cursor) error {
-	if err := os.MkdirAll(stateDir, 0o755); err != nil {
-		return err
-	}
-	data, err := json.MarshalIndent(c, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(CursorPath(stateDir), data, 0o644)
-}
 
 // BranchCursor 单分支游标（字段语义同旧 Cursor）。
 type BranchCursor struct {

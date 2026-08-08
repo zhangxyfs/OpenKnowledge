@@ -12,6 +12,7 @@ import (
 	"openknowledge/internal/agentx"
 	"openknowledge/internal/entry"
 	"openknowledge/internal/registry"
+	"openknowledge/internal/wiki"
 )
 
 // chdir 切换工作目录并在结束时还原。
@@ -356,6 +357,109 @@ func TestAddForceOverwrites(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "summary: 新摘要") {
 		t.Fatalf("entry should carry new summary, got %q", data)
+	}
+}
+
+// runGit 在 dir 下执行 git 命令，失败即 fatal（带测试身份环境变量）。
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+// setupWikiProject 建 OK_HOME 隔离环境 + 临时 git 仓库（master，1 个提交）并注册项目；
+// 返回仓库目录与该项目知识库的 state 目录。
+func setupWikiProject(t *testing.T) (repo, stateDir string) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("OK_HOME", home)
+	t.Setenv("KIMI_CODE_HOME", filepath.Join(home, "kimi"))
+	t.Setenv("PI_CODING_AGENT_DIR", t.TempDir())
+	t.Setenv("OK_ZCODE_HOME", filepath.Join(t.TempDir(), "nonexistent-zcode"))
+	t.Setenv("OK_REASONIX_HOME", filepath.Join(t.TempDir(), "nonexistent-reasonix"))
+	t.Setenv("OPENAI_API_KEY", "") // 防止真实网络调用，保证测试离线
+	repo = t.TempDir()
+	runGit(t, repo, "init", "-b", "master")
+	if err := os.WriteFile(filepath.Join(repo, "f"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "c1")
+	chdir(t, repo)
+	var out, errBuf bytes.Buffer
+	if code := Init(nil, &out, &errBuf); code != 0 {
+		t.Fatalf("init code=%d err=%q", code, errBuf.String())
+	}
+	stateDir = filepath.Join(home, "projects", filepath.Base(repo), "state")
+	return repo, stateDir
+}
+
+// ok wiki base：查询未设置 → 设置 dev → 再查询应显示 dev。
+func TestWikiBaseSetAndShow(t *testing.T) {
+	setupWikiProject(t)
+	var out, errb bytes.Buffer
+	if code := WikiCmd([]string{"base"}, &out, &errb); code != 0 {
+		t.Fatalf("base 查询 exit %d err=%q", code, errb.String())
+	}
+	out.Reset()
+	if code := WikiCmd([]string{"base", "dev"}, &out, &errb); code != 0 {
+		t.Fatalf("base 设置 exit %d err=%q", code, errb.String())
+	}
+	out.Reset()
+	if code := WikiCmd([]string{"base"}, &out, &errb); code != 0 {
+		t.Fatal(code)
+	}
+	if !strings.Contains(out.String(), "dev") {
+		t.Errorf("base 设置后查询应显示 dev: %q", out.String())
+	}
+}
+
+// ok wiki mark：游标应记入当前分支；空基准应设为当前分支；落盘为新格式。
+func TestWikiMarkRecordsCurrentBranch(t *testing.T) {
+	repo, stateDir := setupWikiProject(t)
+	runGit(t, repo, "checkout", "-q", "-b", "dev")
+	var out, errb bytes.Buffer
+	if code := WikiCmd([]string{"mark"}, &out, &errb); code != 0 {
+		t.Fatalf("mark exit %d err=%q", code, errb.String())
+	}
+	s := wiki.LoadState(stateDir)
+	if s == nil || s.Cursors["dev"].LastCommit == "" {
+		t.Fatalf("mark 应记入当前分支 dev: %+v", s)
+	}
+	if s.BaseBranch != "dev" {
+		t.Errorf("空基准应设为当前分支: %+v", s)
+	}
+	// 旧字段不存在于落盘
+	data, _ := os.ReadFile(wiki.CursorPath(stateDir))
+	if strings.Contains(string(data), `"last_commit":`) && !strings.Contains(string(data), `"cursors"`) {
+		t.Errorf("落盘应为新格式: %s", data)
+	}
+}
+
+// ok wiki status：JSON 新增 branch/base_branch/branch_state；has_wiki 语义不变。
+func TestWikiStatusBranchFields(t *testing.T) {
+	setupWikiProject(t)
+	var out, errb bytes.Buffer
+	if code := WikiCmd([]string{"mark"}, &out, &errb); code != 0 {
+		t.Fatal(code)
+	}
+	out.Reset()
+	if code := WikiCmd([]string{"status"}, &out, &errb); code != 0 {
+		t.Fatal(code)
+	}
+	var st map[string]any
+	if err := json.Unmarshal(out.Bytes(), &st); err != nil {
+		t.Fatal(err)
+	}
+	if st["branch"] != "master" || st["base_branch"] != "master" || st["branch_state"] != "ok" {
+		t.Errorf("status 分支字段缺失或错误: %v", st)
+	}
+	if st["has_wiki"] != true {
+		t.Errorf("has_wiki 语义漂移: %v", st)
 	}
 }
 

@@ -35,31 +35,10 @@ func gitRepo(t *testing.T, n int) string {
 	return dir
 }
 
-func TestCursorRoundTrip(t *testing.T) {
+func TestCursorPath(t *testing.T) {
 	dir := t.TempDir()
-	if LoadCursor(dir) != nil {
-		t.Fatal("expected nil cursor for missing file")
-	}
-	c := &Cursor{LastCommit: "abc123", GeneratedAt: time.Now().Truncate(time.Second), EntryCount: 7}
-	if err := SaveCursor(dir, c); err != nil {
-		t.Fatal(err)
-	}
-	got := LoadCursor(dir)
-	if got == nil || got.LastCommit != "abc123" || got.EntryCount != 7 {
-		t.Fatalf("round trip mismatch: %+v", got)
-	}
 	if CursorPath(dir) != filepath.Join(dir, "wiki.json") {
 		t.Fatalf("unexpected path %q", CursorPath(dir))
-	}
-}
-
-func TestLoadCursorCorrupt(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(CursorPath(dir), []byte("{oops"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if LoadCursor(dir) != nil {
-		t.Fatal("corrupt cursor should load as nil")
 	}
 }
 
@@ -82,7 +61,9 @@ func TestCheckStatusBehind(t *testing.T) {
 		t.Fatal(err)
 	}
 	stateDir := t.TempDir()
-	if err := SaveCursor(stateDir, &Cursor{LastCommit: head, GeneratedAt: time.Now()}); err != nil {
+	// 旧格式游标（顶层 last_commit）：CheckStatus 判定可达后视同归入当前分支
+	legacy := `{"last_commit":"` + head + `","generated_at":"2026-08-08T09:00:00+08:00"}`
+	if err := os.WriteFile(CursorPath(stateDir), []byte(legacy), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	// 再追加 2 个 commit
@@ -177,9 +158,10 @@ func TestCheckStatusGitUnavailable(t *testing.T) {
 	if st.Behind != -1 || st.Stale {
 		t.Fatalf("non-git: %+v", st)
 	}
-	// 游标 commit 已不在历史（伪造 hash）
+	// 游标 commit 已不在历史（伪造 hash，旧格式文件）
 	stateDir := t.TempDir()
-	if err := SaveCursor(stateDir, &Cursor{LastCommit: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"}); err != nil {
+	legacy := `{"last_commit":"deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"}`
+	if err := os.WriteFile(CursorPath(stateDir), []byte(legacy), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	st = CheckStatus(stateDir, gitRepo(t, 1), 20)
