@@ -13,11 +13,22 @@ description: 为已存在的项目生成或增量更新 OpenKnowledge 项目 wik
 "{{EXE}}" wiki status
 ```
 
-输出 JSON：`has_wiki`（是否生成过）、`last_commit`（游标）、`behind`（落后 commit 数，-1 = 非 git 项目）、`stale`、`threshold`。
+输出 JSON：`has_wiki`（是否生成过）、`last_commit`（游标）、`behind`（落后 commit 数，-1 = 非 git 项目）、`stale`、`threshold`，以及分支字段 `branch`（当前分支）、`base_branch`（基准分支）、`branch_state`（ok/no_cursor/diverged/gone/legacy_orphan）、`merged_branches`（已并入基准的分支，可选）。
 
-- `has_wiki:false` → 走【全量流程】
-- `has_wiki:true` 且 `behind > 0` → 走【增量流程】
-- `has_wiki:true` 且 `behind = 0` → 告诉用户 wiki 已是最新，结束
+**先判分支，再判新旧：**
+
+- `merged_branches` 非空 → 告诉用户这些分支已并入基准、差异条目已失效，**经用户确认后**删除对应条目（并可用 `{{EXE}} wiki mark` 刷新游标）。然后继续下面的分支判断。
+- `branch` 与 `base_branch` 均非空且**不相等** → 走【分支差异流程】（不得重写全量条目——那会污染基准分支视角）
+- 否则（在基准分支上）：`has_wiki:false` → 走【全量流程】；`behind > 0` → 走【增量流程】；`behind = 0` → 告诉用户 wiki 已是最新，结束
+
+## 分支差异流程
+
+为非基准分支生成/更新**差异条目**——只记本分支与基准的结构差异，不重写全量条目：
+
+1. 取素材：`"{{EXE}}" wiki diff`（分叉点以来的目录/文件/Top 变更摘要），必要时再 `git log --oneline <分叉点>..HEAD` 补充
+2. 把差异消化成条目：标题 `原条目名（<分支> 分支差异）`（无对应主条目时自定主题名），tags 为 `wiki,branch:<分支名>`，正文写"与基准分支的结构差异是什么/为什么"，300 字内
+3. 同名已存在用 `add --force` 覆盖更新；不再适用的差异条目经用户确认后删除
+4. `"{{EXE}}" wiki mark` 记本分支游标，汇报变更摘要
 
 ## 全量流程
 
