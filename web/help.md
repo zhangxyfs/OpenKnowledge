@@ -15,13 +15,11 @@ OpenKnowledge 是 AI 编码助手的**本地知识库**：把项目经验、规�
 - **知识注入是全自动的**：每次你提问，相关知识摘要自动进入上下文，无需任何操作
 - **斜杠技能**（各 agent 均支持，也可用自然语言，如"初始化知识库""把项目沉淀成 wiki"）：
 
-| 技能 | 作用 |
-|---|---|
-| `/openknowledge-init` | 初始化当前项目（等价 `ok init`） |
-| `/openknowledge-propose` | 把本次会话的经验提议为草稿条目（待你批准） |
-| `/openknowledge-wiki` | 生成/增量更新项目 wiki（结构文档） |
-| `/openknowledge-capture` | 查看/切换经验沉淀模式与轮次间隔 |
-| `/openknowledge-on` / `/openknowledge-off` | 全局开启/关闭知识库 hooks |
+- `/openknowledge-init`——初始化当前项目（等价 `ok init`）
+- `/openknowledge-propose`——把本次会话的经验提议为草稿条目（待你批准）
+- `/openknowledge-wiki`——生成/增量更新项目 wiki（结构文档）
+- `/openknowledge-capture`——查看/切换经验沉淀模式与轮次间隔
+- `/openknowledge-on` / `/openknowledge-off`——全局开启/关闭知识库 hooks
 
 - **生效时机**：kimi / pi / zcode 的 hook 配置在**新开会话**时加载；reasonix 以插件形式安装，新会话生效（会话中 `/reload` 可重载）
 
@@ -33,18 +31,16 @@ OpenKnowledge 是 AI 编码助手的**本地知识库**：把项目经验、规�
 
 ### CLI 速查
 
-| 命令 | 作用 |
-|---|---|
-| `ok init` | 注册当前项目（自动取目录名） |
-| `ok setup [--agent <id>]` | 写 hooks/插件 + 装技能 + 配 embedding（交互向导） |
-| `ok add --title T --type note` | 直接添加条目（`--tags/--summary/--mandatory/--force/--file`） |
-| `ok propose / approve` | 沉淀草稿 / 采纳草稿 |
-| `ok list / search <词>` | 列条目 / 检索 |
-| `ok capture` | 查看或设置沉淀模式（propose/auto、轮次间隔） |
-| `ok wiki status / mark / base / diff` | wiki 状态 / 记游标 / 基准分支 / 分支结构差异 |
-| `ok doctor` | 体检：逐 agent 的 hooks 安装状态 |
-| `ok on / off` | 全局开关（off 后所有注入与检查暂停） |
-| `ok gui` | 打开管理界面 |
+- `ok init`——注册当前项目（自动取目录名）
+- `ok setup [--agent <id>]`——写 hooks/插件 + 装技能 + 配 embedding（交互向导）
+- `ok add --title T --type note`——直接添加条目（`--tags/--summary/--mandatory/--force/--file`）
+- `ok propose` / `ok approve`——沉淀草稿 / 采纳草稿
+- `ok list` / `ok search <词>`——列条目 / 检索
+- `ok capture`——查看或设置沉淀模式（propose/auto、轮次间隔）
+- `ok wiki status / mark / base / diff`——wiki 状态 / 记游标 / 基准分支 / 分支结构差异
+- `ok doctor`——体检：逐 agent 的 hooks 安装状态
+- `ok on` / `ok off`——全局开关（off 后所有注入与检查暂停）
+- `ok gui`——打开管理界面
 
 ### daemon 与托盘
 
@@ -54,22 +50,18 @@ daemon 常驻后台、按需自动拉起，无需手动管理；托盘图标右�
 
 ### 全局配置 `~/.openknowledge/config.toml`
 
-| 键 | 默认 | 说明 | 改法 |
-|---|---|---|---|
-| `[hooks] timeout_sec` | 10 | hook 超时（秒），过短在高负载下会被宿主静默杀死 | GUI 引导页"hook 超时"卡（保存后自动重写所有 agent），或手改后重跑 `ok setup` |
-| `[embedding] base_url / model / api_key / timeout_sec` | 空 / 空 / 空 / 5 | 语义检索（可选）；不配则纯关键词检索，照样可用 | `ok setup` 交互向导（带连通性验证） |
-| `[reasonix] enforce_mode` | mixed | reasonix 强制检查表达：soft 全软提示 / hard 全硬阻断 / mixed 软+硬 | GUI 引导页三档卡（仅选中 reasonix 时显示），**即时生效** |
+- `[hooks] timeout_sec`（默认 10）——hook 超时秒数，过短在高负载下会被宿主静默杀死。改法：GUI 引导页"hook 超时"卡（保存后自动重写所有 agent），或手改后重跑 `ok setup`
+- `[embedding] base_url / model / api_key / timeout_sec`（默认 5）——语义检索，可选；不配则纯关键词检索，照样可用。改法：`ok setup` 交互向导（带连通性验证）
+- `[reasonix] enforce_mode`（默认 mixed）——reasonix 强制检查表达：soft 全软提示 / hard 全硬阻断 / mixed 软+硬。改法：GUI 引导页三档卡（仅选中 reasonix 时显示），**即时生效**
 
 ### 项目配置（知识库根目录 `config.toml`）
 
-| 键 | 默认 | 说明 | 改法 |
-|---|---|---|---|
-| `[capture] mode` | propose | 沉淀模式：propose=AI 自主判断 / auto=到间隔自动提醒 | GUI 管理页"经验沉淀"卡，或 `ok capture` |
-| `[capture] turn_interval` | 5 | auto 模式的提醒间隔（回合数） | 同上 |
-| `[enforce]` | 空 | 强制检查规则（如 changelog_required：改了代码必须更新 CHANGELOG，否则阻断） | 手改文件 |
-| `[wiki] stale_commits` | 20 | wiki 落后多少 commit 开始提醒；0 = 关闭提醒 | 手改文件 |
-| `[retrieve] top_n` | 2 | 每次注入最多检索命中条数 | 手改文件 |
-| `[inject] max_tokens` | 800 | 注入预算（超出截断） | 手改文件 |
+- `[capture] mode`（默认 propose）——沉淀模式：propose=AI 自主判断 / auto=到间隔自动提醒。改法：GUI 管理页"经验沉淀"卡，或 `ok capture`
+- `[capture] turn_interval`（默认 5）——auto 模式的提醒间隔（回合数）。改法：同上
+- `[enforce]`（默认空）——强制检查规则（如 changelog_required：改了代码必须更新 CHANGELOG，否则阻断）。改法：手改文件
+- `[wiki] stale_commits`（默认 20）——wiki 落后多少 commit 开始提醒；0 = 关闭提醒。改法：手改文件
+- `[retrieve] top_n`（默认 2）——每次注入最多检索命中条数。改法：手改文件
+- `[inject] max_tokens`（默认 800）——注入预算（超出截断）。改法：手改文件
 
 ### 条目级控制（frontmatter）
 
