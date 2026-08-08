@@ -148,9 +148,35 @@ func selfHealHooks() {
 	}
 }
 
-// onToolAfter tool.after 拦截器（Task 6 点亮 touched 追踪）。
-func (h *handler) onToolAfter(_ context.Context, _ string, _ json.RawMessage) (*extension.InterceptResult, error) {
-	return extension.Continue(), nil
+// onToolAfter tool.after 拦截器：写文件工具成功执行后记录 touched。恒 Continue。
+func (h *handler) onToolAfter(_ context.Context, _ string, payload json.RawMessage) (res *extension.InterceptResult, err error) {
+	defer continueOnPanic(&res, &err)
+	res = extension.Continue()
+	var p struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+		IsError   bool   `json:"isError"`
+	}
+	if err := json.Unmarshal(payload, &p); err != nil || p.IsError {
+		return res, nil
+	}
+	switch p.Name {
+	case "write_file", "edit_file", "multi_edit", "notebook_edit":
+	default:
+		return res, nil
+	}
+	var args struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal([]byte(p.Arguments), &args); err != nil || args.Path == "" {
+		return res, nil
+	}
+	pc, err := project.FromCwd(h.cwd)
+	if err != nil {
+		return res, nil
+	}
+	hook.TrackTouched(pc, h.sessionID, p.Name, args.Path)
+	return res, nil
 }
 
 // continueOnPanic 把 panic 折叠为 Continue（fail-open 铁律）。供拦截器 defer 使用：

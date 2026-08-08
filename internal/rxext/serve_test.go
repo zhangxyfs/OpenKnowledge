@@ -13,6 +13,7 @@ import (
 	"openknowledge/internal/project"
 	"openknowledge/internal/registry"
 	extension "openknowledge/internal/rxext/sdk"
+	"openknowledge/internal/state"
 )
 
 // TestMain 隔离四个 agent home：selfHealHooks 会遍历 detected agents 写 hook 集成，
@@ -178,6 +179,10 @@ func TestOnInputEnforceModes(t *testing.T) {
 		t.Run(tc.mode, func(t *testing.T) {
 			projDir, kbRoot := setupProject(t)
 			writeProjectConfig(t, kbRoot, changelogEnforceCfg)
+			if tc.wantDecision == extension.DecisionReplace {
+				// soft 档：补一条 mandatory 条目使注入 prefix 非空，真正走通双部件合并路径
+				writeEntry(t, kbRoot, "规约.md", "---\ntitle: 架构规约\ntype: reference\nmandatory: true\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\n永远先跑 gofmt。\n")
+			}
 			t.Setenv("OK_RX_ENFORCE_TEST_MODE", tc.mode)
 			h := &handler{sessionID: "s1", cwd: projDir}
 			touchFile(t, projDir, "s1", filepath.Join(projDir, "main.go"))
@@ -201,11 +206,48 @@ func TestOnInputEnforceModes(t *testing.T) {
 				if !strings.Contains(rep.Text, "<ok-context>") || !strings.Contains(rep.Text, "changelog") {
 					t.Errorf("软提醒应合并进 ok-context 且含 changelog 提示: %q", rep.Text)
 				}
+				if n := strings.Count(rep.Text, "<ok-context>"); n != 1 {
+					t.Errorf("提醒与注入应合并为恰一个 ok-context 块，got %d: %q", n, rep.Text)
+				}
+				remindIdx := strings.Index(rep.Text, "changelog")
+				injectIdx := strings.Index(rep.Text, "架构规约")
+				if remindIdx < 0 || injectIdx < 0 || remindIdx > injectIdx {
+					t.Errorf("changelog 提醒应排在注入条目文本之前（remind=%d inject=%d）: %q", remindIdx, injectIdx, rep.Text)
+				}
 				if !strings.HasSuffix(rep.Text, "继续") {
 					t.Errorf("原输入必须完整保留在尾部: %q", rep.Text)
 				}
 			}
 		})
+	}
+}
+
+// TestOnToolAfterTracksTouched tool.after 恒 Continue：写文件工具成功执行记录 touched，
+// isError / 非写工具 / 坏 payload 一律不记录。
+func TestOnToolAfterTracksTouched(t *testing.T) {
+	projDir, _ := setupProject(t)
+	h := &handler{sessionID: "s9", cwd: projDir}
+	payload := fmt.Sprintf(`{"name":"write_file","arguments":%q,"result":"ok","isError":false}`,
+		`{"path":"`+strings.ReplaceAll(filepath.Join(projDir, "b.go"), `\`, `\\`)+`"}`)
+	res, err := h.onToolAfter(context.Background(), "tool.after", []byte(payload))
+	if err != nil || res.Decision != extension.DecisionContinue {
+		t.Fatalf("tool.after 应恒 Continue: %v %v", res, err)
+	}
+	pc, err := project.FromCwd(projDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := state.Load(pc.Store.StateDir(), "s9")
+	if len(st.Touched) != 1 || st.Touched[0] != "b.go" {
+		t.Fatalf("touched 记录错误: %+v", st.Touched)
+	}
+	// isError 与非写工具不记录
+	h2 := &handler{sessionID: "s10", cwd: projDir}
+	_, _ = h2.onToolAfter(context.Background(), "tool.after", []byte(`{"name":"write_file","arguments":"{\"path\":\"x.go\"}","isError":true}`))
+	_, _ = h2.onToolAfter(context.Background(), "tool.after", []byte(`{"name":"bash","arguments":"{\"command\":\"ls\"}","isError":false}`))
+	st2 := state.Load(pc.Store.StateDir(), "s10")
+	if len(st2.Touched) != 0 {
+		t.Errorf("isError/非写工具不应记录: %+v", st2.Touched)
 	}
 }
 
