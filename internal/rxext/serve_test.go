@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"openknowledge/internal/hook"
+	"openknowledge/internal/project"
 	"openknowledge/internal/registry"
 	extension "openknowledge/internal/rxext/sdk"
 )
@@ -55,6 +57,24 @@ func writeEntry(t *testing.T, kbRoot, name, content string) {
 	if err := os.WriteFile(filepath.Join(kbRoot, "knowledge", name), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// writeProjectConfig 写项目配置（kbRoot/config.toml，TOML；与 hook 包测试同款夹具）。
+func writeProjectConfig(t *testing.T, kbRoot, cfg string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(kbRoot, "config.toml"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// touchFile 直接经 hook.TrackTouched 记录会话触碰文件（不走 tool.after 拦截器）。
+func touchFile(t *testing.T, projDir, sessionID, path string) {
+	t.Helper()
+	pc, err := project.FromCwd(projDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hook.TrackTouched(pc, sessionID, "Write", path)
 }
 
 func TestInitializeRecordsSession(t *testing.T) {
@@ -130,5 +150,81 @@ func TestOnInputFailOpen(t *testing.T) {
 	res2, _ := h.onInput(context.Background(), "input.receive", []byte(`不是JSON`))
 	if res2 == nil || res2.Decision != extension.DecisionContinue {
 		t.Errorf("坏 payload 应 Continue")
+	}
+}
+
+// changelog 规则夹具：触碰 **/*.go 且未触碰 docs/changelogs/** → 命中硬阻断。
+const changelogEnforceCfg = `
+[[enforce]]
+type = "changelog_required"
+code_globs = ["**/*.go"]
+changelog_glob = "docs/changelogs/**"
+message = "请补变更日志（changelog）"
+`
+
+// TestOnInputEnforceModes 表驱动覆盖 enforce_mode 三档 + 非法值（按 mixed）：
+// changelog 硬规则命中时 mixed/hard → Block；soft → 提醒合并进 <ok-context> 前缀。
+func TestOnInputEnforceModes(t *testing.T) {
+	cases := []struct {
+		mode         string
+		wantDecision extension.InterceptDecision
+	}{
+		{"mixed", extension.DecisionBlock},
+		{"hard", extension.DecisionBlock},
+		{"soft", extension.DecisionReplace},
+		{"bogus", extension.DecisionBlock}, // 非法值按 mixed
+	}
+	for _, tc := range cases {
+		t.Run(tc.mode, func(t *testing.T) {
+			projDir, kbRoot := setupProject(t)
+			writeProjectConfig(t, kbRoot, changelogEnforceCfg)
+			t.Setenv("OK_RX_ENFORCE_TEST_MODE", tc.mode)
+			h := &handler{sessionID: "s1", cwd: projDir}
+			touchFile(t, projDir, "s1", filepath.Join(projDir, "main.go"))
+			res, err := h.onInput(context.Background(), "input.receive", []byte(`{"text":"继续"}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.Decision != tc.wantDecision {
+				t.Fatalf("mode=%s 应 %v，got %v（reason=%q）", tc.mode, tc.wantDecision, res.Decision, res.Reason)
+			}
+			if tc.wantDecision == extension.DecisionBlock && !strings.Contains(res.Reason, "changelog") {
+				t.Errorf("Block reason 应带规则 message: %q", res.Reason)
+			}
+			if tc.wantDecision == extension.DecisionReplace {
+				var rep struct {
+					Text string `json:"text"`
+				}
+				if err := json.Unmarshal(res.Replacement, &rep); err != nil {
+					t.Fatal(err)
+				}
+				if !strings.Contains(rep.Text, "<ok-context>") || !strings.Contains(rep.Text, "changelog") {
+					t.Errorf("软提醒应合并进 ok-context 且含 changelog 提示: %q", rep.Text)
+				}
+				if !strings.HasSuffix(rep.Text, "继续") {
+					t.Errorf("原输入必须完整保留在尾部: %q", rep.Text)
+				}
+			}
+		})
+	}
+}
+
+// TestOnInputEnforceHardBlocksAutoReminder hard 档下 auto 自省软提醒升级为硬阻断。
+func TestOnInputEnforceHardBlocksAutoReminder(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	// turn_interval=1：首个 input.receive 即触发自省提醒（StopCount 1 >= 1）
+	writeProjectConfig(t, kbRoot, "[capture]\nmode = \"auto\"\nturn_interval = 1\n")
+	t.Setenv("OK_RX_ENFORCE_TEST_MODE", "hard")
+	h := &handler{sessionID: "s1", cwd: projDir}
+	touchFile(t, projDir, "s1", filepath.Join(projDir, "main.go"))
+	res, err := h.onInput(context.Background(), "input.receive", []byte(`{"text":"继续"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Decision != extension.DecisionBlock {
+		t.Fatalf("hard 档 auto 自省应 Block，got %v", res.Decision)
+	}
+	if !strings.Contains(res.Reason, "ok propose") {
+		t.Errorf("Block reason 应为自省提醒: %q", res.Reason)
 	}
 }

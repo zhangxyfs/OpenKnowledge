@@ -62,6 +62,11 @@ type Hooks struct {
 	TimeoutSec int `toml:"timeout_sec"`
 }
 
+// Reasonix 控制 reasonix sidecar 的强制检查表达方式。
+type Reasonix struct {
+	EnforceMode string `toml:"enforce_mode"` // soft|hard|mixed；缺省/非法按 mixed
+}
+
 type Config struct {
 	Embedding Embedding     `toml:"embedding"`
 	Inject    Inject        `toml:"inject"`
@@ -70,6 +75,7 @@ type Config struct {
 	Capture   Capture       `toml:"capture"`
 	Wiki      Wiki          `toml:"wiki"`
 	Hooks     Hooks         `toml:"hooks"`
+	Reasonix  Reasonix      `toml:"reasonix"`
 }
 
 func Default() Config {

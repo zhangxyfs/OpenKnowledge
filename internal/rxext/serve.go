@@ -12,8 +12,10 @@ import (
 	"strings"
 
 	"openknowledge/internal/agentx"
+	"openknowledge/internal/config"
 	"openknowledge/internal/hook"
 	"openknowledge/internal/project"
+	"openknowledge/internal/registry"
 	extension "openknowledge/internal/rxext/sdk"
 	"openknowledge/internal/version"
 )
@@ -45,8 +47,10 @@ func (h *handler) Initialize(_ context.Context, p extension.InitializeParams) (*
 	}, nil
 }
 
-// onInput input.receive 拦截器：检索注入（replace 前缀 <ok-context>）。
-// enforce 分支由 Task 5 加入。fail-open：panic/错误一律 Continue。
+// onInput input.receive 拦截器：先 enforce 检查（block 优先于注入），再检索注入。
+// 三档分流（[reasonix] enforce_mode）：mixed（默认）=自省软提醒/规则硬阻断；
+// soft=全软提示；hard=全硬阻断。软路径把提醒与注入合并为一个 <ok-context> 块
+// （提醒在前、注入在后）。fail-open：panic/错误一律 Continue。
 func (h *handler) onInput(_ context.Context, _ string, payload json.RawMessage) (res *extension.InterceptResult, err error) {
 	defer continueOnPanic(&res, &err)
 	res = extension.Continue()
@@ -61,11 +65,57 @@ func (h *handler) onInput(_ context.Context, _ string, payload json.RawMessage) 
 	if err != nil {
 		return res, nil
 	}
+	reason, isBlock := hook.CheckStop(pc, h.sessionID)
+	mode := enforceMode()
+	if reason != "" {
+		switch {
+		case isBlock && mode != "soft":
+			// 规则硬阻断：mixed/hard 直接 Block
+			return extension.Block(reason), nil
+		case !isBlock && mode == "hard":
+			// auto 自省软提醒：hard 档升级为硬阻断
+			return extension.Block(reason), nil
+		}
+	}
 	prefix := hook.InjectForPrompt(pc, h.sessionID, h.cwd, in.Text)
-	if strings.TrimSpace(prefix) == "" {
+	var parts []string
+	if reason != "" { // 软路径：提醒与注入合并为一个 ok-context 块（提醒在前）
+		parts = append(parts, reason)
+	}
+	if strings.TrimSpace(prefix) != "" {
+		parts = append(parts, prefix)
+	}
+	if len(parts) == 0 {
 		return res, nil
 	}
-	return buildInputReplacement(in.Text, []string{prefix})
+	rep, err := buildInputReplacement(in.Text, parts)
+	if err != nil {
+		return extension.Continue(), nil // fail-open：组装失败不阻断输入
+	}
+	return rep, nil
+}
+
+// enforceMode 读全局配置 [reasonix] enforce_mode：soft|hard|mixed，缺省/非法按 mixed。
+// OK_RX_ENFORCE_TEST_MODE 是测试注入口（生产不设置）。
+// Task 8 收编到 setupx.ReasonixEnforceMode() 后删除本实现、改调 setupx。
+func enforceMode() string {
+	if m := os.Getenv("OK_RX_ENFORCE_TEST_MODE"); m != "" {
+		return normalizeEnforceMode(m)
+	}
+	cfg, err := config.LoadMerged("", filepath.Join(registry.Home(), "config.toml"))
+	if err != nil {
+		return "mixed"
+	}
+	return normalizeEnforceMode(cfg.Reasonix.EnforceMode)
+}
+
+func normalizeEnforceMode(m string) string {
+	switch m {
+	case "soft", "hard":
+		return m
+	default:
+		return "mixed"
+	}
 }
 
 // buildInputReplacement 把若干注入片段合并为一个 <ok-context> 块前缀进原输入。
