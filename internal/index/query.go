@@ -15,6 +15,7 @@ type Hit struct {
 	Type     string
 	Summary  string
 	Body     string
+	Tags     []string // 供注入层按分支过滤
 	Score    float64
 }
 
@@ -43,7 +44,7 @@ func (db *DB) Query(terms []string, queryVec []float32, cfg config.Retrieve) ([]
 	// 归一化为 kw/(kw+6)。
 	if match := buildMatch(terms); match != "" {
 		rows, err := db.sql.Query(
-			`SELECT e.filename, e.title, e.type, e.summary, e.body,
+			`SELECT e.filename, e.title, e.type, e.summary, e.body, e.tags,
 				bm25(entries_fts, 10.0, 8.0, 3.0, 1.0) AS r
 			FROM entries_fts JOIN entries e ON e.filename = entries_fts.filename
 			WHERE entries_fts MATCH ? AND e.mandatory = 0 AND e.draft = 0`, match)
@@ -52,11 +53,13 @@ func (db *DB) Query(terms []string, queryVec []float32, cfg config.Retrieve) ([]
 		}
 		for rows.Next() {
 			var h Hit
+			var tagsStr string
 			var rank float64
-			if err := rows.Scan(&h.Filename, &h.Title, &h.Type, &h.Summary, &h.Body, &rank); err != nil {
+			if err := rows.Scan(&h.Filename, &h.Title, &h.Type, &h.Summary, &h.Body, &tagsStr, &rank); err != nil {
 				_ = rows.Close()
 				return nil, err
 			}
+			h.Tags = splitTags(tagsStr)
 			kw := -rank
 			h.Score = cfg.Alpha * kw / (kw + 6)
 			hits[h.Filename] = &h
@@ -71,16 +74,16 @@ func (db *DB) Query(terms []string, queryVec []float32, cfg config.Retrieve) ([]
 	// 语义通道：向量全量读入内存算余弦（万条毫秒级）。
 	if len(queryVec) > 0 {
 		rows, err := db.sql.Query(
-			`SELECT e.filename, e.title, e.type, e.summary, e.body, v.blob
+			`SELECT e.filename, e.title, e.type, e.summary, e.body, e.tags, v.blob
 			FROM vectors v JOIN entries e ON e.filename = v.filename
 			WHERE e.mandatory = 0 AND e.draft = 0`)
 		if err != nil {
 			return nil, err
 		}
 		for rows.Next() {
-			var filename, title, typ, summary, body string
+			var filename, title, typ, summary, body, tagsStr string
 			var blob []byte
-			if err := rows.Scan(&filename, &title, &typ, &summary, &body, &blob); err != nil {
+			if err := rows.Scan(&filename, &title, &typ, &summary, &body, &tagsStr, &blob); err != nil {
 				_ = rows.Close()
 				return nil, err
 			}
@@ -90,6 +93,7 @@ func (db *DB) Query(terms []string, queryVec []float32, cfg config.Retrieve) ([]
 			} else if cos > 0 {
 				hits[filename] = &Hit{
 					Filename: filename, Title: title, Type: typ, Summary: summary, Body: body,
+					Tags:  splitTags(tagsStr),
 					Score: cfg.Beta * cos,
 				}
 			}
@@ -143,11 +147,12 @@ type WikiEntry struct {
 	Title    string
 	Filename string
 	Summary  string
+	Branch   string
 }
 
 // WikiEntries 返回打 wiki 标签的已转正条目（按 title 排序）。
 func (db *DB) WikiEntries() ([]WikiEntry, error) {
-	rows, err := db.sql.Query(`SELECT title, filename, summary FROM entries WHERE draft = 0 AND tags LIKE '%wiki%' ORDER BY title`)
+	rows, err := db.sql.Query(`SELECT title, filename, summary, tags FROM entries WHERE draft = 0 AND tags LIKE '%wiki%' ORDER BY title`)
 	if err != nil {
 		return nil, err
 	}
@@ -155,12 +160,28 @@ func (db *DB) WikiEntries() ([]WikiEntry, error) {
 	var out []WikiEntry
 	for rows.Next() {
 		var e WikiEntry
-		if err := rows.Scan(&e.Title, &e.Filename, &e.Summary); err != nil {
+		var tagsStr string
+		if err := rows.Scan(&e.Title, &e.Filename, &e.Summary, &tagsStr); err != nil {
 			return nil, err
 		}
+		e.Branch = BranchOf(splitTags(tagsStr))
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// HasBranchWiki 报告指定分支是否存在已转正的差异条目（wiki 标签且 branch 精确匹配）。
+func (db *DB) HasBranchWiki(branch string) (bool, error) {
+	entries, err := db.WikiEntries()
+	if err != nil {
+		return false, err
+	}
+	for _, e := range entries {
+		if e.Branch == branch {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // WikiCount 返回 wiki 条目数（ok wiki mark 展示用）。

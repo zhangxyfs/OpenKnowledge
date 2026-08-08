@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"openknowledge/internal/embed"
@@ -250,12 +251,31 @@ func (db *DB) rebuildIndex(dir string) error {
 		return err
 	}
 	if wikiEntries, err := db.WikiEntries(); err == nil && len(wikiEntries) > 0 {
-		b.WriteString("\n## Wiki 目录\n\n")
-		for _, we := range wikiEntries {
+		writeWikiLine := func(b *strings.Builder, we WikiEntry) {
 			if we.Summary != "" {
-				fmt.Fprintf(&b, "- [%s](%s) — %s\n", we.Title, we.Filename, we.Summary)
+				fmt.Fprintf(b, "- [%s](%s) — %s\n", we.Title, we.Filename, we.Summary)
 			} else {
-				fmt.Fprintf(&b, "- [%s](%s)\n", we.Title, we.Filename)
+				fmt.Fprintf(b, "- [%s](%s)\n", we.Title, we.Filename)
+			}
+		}
+		b.WriteString("\n## Wiki 目录\n\n")
+		branches := map[string][]WikiEntry{}
+		for _, we := range wikiEntries {
+			if we.Branch == "" {
+				writeWikiLine(&b, we)
+			} else {
+				branches[we.Branch] = append(branches[we.Branch], we)
+			}
+		}
+		names := make([]string, 0, len(branches))
+		for n := range branches {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		for _, n := range names {
+			fmt.Fprintf(&b, "\n## 分支差异（%s）\n\n", n)
+			for _, we := range branches[n] {
+				writeWikiLine(&b, we)
 			}
 		}
 	}
