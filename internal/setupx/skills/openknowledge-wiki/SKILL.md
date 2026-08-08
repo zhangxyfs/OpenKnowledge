@@ -1,6 +1,6 @@
 ---
 name: openknowledge-wiki
-description: 为已存在的项目生成或增量更新 OpenKnowledge 项目 wiki——扫描代码结构与 git 历史，经 ok add 录入 reference 条目（tags 含 wiki），条目随混合检索注入，目录固定进 INDEX.md。当用户要求"生成项目 wiki""初始化 wiki""更新 wiki""把项目沉淀成 wiki"时使用。
+description: 为已存在的项目生成或增量更新 OpenKnowledge 项目 wiki——扫描代码结构与 git 历史，经 ok add 录入 reference 条目（tags 含 wiki），条目随混合检索注入，目录固定进 INDEX.md。当用户要求"生成项目 wiki""初始化 wiki""更新 wiki""把项目沉淀成 wiki"，或新功能/新模块/重要架构变化定稿需要沉淀进项目 wiki 时使用。
 ---
 
 # openknowledge-wiki
