@@ -256,6 +256,11 @@ message = "请补变更日志"
 	if !strings.Contains(stderr.String(), "请补变更日志") {
 		t.Fatalf("missing message %q", stderr.String())
 	}
+	// MarkBlocked 所有权在 HandleStop：阻断后 BlockedRules 必须落盘
+	stBlocked := state.Load(filepath.Join(kbRoot, "state"), "s1")
+	if !stBlocked.HasBlocked("changelog_required") {
+		t.Fatalf("阻断后应落 MarkBlocked（每会话每规则最多一次的前提）: %+v", stBlocked.BlockedRules)
+	}
 	// 第二次 Stop 放行（防死循环）
 	stderr.Reset()
 	if code := HandleStop(strings.NewReader(stop), &stderr, &bytes.Buffer{}, ""); code != 0 {

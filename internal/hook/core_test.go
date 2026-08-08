@@ -1,6 +1,7 @@
 package hook
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -52,11 +53,45 @@ func TestTrackTouchedAndCheckStopRemind(t *testing.T) {
 	if len(st.Touched) != 1 || st.Touched[0] != "a.go" {
 		t.Fatalf("touched 记录错误: %+v", st.Touched)
 	}
-	reason, isBlock := CheckStop(pc, "s2")
-	if reason == "" || isBlock {
-		t.Fatalf("auto 自省应返回软提醒，got (%q, %v)", reason, isBlock)
+	reason, blockedRule := CheckStop(pc, "s2")
+	if reason == "" || blockedRule != "" {
+		t.Fatalf("auto 自省应返回软提醒（blockedRule 为空），got (%q, %q)", reason, blockedRule)
 	}
 	if !strings.Contains(reason, "ok propose") {
 		t.Errorf("自省提醒文案应引导 ok propose，got: %q", reason)
+	}
+}
+
+// TestCheckStopDoesNotMarkBlocked MarkBlocked 所有权在调用方：CheckStop 命中 enforce
+// 规则只返回 blockedRule，自身不落每会话防重标记（rxext soft 档重复提醒依赖此语义）。
+func TestCheckStopDoesNotMarkBlocked(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	cfg := `
+[[enforce]]
+type = "changelog_required"
+code_globs = ["**/*.go"]
+changelog_glob = "docs/changelogs/**"
+message = "请补变更日志"
+`
+	if err := os.WriteFile(filepath.Join(kbRoot, "config.toml"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pc, err := project.FromCwd(projDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	TrackTouched(pc, "s3", "write_file", filepath.Join(projDir, "main.go"))
+	reason, blockedRule := CheckStop(pc, "s3")
+	if reason == "" || blockedRule != "changelog_required" {
+		t.Fatalf("enforce 命中应返回 (reason, changelog_required)，got (%q, %q)", reason, blockedRule)
+	}
+	st := state.Load(pc.Store.StateDir(), "s3")
+	if st.HasBlocked("changelog_required") {
+		t.Fatalf("CheckStop 不得落 MarkBlocked: %+v", st.BlockedRules)
+	}
+	// 未落标记 → 再次评估仍命中（soft 档每条输入重复提醒的前提）
+	reason2, blockedRule2 := CheckStop(pc, "s3")
+	if reason2 == "" || blockedRule2 != "changelog_required" {
+		t.Fatalf("未落标记时应重复命中，got (%q, %q)", reason2, blockedRule2)
 	}
 }

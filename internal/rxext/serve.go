@@ -10,12 +10,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"openknowledge/internal/agentx"
 	"openknowledge/internal/hook"
 	"openknowledge/internal/project"
 	extension "openknowledge/internal/rxext/sdk"
 	"openknowledge/internal/setupx"
+	"openknowledge/internal/state"
 	"openknowledge/internal/version"
 )
 
@@ -33,7 +35,10 @@ func Serve(ctx context.Context) error {
 }
 
 // handler 持有 initialize 握手确定的单会话上下文（一个 Reasonix 会话一个 sidecar 进程）。
+// mu 串行化拦截器回调：SDK 并发派发（wire.go maxConcurrentHandlers=32），
+// state 的读-改-写（TrackTouched/CheckStop）无锁会丢更新。
 type handler struct {
+	mu        sync.Mutex
 	sessionID string
 	cwd       string
 }
@@ -52,6 +57,8 @@ func (h *handler) Initialize(_ context.Context, p extension.InitializeParams) (*
 // （提醒在前、注入在后）。fail-open：panic/错误一律 Continue。
 func (h *handler) onInput(_ context.Context, _ string, payload json.RawMessage) (res *extension.InterceptResult, err error) {
 	defer continueOnPanic(&res, &err)
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	res = extension.Continue()
 	selfHealHooks()
 	var in struct {
@@ -64,15 +71,18 @@ func (h *handler) onInput(_ context.Context, _ string, payload json.RawMessage) 
 	if err != nil {
 		return res, nil
 	}
-	reason, isBlock := hook.CheckStop(pc, h.sessionID)
+	reason, blockedRule := hook.CheckStop(pc, h.sessionID)
 	mode := enforceMode()
+	isBlock := blockedRule != ""
 	if reason != "" {
 		switch {
 		case isBlock && mode != "soft":
-			// 规则硬阻断：mixed/hard 直接 Block
+			// 规则硬阻断：mixed/hard 直接 Block；Block 生效前落每会话防重标记
+			// （soft 路径不标记 → 下条输入 CheckStop 重复命中，提醒逐条重复）
+			markBlocked(pc, h.sessionID, blockedRule)
 			return extension.Block(reason), nil
 		case !isBlock && mode == "hard":
-			// auto 自省软提醒：hard 档升级为硬阻断
+			// auto 自省软提醒：hard 档升级为硬阻断（blockedRule 为空，无规则可标）
 			return extension.Block(reason), nil
 		}
 	}
@@ -143,9 +153,20 @@ func selfHealHooks() {
 	}
 }
 
+// markBlocked 硬阻断生效前落每会话防重标记（fail-open：失败仅记日志）。
+func markBlocked(pc *project.Context, sessionID, ruleType string) {
+	st := state.Load(pc.Store.StateDir(), sessionID)
+	st.MarkBlocked(ruleType)
+	if err := st.Save(pc.Store.StateDir()); err != nil {
+		fmt.Fprintf(os.Stderr, "rxext markBlocked: %v\n", err)
+	}
+}
+
 // onToolAfter tool.after 拦截器：写文件工具成功执行后记录 touched。恒 Continue。
 func (h *handler) onToolAfter(_ context.Context, _ string, payload json.RawMessage) (res *extension.InterceptResult, err error) {
 	defer continueOnPanic(&res, &err)
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	res = extension.Continue()
 	var p struct {
 		Name      string `json:"name"`

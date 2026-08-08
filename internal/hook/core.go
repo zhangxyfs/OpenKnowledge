@@ -137,15 +137,18 @@ func TrackTouched(pc *project.Context, sessionID, toolName, filePath string) {
 }
 
 // CheckStop 评估 auto 自省提醒与 enforce 规则并维护回合计数。
-// 返回 (reason, isBlock)：reason 空 = 放行；isBlock false = auto 自省提醒（软），
-// true = enforce 规则命中（硬）。auto 提醒先于 enforce 评估（与既有 Stop 行为一致）。
-func CheckStop(pc *project.Context, sessionID string) (string, bool) {
+// 返回 (reason, blockedRule)：均空 = 放行；reason 非空 + blockedRule 空 = auto 自省
+// 提醒（软）；两者皆非空 = enforce 规则命中（硬，blockedRule 为规则 Type）。
+// MarkBlocked 所有权在调用方：本函数只评估不落防重标记——硬阻断生效前由调用方
+// （HandleStop / rxext onInput）落标记；不落标记则下次评估重复命中（rxext soft 档
+// "每条输入重复提醒"依赖此语义）。auto 提醒先于 enforce 评估（与既有 Stop 行为一致）。
+func CheckStop(pc *project.Context, sessionID string) (reason string, blockedRule string) {
 	if registry.HooksDisabled() {
-		return "", false
+		return "", ""
 	}
 	// 无 enforce 规则且非 auto 自省模式：无需加载状态，直接放行
 	if len(pc.Config.Enforce) == 0 && pc.Config.Capture.Mode != "auto" {
-		return "", false
+		return "", ""
 	}
 	st := state.Load(pc.Store.StateDir(), sessionID)
 	// auto 自省模式：有文件修改且距上次提醒满 turn_interval 回合 → 软阻断一次。
@@ -161,23 +164,22 @@ func CheckStop(pc *project.Context, sessionID string) (string, bool) {
 		if err := st.Save(pc.Store.StateDir()); err != nil {
 			logErr("stop save state: %v", err)
 		}
-		return "本会话修改过文件。请回顾是否有值得记录的经验（非显而易见的坑或解法），有则立即运行 ok propose 记录草稿条目；没有则继续。", false
+		return "本会话修改过文件。请回顾是否有值得记录的经验（非显而易见的坑或解法），有则立即运行 ok propose 记录草稿条目；没有则继续。", ""
 	}
 	for _, rule := range pc.Config.Enforce {
 		if rule.Type != "changelog_required" {
 			continue
 		}
 		if block, reason := enforce.EvalChangelog(rule, st); block {
-			st.MarkBlocked(rule.Type)
 			if err := st.Save(pc.Store.StateDir()); err != nil {
 				logErr("stop save state: %v", err)
 			}
-			return reason, true
+			return reason, rule.Type
 		}
 	}
 	// 未阻断也要持久化 StopCount
 	if err := st.Save(pc.Store.StateDir()); err != nil {
 		logErr("stop save state: %v", err)
 	}
-	return "", false
+	return "", ""
 }

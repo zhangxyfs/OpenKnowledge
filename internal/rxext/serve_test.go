@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"openknowledge/internal/hook"
@@ -268,5 +269,106 @@ func TestOnInputEnforceHardBlocksAutoReminder(t *testing.T) {
 	}
 	if !strings.Contains(res.Reason, "ok propose") {
 		t.Errorf("Block reason 应为自省提醒: %q", res.Reason)
+	}
+}
+
+// TestOnInputSoftRepeatsReminder soft 档不落 MarkBlocked：同一 sessionID 连续两次
+// onInput 都应 Replace 且含 changelog 提醒（无视则每条输入重复提醒）。
+func TestOnInputSoftRepeatsReminder(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	writeProjectConfig(t, kbRoot, changelogEnforceCfg)
+	t.Setenv("OK_RX_ENFORCE_TEST_MODE", "soft")
+	h := &handler{sessionID: "s1", cwd: projDir}
+	touchFile(t, projDir, "s1", filepath.Join(projDir, "main.go"))
+	pc, err := project.FromCwd(projDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i <= 2; i++ {
+		res, err := h.onInput(context.Background(), "input.receive", []byte(`{"text":"继续"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Decision != extension.DecisionReplace {
+			t.Fatalf("第 %d 次 onInput 应 Replace（soft 重复提醒），got %v（reason=%q）", i, res.Decision, res.Reason)
+		}
+		var rep struct {
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal(res.Replacement, &rep); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(rep.Text, "changelog") {
+			t.Errorf("第 %d 次 onInput 软提醒应含 changelog 提示: %q", i, rep.Text)
+		}
+		// soft 路径每次调用后都不得落 MarkBlocked
+		st := state.Load(pc.Store.StateDir(), "s1")
+		if st.HasBlocked("changelog_required") {
+			t.Fatalf("第 %d 次 onInput 后不应落 MarkBlocked: %+v", i, st.BlockedRules)
+		}
+	}
+}
+
+// TestOnInputMixedBlocksOncePerSession mixed 档反向用例：规则硬阻断生效前落
+// MarkBlocked，每会话每规则最多阻断一次——第二次同会话 onInput 不再 Block。
+func TestOnInputMixedBlocksOncePerSession(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	writeProjectConfig(t, kbRoot, changelogEnforceCfg)
+	t.Setenv("OK_RX_ENFORCE_TEST_MODE", "mixed")
+	h := &handler{sessionID: "s1", cwd: projDir}
+	touchFile(t, projDir, "s1", filepath.Join(projDir, "main.go"))
+	res, err := h.onInput(context.Background(), "input.receive", []byte(`{"text":"继续"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Decision != extension.DecisionBlock {
+		t.Fatalf("第一次 onInput 应 Block，got %v", res.Decision)
+	}
+	// Block 生效后 MarkBlocked 必须已落盘
+	pc, err := project.FromCwd(projDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := state.Load(pc.Store.StateDir(), "s1")
+	if !st.HasBlocked("changelog_required") {
+		t.Fatalf("mixed 档 Block 后应落 MarkBlocked: %+v", st.BlockedRules)
+	}
+	// 第二次同会话 onInput：已阻断过 → 不再 Block（防死循环语义不变）
+	res2, err := h.onInput(context.Background(), "input.receive", []byte(`{"text":"继续"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res2.Decision == extension.DecisionBlock {
+		t.Fatalf("第二次 onInput 不应再 Block（每会话每规则最多一次），reason=%q", res2.Reason)
+	}
+}
+
+// TestOnToolAfterConcurrent SDK 并发派发回调（maxConcurrentHandlers=32）：handler
+// 互斥锁须保证 state 读-改-写不丢更新——并发 8 次 onToolAfter 不同文件全落盘。
+func TestOnToolAfterConcurrent(t *testing.T) {
+	projDir, _ := setupProject(t)
+	h := &handler{sessionID: "sc", cwd: projDir}
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			name := fmt.Sprintf("f%d.go", i)
+			payload := fmt.Sprintf(`{"name":"write_file","arguments":%q,"result":"ok","isError":false}`,
+				`{"path":"`+strings.ReplaceAll(filepath.Join(projDir, name), `\`, `\\`)+`"}`)
+			res, err := h.onToolAfter(context.Background(), "tool.after", []byte(payload))
+			if err != nil || res.Decision != extension.DecisionContinue {
+				t.Errorf("tool.after 应恒 Continue: %v %v", res, err)
+			}
+		}(i)
+	}
+	wg.Wait()
+	pc, err := project.FromCwd(projDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := state.Load(pc.Store.StateDir(), "sc")
+	if len(st.Touched) != 8 {
+		t.Fatalf("并发 8 次 onToolAfter 应记录 8 条 touched，got %d: %+v", len(st.Touched), st.Touched)
 	}
 }

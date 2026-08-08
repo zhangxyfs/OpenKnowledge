@@ -503,7 +503,7 @@ type Agent interface {
 | kimi | TOML 标记块（3 条 `[[hooks]]`） | `~/.kimi-code/config.toml`（`KIMI_CODE_HOME` 优先） | 标记块 `# >>> openknowledge hooks >>>` 存在 |
 | pi | TypeScript 扩展（三事件回调） | `~/.pi/agent/extensions/openknowledge.ts`（`PI_CODING_AGENT_DIR` 优先） | 头标记 + `// fingerprint:` 行与当前模板指纹一致 |
 | zcode | 合并写 JSON 配置（`hooks.events` 三事件，`type:"process"`） | `~/.zcode/cli/config.json`（`OK_ZCODE_HOME` 优先，ok 自留测试口） | 三事件的 ok hook 均为当前 exe + `claude` 参数 + 当前 timeoutMs |
-| reasonix | Extension Protocol 插件包（manifest v1 + 信任门登记） | `<reasonix home>/plugins/openknowledge/reasonix-plugin.json` + `plugin-packages.json`（`OK_REASONIX_HOME`/`REASONIX_HOME` 优先） | 登记条目 enabled/root 正确且 manifest command/args 为当前 exe |
+| reasonix | Extension Protocol 插件包（manifest v1 + 信任门登记） | `<reasonix home>/plugins/openknowledge/reasonix-plugin.json` + `<reasonix home>/plugin-packages.json`（`OK_REASONIX_HOME`/`REASONIX_HOME` 优先） | 登记条目 enabled/root 正确且 manifest command/args 为当前 exe |
 
 zcode 适配器（`zcode.go`）：ZCode 的 hook 输入契约是 Claude 风格 snake_case，与 `hook.ParseEvent` 天然兼容；但**输出侧要求 stdout 为协议 JSON**（纯文本只当诊断不进上下文），故 hook 命令带第三参数 `claude`——`HandlePrompt` 把注入包成 `{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":...}}`，`HandleStop` 阻断改写 stdout `{"decision":"block","reason":...}` + exit 0（kimi/pi 的 stderr + exit 2 语义不变）；daemon 转发经 `?format=` query 透传。配置合并写保留未知字段与用户自有 hook（ok 条目按 `args:["hook",<事件>,...]` 识别，与 exe 路径无关），写前备份 `.bak-openknowledge`；`hooks.enabled` 置 true（ZCode 要求显式开启）。自愈语义：曾装过且内容过期才重写，从未安装不复活。技能进 `~/.zcode/skills`（ZCode 不自动读 `~/.agents/skills`）。
 

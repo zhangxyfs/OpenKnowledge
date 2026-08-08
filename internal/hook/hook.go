@@ -207,8 +207,9 @@ func relativize(pc *project.Context, abs string) string {
 
 // HandleStop 解析 hook 事件，按 CheckStop 评估结果阻断：纯文本格式 stderr + exit 2
 // （kimi/pi）；claude 格式 stdout decision:block JSON + exit 0。
-// isBlock 在本 Handler 不区分——两种结果都走 stopBlock，行为与现状一致；
-// isBlock 供 reasonix sidecar 三档分流用。
+// enforce 硬阻断（blockedRule 非空）在阻断输出前落 MarkBlocked——MarkBlocked 所有权
+// 在调用方，kimi/zcode/pi 保持每会话每规则最多阻断一次的语义；blockedRule 同时供
+// reasonix sidecar 三档分流用。
 func HandleStop(r io.Reader, stderr, stdout io.Writer, format string) int {
 	if registry.HooksDisabled() {
 		return 0
@@ -221,8 +222,16 @@ func HandleStop(r io.Reader, stderr, stdout io.Writer, format string) int {
 	if err != nil {
 		return 0
 	}
-	reason, _ := CheckStop(pc, ev.SessionID)
+	reason, blockedRule := CheckStop(pc, ev.SessionID)
 	if reason != "" {
+		if blockedRule != "" {
+			// 硬阻断生效前落每会话防重标记（fail-open：错误仅记日志）
+			st := state.Load(pc.Store.StateDir(), ev.SessionID)
+			st.MarkBlocked(blockedRule)
+			if err := st.Save(pc.Store.StateDir()); err != nil {
+				logErr("stop save blocked rule: %v", err)
+			}
+		}
 		return stopBlock(stderr, stdout, format, reason)
 	}
 	return 0

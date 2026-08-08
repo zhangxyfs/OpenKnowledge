@@ -73,7 +73,7 @@ func TestReasonixEnforceMode(t *testing.T) {
 	if err := SaveReasonixEnforceMode("歪值"); err == nil {
 		t.Error("非法值应报错")
 	}
-	// 非法值落盘时读回按 mixed
+	// 合法值 hard 保存后读回一致
 	if err := SaveReasonixEnforceMode("hard"); err != nil {
 		t.Fatal(err)
 	}
