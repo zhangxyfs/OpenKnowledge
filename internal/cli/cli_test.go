@@ -505,6 +505,64 @@ func TestWikiMarkRecordsCurrentBranch(t *testing.T) {
 	}
 }
 
+// ok wiki mark <rev>：相对 rev（HEAD~1）应归一化为 40 位完整 hash 落盘，
+// 且随后 status 的 branch_state 为 ok（回归：原样落盘会被 mb == lc 误判为 diverged）。
+func TestWikiMarkNormalizesRev(t *testing.T) {
+	repo, stateDir := setupWikiProject(t)
+	// 夹具需 ≥2 提交：再补一个提交，随后 mark HEAD~1
+	if err := os.WriteFile(filepath.Join(repo, "g"), []byte("y"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "c2")
+	// 期望值独立取自 git rev-parse（不经过被测函数）
+	cmd := exec.Command("git", "-C", repo, "rev-parse", "HEAD~1")
+	wantB, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.TrimSpace(string(wantB))
+
+	var out, errb bytes.Buffer
+	if code := WikiCmd([]string{"mark", "HEAD~1"}, &out, &errb); code != 0 {
+		t.Fatalf("mark HEAD~1 exit %d err=%q", code, errb.String())
+	}
+	s := wiki.LoadState(stateDir)
+	if s == nil || s.Cursors["master"].LastCommit != want {
+		t.Fatalf("落盘游标应为 rev-parse 全 hash %q: %+v", want, s)
+	}
+	if got := s.Cursors["master"].LastCommit; len(got) != 40 {
+		t.Errorf("落盘游标应为 40 位全 hash，got %q", got)
+	}
+	out.Reset()
+	errb.Reset()
+	if code := WikiCmd([]string{"status"}, &out, &errb); code != 0 {
+		t.Fatalf("status exit %d err=%q", code, errb.String())
+	}
+	var st map[string]any
+	if err := json.Unmarshal(out.Bytes(), &st); err != nil {
+		t.Fatal(err)
+	}
+	if st["branch_state"] != "ok" {
+		t.Errorf("mark HEAD~1 后 branch_state 应为 ok: %v", st)
+	}
+}
+
+// ok wiki mark <非法rev>：fail-fast 返回 1，stderr 报错，wiki.json 不被写入垃圾。
+func TestWikiMarkInvalidRevRefused(t *testing.T) {
+	_, stateDir := setupWikiProject(t)
+	var out, errb bytes.Buffer
+	if code := WikiCmd([]string{"mark", "不存在的rev"}, &out, &errb); code != 1 {
+		t.Fatalf("非法 rev 应 exit 1，got %d", code)
+	}
+	if !strings.Contains(errb.String(), "不存在的rev") {
+		t.Errorf("stderr 应指出非法 rev: %q", errb.String())
+	}
+	if _, err := os.Stat(wiki.CursorPath(stateDir)); !os.IsNotExist(err) {
+		t.Errorf("非法 rev 不应写入 wiki.json: stat err=%v", err)
+	}
+}
+
 // ok wiki status：JSON 新增 branch/base_branch/branch_state；has_wiki 语义不变。
 func TestWikiStatusBranchFields(t *testing.T) {
 	setupWikiProject(t)

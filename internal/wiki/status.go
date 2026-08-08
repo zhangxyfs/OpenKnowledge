@@ -30,6 +30,13 @@ func gitOut(srcDir string, args ...string) (string, error) {
 	return strings.TrimSpace(string(b)), nil
 }
 
+// ResolveRevision 把用户传入的任意 rev（短 hash / HEAD~n / 标签等）经
+// git rev-parse 归一化为完整 hash；非法 rev 返回错误（fail-fast，调用方不写盘）。
+// HeadCommit 是本函数 rev=HEAD 的特化版。
+func ResolveRevision(srcDir, rev string) (string, error) {
+	return gitOut(srcDir, "rev-parse", rev)
+}
+
 // commitExists 报告 commit 在仓库中是否存在。
 func commitExists(srcDir, commit string) bool {
 	_, err := gitOut(srcDir, "rev-parse", "--verify", "--quiet", commit+"^{commit}")

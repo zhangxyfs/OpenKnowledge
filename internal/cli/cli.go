@@ -620,6 +620,16 @@ func WikiCmd(args []string, stdout, stderr io.Writer) int {
 		commit := fs.Arg(1)
 		if commit == "" {
 			commit, _ = wiki.HeadCommit(cwd) // 非 git 项目留空，只写时间戳
+		} else {
+			// 用户传入的 rev（短 hash / HEAD~n / 标签等）先归一化为完整 hash 再落盘，
+			// 否则 CheckStatus 的 mb == lc 字符串比较（merge-base 恒输出全 hash）
+			// 必不相等，会把 ok 误判为 diverged。非法 rev 直接报错，不写垃圾游标。
+			full, err := wiki.ResolveRevision(cwd, commit)
+			if err != nil {
+				fmt.Fprintf(stderr, "无法解析 rev %q：%v\n", commit, err)
+				return 1
+			}
+			commit = full
 		}
 		count := 0
 		if db, err := index.Open(pc.Store.KbPath()); err == nil {

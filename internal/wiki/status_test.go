@@ -51,6 +51,27 @@ func TestCurrentBranch(t *testing.T) {
 	}
 }
 
+// ResolveRevision：HEAD~1 / 短 hash 归一化为 40 位全 hash；非法 rev 返回错误。
+func TestResolveRevision(t *testing.T) {
+	dir := initRepo(t, 2)
+	head := headOf(t, dir)
+	full, err := ResolveRevision(dir, "HEAD~1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(full) != 40 || full == head {
+		t.Errorf("HEAD~1 应解析为前一提交的全 hash，got %q", full)
+	}
+	// 短 hash 应补全为同一全 hash
+	short, err := ResolveRevision(dir, full[:7])
+	if err != nil || short != full {
+		t.Errorf("短 hash %q 应补全为 %q，got %q err=%v", full[:7], full, short, err)
+	}
+	if _, err := ResolveRevision(dir, "no-such-rev"); err == nil {
+		t.Error("非法 rev 应返回错误")
+	}
+}
+
 func TestCheckStatusSameBranchUnchanged(t *testing.T) {
 	dir := initRepo(t, 3)
 	sd := t.TempDir()
