@@ -348,7 +348,8 @@
     if (!entries || entries.length === 0) {
       content.innerHTML = '<p class="muted">暂无更新日志</p>';
     } else {
-      content.innerHTML = entries.map(function (e) { return renderMd(e.log); }).join("<hr>");
+      // 最新版本在最前（API 返回升序，展示层翻转为降序；标题取 latest 的逻辑不受影响）
+      content.innerHTML = entries.slice().reverse().map(function (e) { return renderMd(e.log); }).join("<hr>");
     }
     $("changelog-modal").classList.remove("hidden");
   }
