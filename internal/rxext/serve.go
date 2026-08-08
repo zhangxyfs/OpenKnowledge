@@ -12,11 +12,10 @@ import (
 	"strings"
 
 	"openknowledge/internal/agentx"
-	"openknowledge/internal/config"
 	"openknowledge/internal/hook"
 	"openknowledge/internal/project"
-	"openknowledge/internal/registry"
 	extension "openknowledge/internal/rxext/sdk"
+	"openknowledge/internal/setupx"
 	"openknowledge/internal/version"
 )
 
@@ -95,18 +94,14 @@ func (h *handler) onInput(_ context.Context, _ string, payload json.RawMessage) 
 	return rep, nil
 }
 
-// enforceMode 读全局配置 [reasonix] enforce_mode：soft|hard|mixed，缺省/非法按 mixed。
-// OK_RX_ENFORCE_TEST_MODE 是测试注入口（生产不设置）。
-// Task 8 收编到 setupx.ReasonixEnforceMode() 后删除本实现、改调 setupx。
+// enforceMode 读全局三档配置 [reasonix] enforce_mode（soft|hard|mixed，缺省/非法
+// 按 mixed），生产路径收编在 setupx.ReasonixEnforceMode()；OK_RX_ENFORCE_TEST_MODE
+// 是测试注入口（生产不设置）。
 func enforceMode() string {
 	if m := os.Getenv("OK_RX_ENFORCE_TEST_MODE"); m != "" {
 		return normalizeEnforceMode(m)
 	}
-	cfg, err := config.LoadMerged("", filepath.Join(registry.Home(), "config.toml"))
-	if err != nil {
-		return "mixed"
-	}
-	return normalizeEnforceMode(cfg.Reasonix.EnforceMode)
+	return setupx.ReasonixEnforceMode()
 }
 
 func normalizeEnforceMode(m string) string {

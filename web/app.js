@@ -471,6 +471,7 @@
     $("hooks-agent-name").textContent = cur ? cur.name : "agent";
     $("btn-hooks").textContent = cur ? ("写入 " + cur.name + " hooks 配置") : "写入 hooks 配置";
     $("hooks-timeout").value = s.hooksTimeout || 10;
+    renderRxEnforce();
     setBadge("badge-skills", s.skillsInstalled, "已安装", "未配置");
     setBadge("badge-embedding", s.embeddingConfigured, "已配置", "未配置");
     setBadge("badge-toggle", !s.disabled, "已开启", "已关闭");
@@ -481,6 +482,22 @@
       $("emb-api-key").placeholder = s.embedding.has_key ? "已保存（留空保持不变）" : "api_key";
     }
     refreshCapture();
+  }
+
+  // renderRxEnforce 三档卡仅 agent=reasonix 时显示，并回填当前保存的档位。
+  // 由 renderGuide 调用（状态刷新与 agent 下拉切换都会经过 renderGuide）。
+  function renderRxEnforce() {
+    var card = $("rx-enforce-card");
+    if (!card) return;
+    var isRx = state.agent === "reasonix";
+    card.classList.toggle("hidden", !isRx);
+    if (isRx) {
+      var mode = (state.status && state.status.rxEnforceMode) || "mixed";
+      var radios = document.getElementsByName("rx-enforce");
+      for (var i = 0; i < radios.length; i++) {
+        radios[i].checked = radios[i].value === mode;
+      }
+    }
   }
 
   // ---------- 引导页：经验沉淀卡片 ----------
@@ -565,6 +582,21 @@
     api("/api/setup/hooks", { method: "POST", body: { timeout_sec: timeout } })
       .then(function () { refreshStatus(); })
       .catch(function (err) { showError(err.message); });
+  });
+
+  // reasonix 三档：radio 变更即保存（sidecar 实时读配置，即时生效）；
+  // 失败时回退 radio 到已保存档位。
+  document.getElementsByName("rx-enforce").forEach(function (r) {
+    r.addEventListener("change", function () {
+      api("/api/reasonix/enforce-mode", { method: "POST", body: { mode: r.value } })
+        .then(function () {
+          if (state.status) state.status.rxEnforceMode = r.value;
+        })
+        .catch(function (err) {
+          showError("强制检查方式保存失败：" + err.message);
+          renderRxEnforce();
+        });
+    });
   });
 
   $("btn-skills").addEventListener("click", function () {

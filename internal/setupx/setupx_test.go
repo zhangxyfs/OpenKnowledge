@@ -49,6 +49,39 @@ func TestInstallWikiSkillContent(t *testing.T) {
 	}
 }
 
+// ReasonixEnforceMode/SaveReasonixEnforceMode：缺省 mixed，保存后可读回，非法值报错。
+func TestReasonixEnforceMode(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("OK_HOME", home)
+	if got := ReasonixEnforceMode(); got != "mixed" {
+		t.Errorf("缺省应为 mixed，got %q", got)
+	}
+	if err := SaveReasonixEnforceMode("soft"); err != nil {
+		t.Fatal(err)
+	}
+	if got := ReasonixEnforceMode(); got != "soft" {
+		t.Errorf("保存后应为 soft，got %q", got)
+	}
+	// 磁盘上确实写入 [reasonix] enforce_mode
+	data, err := os.ReadFile(filepath.Join(home, "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `enforce_mode = "soft"`) {
+		t.Errorf("config.toml 应含 enforce_mode = \"soft\"，实际:\n%s", data)
+	}
+	if err := SaveReasonixEnforceMode("歪值"); err == nil {
+		t.Error("非法值应报错")
+	}
+	// 非法值落盘时读回按 mixed
+	if err := SaveReasonixEnforceMode("hard"); err != nil {
+		t.Fatal(err)
+	}
+	if got := ReasonixEnforceMode(); got != "hard" {
+		t.Errorf("保存 hard 后应为 hard，got %q", got)
+	}
+}
+
 // propose 技能模板必须包含"先分类"指引与 wiki 覆盖提示的联动说明。
 func TestProposeSkillTemplateHasClassification(t *testing.T) {
 	tpl := skillTemplates["openknowledge-propose"]

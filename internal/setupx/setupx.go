@@ -126,6 +126,49 @@ func SaveHooksTimeout(sec int) error {
 	}
 	return nil
 }
+
+// ReasonixEnforceMode 返回 reasonix sidecar 的强制检查表达方式：
+// 全局配置 [reasonix] enforce_mode（soft|hard|mixed），缺省/非法按 mixed。
+func ReasonixEnforceMode() string {
+	cfg, err := config.LoadMerged("", filepath.Join(registry.Home(), "config.toml"))
+	if err != nil {
+		return "mixed"
+	}
+	switch cfg.Reasonix.EnforceMode {
+	case "soft", "hard":
+		return cfg.Reasonix.EnforceMode
+	default:
+		return "mixed"
+	}
+}
+
+// SaveReasonixEnforceMode 校验并写入全局配置 [reasonix] enforce_mode；
+// sidecar 每条输入实时读配置，即时生效。
+func SaveReasonixEnforceMode(mode string) error {
+	switch mode {
+	case "soft", "hard", "mixed":
+	default:
+		return fmt.Errorf("enforce_mode 必须是 soft|hard|mixed: %q", mode)
+	}
+	globalPath := filepath.Join(registry.Home(), "config.toml")
+	cfg, err := config.LoadMerged("", globalPath)
+	if err != nil {
+		return fmt.Errorf("全局配置读取失败: %w", err)
+	}
+	cfg.Reasonix.EnforceMode = mode
+	var buf strings.Builder
+	if err := toml.NewEncoder(&buf).Encode(cfg); err != nil {
+		return fmt.Errorf("全局配置编码失败: %w", err)
+	}
+	if err := os.MkdirAll(registry.Home(), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(globalPath, []byte(buf.String()), 0o600); err != nil {
+		return fmt.Errorf("全局配置写入失败: %w", err)
+	}
+	return nil
+}
+
 // TestEmbedding 以 10s 超时做 embedding 连通性检查。
 func TestEmbedding(baseURL, model, apiKey string) error {
 	client := &embed.OpenAIClient{BaseURL: baseURL, APIKey: apiKey, Model: model, Timeout: 10 * time.Second}

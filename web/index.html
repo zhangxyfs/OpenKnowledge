@@ -90,6 +90,15 @@
             </span>
           </div>
         </div>
+        <div class="card hidden" id="rx-enforce-card">
+          <div class="card-head"><h3>强制检查方式</h3></div>
+          <p class="card-desc muted">仅对 Reasonix 生效（sidecar 每条输入实时读取，改动即时生效）。auto 自省 = 经验沉淀提醒；changelog = 改了代码未更新日志的检查。</p>
+          <div class="card-desc">
+            <label><input type="radio" name="rx-enforce" value="mixed"> 软+硬（默认）：自省提醒、changelog 阻断输入</label><br>
+            <label><input type="radio" name="rx-enforce" value="soft"> 全软提示：都以前缀提醒，不打断输入</label><br>
+            <label><input type="radio" name="rx-enforce" value="hard"> 全硬阻断：都阻断输入</label>
+          </div>
+        </div>
         <div class="card">
           <div class="card-head"><h3>技能</h3><span id="badge-skills" class="badge badge-off">未配置</span></div>
           <p class="card-desc muted">6 个技能：init / on / off / propose / capture / wiki，装入共享目录，Kimi Code 与 Pi 均可读。</p>

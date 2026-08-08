@@ -67,6 +67,7 @@ func NewHandler(webDir, token string, beats chan<- struct{}) *Handler {
 	api("POST /api/setup/hooks", h.apiSetupHooks)
 	api("POST /api/setup/skills", h.apiSetupSkills)
 	api("POST /api/setup/embedding", h.apiSetupEmbedding)
+	api("POST /api/reasonix/enforce-mode", h.apiReasonixEnforceMode)
 	api("POST /api/toggle", h.apiToggle)
 	api("GET /api/changelog", h.apiChangelog)
 	api("POST /api/changelog/seen", h.apiChangelogSeen)
@@ -316,6 +317,7 @@ func (h *Handler) apiStatus(w http.ResponseWriter, _ *http.Request) {
 		"embeddingConfigured": embeddingConfigured,
 		"embedding":           embedding,
 		"hooksTimeout":        hooksTimeout,
+		"rxEnforceMode":       setupx.ReasonixEnforceMode(),
 		"disabled":            registry.HooksDisabled(),
 		"app_version":         version.Version,
 		"home":                registry.Home(),
@@ -861,6 +863,22 @@ func (h *Handler) apiSetupSkills(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "dirs": setupx.SkillDirs()})
+}
+
+// apiReasonixEnforceMode 保存 reasonix sidecar 的强制检查表达方式（soft|hard|mixed）。
+// sidecar 每条输入实时读配置，即时生效，无需重装插件。
+func (h *Handler) apiReasonixEnforceMode(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Mode string `json:"mode"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if err := setupx.SaveReasonixEnforceMode(req.Mode); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "mode": setupx.ReasonixEnforceMode()})
 }
 
 func (h *Handler) apiSetupEmbedding(w http.ResponseWriter, r *http.Request) {

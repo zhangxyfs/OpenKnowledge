@@ -848,6 +848,58 @@ func TestCaptureRoundTrip(t *testing.T) {
 	}
 }
 
+// reasonix 三档：status 暴露 rxEnforceMode（缺省 mixed）；POST 保存后 status 反映；
+// 非法值 400 且不落盘。
+func TestReasonixEnforceModeAPI(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	// 缺省 mixed
+	code, data := do(t, "GET", srv.URL+"/api/status", testToken, nil)
+	if code != 200 {
+		t.Fatalf("status = %d, body %s", code, data)
+	}
+	if !strings.Contains(string(data), `"rxEnforceMode":"mixed"`) {
+		t.Fatalf("status 默认应为 mixed: %s", data)
+	}
+
+	// 保存 hard → status 反映；config.toml 落盘
+	code, data = do(t, "POST", srv.URL+"/api/reasonix/enforce-mode", testToken, map[string]any{"mode": "hard"})
+	if code != 200 {
+		t.Fatalf("保存失败: %d %s", code, data)
+	}
+	if !strings.Contains(string(data), `"mode":"hard"`) {
+		t.Fatalf("响应应回显 hard: %s", data)
+	}
+	cfgData, err := os.ReadFile(filepath.Join(okHome, "config.toml"))
+	if err != nil {
+		t.Fatalf("全局配置应已落盘: %v", err)
+	}
+	if !strings.Contains(string(cfgData), `enforce_mode = "hard"`) {
+		t.Fatalf("config.toml 应含 enforce_mode = \"hard\":\n%s", cfgData)
+	}
+	_, data = do(t, "GET", srv.URL+"/api/status", testToken, nil)
+	if !strings.Contains(string(data), `"rxEnforceMode":"hard"`) {
+		t.Fatalf("status 应反映 hard: %s", data)
+	}
+
+	// 非法值 → 400，且不改动已保存的 hard
+	code, _ = do(t, "POST", srv.URL+"/api/reasonix/enforce-mode", testToken, map[string]any{"mode": "歪"})
+	if code != 400 {
+		t.Fatalf("非法值应 400，got %d", code)
+	}
+	_, data = do(t, "GET", srv.URL+"/api/status", testToken, nil)
+	if !strings.Contains(string(data), `"rxEnforceMode":"hard"`) {
+		t.Fatalf("非法保存不应改动配置: %s", data)
+	}
+
+	// 鉴权：无令牌 → 401
+	if code, _ := do(t, "POST", srv.URL+"/api/reasonix/enforce-mode", "", map[string]any{"mode": "soft"}); code != 401 {
+		t.Fatalf("无令牌应 401，got %d", code)
+	}
+}
+
 func TestStatusVersionAndHome(t *testing.T) {
 	h, _, _ := newEnv(t)
 	srv := httptest.NewServer(h)
