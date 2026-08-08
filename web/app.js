@@ -60,6 +60,10 @@
       .replace(/"/g, "&quot;");
   }
 
+  // 条目类型显示名：存储值固定英文（frontmatter/API 不变），界面显示中文。
+  var TYPE_LABELS = { rule: "规则", pitfall: "踩坑", note: "笔记", reference: "参考" };
+  function typeLabel(t) { return TYPE_LABELS[t] || t || ""; }
+
   // ---------- 选项卡 ----------
 
   function switchTab(name) {
@@ -258,7 +262,7 @@
         '<td class="muted">' + fmtTime(e.mtime) + "</td>" +
         '<td>' + (entryBranch(e) ? '<span class="badge badge-branch">⎇ ' + esc(entryBranch(e)) + "</span>" : "") + "</td>" +
         "<td>" + esc(e.title) + (e.draft ? ' <span class="badge badge-draft">草稿</span>' : "") + "</td>" +
-        "<td>" + esc(e.type) + "</td>" +
+        "<td>" + esc(typeLabel(e.type)) + "</td>" +
         "<td>" + esc((e.tags || []).join(", ")) + "</td>" +
         "<td>" + (e.mandatory ? "✓" : "") + "</td>" +
         "<td>" + esc(e.summary) + "</td>" +
