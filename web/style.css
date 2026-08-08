@@ -170,7 +170,7 @@ input:focus, select:focus, textarea:focus {
 .entries th { background: #f0f1f4; font-weight: 600; white-space: nowrap; }
 .entries tr:last-child td { border-bottom: none; }
 .entries tr.hit-row td { background: #fef9c3; }
-.entries td:nth-child(5) { max-width: 320px; }
+.entries td:nth-child(7) { max-width: 320px; }
 
 .ops { white-space: nowrap; }
 .ops button {
@@ -182,6 +182,18 @@ input:focus, select:focus, textarea:focus {
   padding: 0 2px;
 }
 .ops button:hover { text-decoration: underline; }
+
+/* 分支列 + 可横滑表格：内容区可滑，操作列 sticky 固定 */
+.entries-wrap { overflow-x: auto; }
+.entries { min-width: 960px; }
+.entries th.ops, .entries td.ops {
+  position: sticky;
+  right: 0;
+  background: #fff;
+  box-shadow: -4px 0 6px -4px rgba(0,0,0,.12);
+}
+.entries thead th.ops { background: #f0f1f4; z-index: 2; }
+.badge-branch { background: #e0e7ff; color: #3730a3; border-radius: 4px; padding: 1px 6px; font-size: 12px; white-space: nowrap; }
 
 /* ---------- 引导页卡片 ---------- */
 

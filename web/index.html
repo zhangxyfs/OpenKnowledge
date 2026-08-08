@@ -38,25 +38,33 @@
             <option value="draft">仅草稿</option>
           </select>
         </label>
+        <label>分支
+          <select id="branch-filter">
+            <option value="">全部</option>
+          </select>
+        </label>
         <input id="search-input" type="search" placeholder="搜索条目…" autocomplete="off">
         <button id="btn-new" type="button" class="btn btn-primary">新建</button>
         <button id="btn-refresh" type="button" class="btn" title="刷新列表（数据库变更时也会自动刷新）">刷新</button>
       </div>
       <div id="search-results" class="search-results hidden"></div>
+      <div class="entries-wrap">
       <table class="entries">
         <thead>
           <tr>
             <th id="th-time" class="sortable" title="点击切换排序方向">时间 <span id="time-arrow">↓</span></th>
+            <th>分支</th>
             <th>标题</th>
             <th>类型</th>
             <th>tags</th>
             <th>mandatory</th>
             <th>摘要</th>
-            <th>操作</th>
+            <th class="ops">操作</th>
           </tr>
         </thead>
         <tbody id="entries-body"></tbody>
       </table>
+      </div>
       <div id="entries-footer" class="entries-footer">
         <span id="entries-total" class="muted"></span>
         <span class="pager">

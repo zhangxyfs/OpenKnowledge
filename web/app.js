@@ -11,6 +11,7 @@
     readOnly: false,
     hitFiles: null, // 搜索命中的条目 file 集合；null 表示无搜索高亮
     typeFilter: "", // "" = 全部；"draft" = 仅草稿；其余按条目类型过滤
+    branchFilter: "", // "" = 全部；选中后 = 共享条目（无 branch 标签）∪ branch:<名> 条目
     sortDir: "desc", // 时间排序方向：desc 新→旧 / asc 旧→新
     page: 1,
     pageSize: 20,
@@ -133,9 +134,16 @@
     state.project = this.value;
     state.page = 1;
     state.lastVersion = 0;
+    renderBranchFilter(); // 项目切换：先按现有条目重聚合分支选项（loadEntries 完成后会再次聚合）
     loadEntries();
     runSearch();
     refreshCapture();
+  });
+
+  $("branch-filter").addEventListener("change", function () {
+    state.branchFilter = this.value;
+    state.page = 1;
+    renderEntries();
   });
 
   $("type-filter").addEventListener("change", function () {
@@ -169,6 +177,7 @@
     if (!state.project) return;
     api("/api/entries?project=" + encodeURIComponent(state.project)).then(function (list) {
       state.entries = list || [];
+      renderBranchFilter(); // 分支选项随条目（含项目切换）重新聚合
       renderEntries();
     }).catch(function (err) { showError(err.message); });
   }
@@ -181,13 +190,46 @@
       " " + p(d.getHours()) + ":" + p(d.getMinutes());
   }
 
+  // entryBranch 提取条目的分支标签（branch:<名>，第一个）；无则空串
+  function entryBranch(e) {
+    var tags = e.tags || [];
+    for (var i = 0; i < tags.length; i++) {
+      if (tags[i].indexOf("branch:") === 0) return tags[i].slice(7);
+    }
+    return "";
+  }
+
+  // renderBranchFilter 按当前项目条目聚合分支选项（项目切换时重聚合，联动）
+  function renderBranchFilter() {
+    var sel = $("branch-filter");
+    if (!sel) return;
+    var seen = {};
+    (state.entries || []).forEach(function (e) {
+      var b = entryBranch(e);
+      if (b) seen[b] = true;
+    });
+    var cur = state.branchFilter || "";
+    sel.innerHTML = '<option value="">全部</option>';
+    Object.keys(seen).sort().forEach(function (b) {
+      var o = document.createElement("option");
+      o.value = b;
+      o.textContent = b;
+      sel.appendChild(o);
+    });
+    if (cur && seen[cur]) sel.value = cur; else { state.branchFilter = ""; sel.value = ""; }
+  }
+
   function renderEntries() {
     var tbody = $("entries-body");
     tbody.innerHTML = "";
-    // 类型过滤（draft 选项只看草稿）
+    // 类型过滤（draft 选项只看草稿）+ 分支过滤（选中分支 = 共享条目 ∪ 该分支条目）
     var list = state.entries.filter(function (e) {
-      if (state.typeFilter === "draft") return e.draft;
-      if (state.typeFilter) return e.type === state.typeFilter;
+      if (state.typeFilter === "draft" && !e.draft) return false;
+      if (state.typeFilter && state.typeFilter !== "draft" && e.type !== state.typeFilter) return false;
+      if (state.branchFilter) {
+        var b = entryBranch(e);
+        if (b !== "" && b !== state.branchFilter) return false;
+      }
       return true;
     });
     $("entries-empty").classList.toggle("hidden", list.length > 0);
@@ -214,6 +256,7 @@
       if (state.hitFiles && state.hitFiles[e.file]) tr.classList.add("hit-row");
       tr.innerHTML =
         '<td class="muted">' + fmtTime(e.mtime) + "</td>" +
+        '<td>' + (entryBranch(e) ? '<span class="badge badge-branch">⎇ ' + esc(entryBranch(e)) + "</span>" : "") + "</td>" +
         "<td>" + esc(e.title) + (e.draft ? ' <span class="badge badge-draft">草稿</span>' : "") + "</td>" +
         "<td>" + esc(e.type) + "</td>" +
         "<td>" + esc((e.tags || []).join(", ")) + "</td>" +
