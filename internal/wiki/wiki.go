@@ -49,6 +49,62 @@ func SaveCursor(stateDir string, c *Cursor) error {
 	return os.WriteFile(CursorPath(stateDir), data, 0o644)
 }
 
+// BranchCursor 单分支游标（字段语义同旧 Cursor）。
+type BranchCursor struct {
+	LastCommit  string    `json:"last_commit"`
+	GeneratedAt time.Time `json:"generated_at"`
+	EntryCount  int       `json:"entry_count,omitempty"`
+}
+
+// State 是 wiki.json 的新格式：基准分支 + 按分支游标表。
+// Legacy 承载旧格式（顶层 last_commit）的惰性迁移：LoadState 识别后挂在此处、
+// 不落盘；归属判定（git 可达性）由 CheckStatus 完成（见 status.go）。
+type State struct {
+	BaseBranch string                  `json:"base_branch,omitempty"`
+	Cursors    map[string]BranchCursor `json:"cursors,omitempty"`
+	Legacy     *BranchCursor           `json:"-"`
+}
+
+// LoadState 读 wiki.json：不存在/损坏返回 nil；旧格式（顶层 last_commit 且
+// 无 cursors）升级为 State{Legacy}，归属待 CheckStatus 判定。
+func LoadState(stateDir string) *State {
+	data, err := os.ReadFile(CursorPath(stateDir))
+	if err != nil {
+		return nil
+	}
+	var disk struct {
+		BaseBranch  string                  `json:"base_branch"`
+		Cursors     map[string]BranchCursor `json:"cursors"`
+		LastCommit  string                  `json:"last_commit"`
+		GeneratedAt time.Time               `json:"generated_at"`
+		EntryCount  int                     `json:"entry_count"`
+	}
+	if json.Unmarshal(data, &disk) != nil {
+		return nil
+	}
+	s := &State{BaseBranch: disk.BaseBranch, Cursors: disk.Cursors}
+	if disk.Cursors == nil && disk.LastCommit != "" {
+		s.Legacy = &BranchCursor{
+			LastCommit:  disk.LastCommit,
+			GeneratedAt: disk.GeneratedAt,
+			EntryCount:  disk.EntryCount,
+		}
+	}
+	return s
+}
+
+// SaveState 以新格式写 wiki.json（Legacy 不落盘）。
+func SaveState(stateDir string, s *State) error {
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(s, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(CursorPath(stateDir), data, 0o644)
+}
+
 // Status 是 ok wiki status 的结果。Behind=-1 表示 git 不可用。
 type Status struct {
 	HasWiki    bool   `json:"has_wiki"`

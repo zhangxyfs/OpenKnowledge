@@ -1,6 +1,7 @@
 package wiki
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -103,6 +104,70 @@ func TestCheckStatusBehind(t *testing.T) {
 	st := CheckStatus(stateDir, repo, 2)
 	if !st.HasWiki || st.LastCommit != head || st.Behind != 2 || !st.Stale {
 		t.Fatalf("behind: %+v", st)
+	}
+}
+
+func TestStateRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	s := &State{
+		BaseBranch: "master",
+		Cursors: map[string]BranchCursor{
+			"master": {LastCommit: "abc123", GeneratedAt: time.Date(2026, 8, 8, 1, 0, 0, 0, time.UTC), EntryCount: 15},
+			"dev":    {LastCommit: "def456", GeneratedAt: time.Date(2026, 8, 8, 2, 0, 0, 0, time.UTC), EntryCount: 3},
+		},
+	}
+	if err := SaveState(dir, s); err != nil {
+		t.Fatal(err)
+	}
+	got := LoadState(dir)
+	if got == nil || got.BaseBranch != "master" || len(got.Cursors) != 2 {
+		t.Fatalf("回环失败: %+v", got)
+	}
+	if got.Cursors["dev"].LastCommit != "def456" || got.Cursors["master"].EntryCount != 15 {
+		t.Errorf("游标内容错位: %+v", got.Cursors)
+	}
+	if got.Legacy != nil {
+		t.Errorf("新格式不得带 Legacy: %+v", got.Legacy)
+	}
+	// 落盘文本不得含旧顶层字段
+	data, _ := os.ReadFile(filepath.Join(dir, "wiki.json"))
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := raw["last_commit"]; ok {
+		t.Errorf("新格式不应含顶层 last_commit: %s", data)
+	}
+}
+
+func TestLoadStateLegacyDetected(t *testing.T) {
+	dir := t.TempDir()
+	legacy := `{"last_commit":"d9f495c","generated_at":"2026-08-08T09:36:47+08:00","entry_count":15}`
+	if err := os.WriteFile(filepath.Join(dir, "wiki.json"), []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := LoadState(dir)
+	if got == nil || got.Legacy == nil {
+		t.Fatalf("旧格式应识别为 Legacy: %+v", got)
+	}
+	if got.Legacy.LastCommit != "d9f495c" || got.Legacy.EntryCount != 15 {
+		t.Errorf("Legacy 内容错误: %+v", got.Legacy)
+	}
+	if got.Cursors != nil || got.BaseBranch != "" {
+		t.Errorf("Legacy 未判归属前 Cursors/BaseBranch 应为空: %+v", got)
+	}
+}
+
+func TestLoadStateMissingAndCorrupt(t *testing.T) {
+	if LoadState(t.TempDir()) != nil {
+		t.Error("不存在应返回 nil")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "wiki.json"), []byte("{坏"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if LoadState(dir) != nil {
+		t.Error("损坏应返回 nil")
 	}
 }
 
