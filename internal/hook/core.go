@@ -21,6 +21,7 @@ import (
 	"openknowledge/internal/retrieve"
 	"openknowledge/internal/state"
 	"openknowledge/internal/store"
+	"openknowledge/internal/wiki"
 )
 
 // InjectForPrompt 组装 prompt 注入文本：会话首次基础注入（mandatory 全文 + 索引）
@@ -112,7 +113,13 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 		b.WriteString("\n")
 	}
 	out := store.TruncateToBudget(b.String(), pc.Config.Inject.MaxTokens)
-	if nudge := wikiNudge(pc, st, cwd); nudge != "" {
+	// CheckStatus 只算一次：分支上下文行（注入开头）与 nudge（末尾）共用同一份 Status。
+	threshold := pc.Config.Wiki.StaleCommits
+	ws := wiki.CheckStatus(pc.Store.StateDir(), cwd, threshold)
+	if line := wikiContextLine(ws); line != "" && strings.TrimSpace(out) != "" {
+		out = line + "\n" + out
+	}
+	if nudge := wikiNudge(pc, st, ws); nudge != "" {
 		out += nudge
 	}
 	return out

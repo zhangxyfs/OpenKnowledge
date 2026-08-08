@@ -237,23 +237,59 @@ func HandleStop(r io.Reader, stderr, stdout io.Writer, format string) int {
 	return 0
 }
 
-// wikiNudge 返回 wiki 落后提示（每会话最多一次，预算外放行）；不适用返回空串。
-// fail-open：git 不可用/非 git 项目时 CheckStatus 不 stale，自然无提示。
-func wikiNudge(pc *project.Context, st *state.Session, cwd string) string {
-	threshold := pc.Config.Wiki.StaleCommits
-	if threshold <= 0 || st.WikiNudged {
+// wikiNudge 返回 wiki 提示（每会话最多一次，预算外放行）；不适用返回空串。
+// fail-open：git 不可用/非 git 项目时 Status 不带分支状态，自然无提示。
+func wikiNudge(pc *project.Context, st *state.Session, s *wiki.Status) string {
+	if st.WikiNudged {
 		return ""
 	}
-	s := wiki.CheckStatus(pc.Store.StateDir(), cwd, threshold)
-	if !s.Stale {
+	// gone/legacy_orphan 不受 stale_commits 阈值门控（游标失效与落后计数无关，
+	// 必须尽快告知）；无 wiki/落后提示维持 threshold <= 0 即关闭的旧语义。
+	threshold := pc.Config.Wiki.StaleCommits
+	if threshold <= 0 && s.BranchState != "gone" && s.BranchState != "legacy_orphan" {
+		return ""
+	}
+	var msg string
+	switch {
+	case s.BranchState == "gone":
+		msg = "[OpenKnowledge] wiki 游标失效（分支可能被改写），建议在生成 wiki 的分支上重新运行 openknowledge-wiki 技能。"
+	case s.BranchState == "legacy_orphan":
+		msg = "[OpenKnowledge] wiki 游标与当前分支分叉、无法确认归属；请在生成 wiki 的分支上运行 openknowledge-wiki 技能。"
+	case !s.HasWiki && s.Stale:
+		msg = "[OpenKnowledge] 本项目还没有 wiki，建议用 openknowledge-wiki 技能生成项目 wiki（含架构、模块与演进历史）。"
+	case s.HasWiki && s.Stale:
+		msg = fmt.Sprintf("[OpenKnowledge] wiki 已落后 %d 个 commit，建议用 openknowledge-wiki 技能增量更新。", s.Behind)
+	default:
 		return ""
 	}
 	st.WikiNudged = true
 	if err := st.Save(pc.Store.StateDir()); err != nil {
 		logErr("prompt save state: %v", err)
 	}
-	if !s.HasWiki {
-		return "\n[OpenKnowledge] 本项目还没有 wiki，建议用 openknowledge-wiki 技能生成项目 wiki（含架构、模块与演进历史）。\n"
+	return "\n" + msg + "\n"
+}
+
+// wikiContextLine 返回 standing 分支上下文行：当前分支有 wiki 内容注入、
+// 但 wiki 基准不在本分支时提示出处；基准分支/无 wiki/非 git 返回空串。
+func wikiContextLine(s *wiki.Status) string {
+	if !s.HasWiki || s.Branch == "" || s.BaseBranch == "" || s.Branch == s.BaseBranch {
+		return ""
 	}
-	return fmt.Sprintf("\n[OpenKnowledge] wiki 已落后 %d 个 commit，建议用 openknowledge-wiki 技能增量更新。\n", s.Behind)
+	short := s.LastCommit
+	if len(short) > 7 {
+		short = short[:7]
+	}
+	switch s.BranchState {
+	case "diverged":
+		mb := s.MergeBase
+		if len(mb) > 7 {
+			mb = mb[:7]
+		}
+		return fmt.Sprintf("[OpenKnowledge] wiki 基于 %s@%s；当前分支 %s（分叉点 %s），结构描述可能与当前分支不符。\n",
+			s.BaseBranch, short, s.Branch, mb)
+	case "no_cursor":
+		return fmt.Sprintf("[OpenKnowledge] wiki 基于 %s@%s；当前分支 %s 尚无基线，结构描述以 %s 为准。\n",
+			s.BaseBranch, short, s.Branch, s.BaseBranch)
+	}
+	return ""
 }

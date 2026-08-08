@@ -11,6 +11,7 @@ import (
 
 	"openknowledge/internal/registry"
 	"openknowledge/internal/state"
+	"openknowledge/internal/wiki"
 )
 
 // TestMain 隔离 KIMI_CODE_HOME 与 PI_CODING_AGENT_DIR：HandlePrompt 的 hooks 自愈
@@ -476,6 +477,7 @@ message = "请补变更日志"
 }
 
 // initGitRepo 在项目目录初始化 git 并提交 n 个 commit（供 wiki 落后提示测试）。
+// 显式 -b master：分支上下文测试依赖基准分支名，不随本机 init.defaultBranch 漂移。
 func initGitRepo(t *testing.T, dir string, n int) {
 	t.Helper()
 	env := append(os.Environ(),
@@ -489,7 +491,7 @@ func initGitRepo(t *testing.T, dir string, n int) {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
-	run("init")
+	run("init", "-b", "master")
 	for i := 0; i < n; i++ {
 		if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte{byte(i)}, 0o644); err != nil {
 			t.Fatal(err)
@@ -497,6 +499,26 @@ func initGitRepo(t *testing.T, dir string, n int) {
 		run("add", ".")
 		run("commit", "-m", "c")
 	}
+}
+
+// runGit 在 dir 执行 git 命令（initGitRepo 的 run 是闭包不可复用，提为文件级）。
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+// gitHead 返回 dir 的 HEAD 完整 hash。
+func gitHead(t *testing.T, dir string) string {
+	t.Helper()
+	h, err := wiki.HeadCommit(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return h
 }
 
 const wikiNudgeHint = "本项目还没有 wiki"
@@ -562,5 +584,69 @@ func TestPromptWikiNudgeNonGitSilent(t *testing.T) {
 	}
 	if strings.Contains(out.String(), wikiNudgeHint) {
 		t.Fatalf("non-git project must not nudge: %q", out.String())
+	}
+}
+
+func TestPromptWikiBranchContextOnDiverged(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	initGitRepo(t, projDir, 2)
+	runGit(t, projDir, "checkout", "-q", "-b", "dev") // 切到 dev：master 游标对 dev 为 no_cursor
+	head := gitHead(t, projDir)
+	// 游标记在 master（dev 上无基线）
+	st := &wiki.State{BaseBranch: "master", Cursors: map[string]wiki.BranchCursor{"master": {LastCommit: head}}}
+	if err := wiki.SaveState(filepath.Join(kbRoot, "state"), st); err != nil {
+		t.Fatal(err)
+	}
+	writeEntry(t, kbRoot, "条目.md", "---\ntitle: 测试条目\ntype: note\ntags: []\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\n正文含线索词 BranchCue。\n")
+	in := fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":"BranchCue"}`, projDir)
+	var out bytes.Buffer
+	if code := HandlePrompt(strings.NewReader(in), &out, ""); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	got := out.String()
+	if !strings.Contains(got, "[OpenKnowledge] wiki 基于 master@") || !strings.Contains(got, "当前分支 dev") {
+		t.Errorf("分叉/无基线分支应附上下文行: %q", got)
+	}
+	if !strings.Contains(got, "测试条目") {
+		t.Errorf("注入主流程不应受影响: %q", got)
+	}
+}
+
+func TestPromptWikiNoContextOnBaseBranch(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	initGitRepo(t, projDir, 2)
+	head := gitHead(t, projDir)
+	st := &wiki.State{BaseBranch: "master", Cursors: map[string]wiki.BranchCursor{"master": {LastCommit: head}}}
+	if err := wiki.SaveState(filepath.Join(kbRoot, "state"), st); err != nil {
+		t.Fatal(err)
+	}
+	writeEntry(t, kbRoot, "条目.md", "---\ntitle: 测试条目\ntype: note\ntags: []\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\n正文含线索词 BranchCue。\n")
+	in := fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":"BranchCue"}`, projDir)
+	var out bytes.Buffer
+	if code := HandlePrompt(strings.NewReader(in), &out, ""); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if strings.Contains(out.String(), "当前分支") {
+		t.Errorf("基准分支不得出现分支上下文行（零回归）: %q", out.String())
+	}
+}
+
+func TestPromptWikiGoneNudge(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	initGitRepo(t, projDir, 1)
+	if err := os.WriteFile(filepath.Join(kbRoot, "config.toml"), []byte("[wiki]\nstale_commits = 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st := &wiki.State{BaseBranch: "master", Cursors: map[string]wiki.BranchCursor{"master": {LastCommit: "0123456789abcdef0123456789abcdef01234567"}}}
+	if err := wiki.SaveState(filepath.Join(kbRoot, "state"), st); err != nil {
+		t.Fatal(err)
+	}
+	in := fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":"hello"}`, projDir)
+	var out bytes.Buffer
+	if code := HandlePrompt(strings.NewReader(in), &out, ""); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if !strings.Contains(out.String(), "游标失效") {
+		t.Errorf("失效态应提示: %q", out.String())
 	}
 }
