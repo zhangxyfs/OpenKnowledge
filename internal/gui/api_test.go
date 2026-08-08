@@ -30,6 +30,7 @@ func newEnv(t *testing.T) (*Handler, string, string) {
 	t.Setenv("OK_SKILLS_HOME", t.TempDir())
 	t.Setenv("PI_CODING_AGENT_DIR", t.TempDir())
 	t.Setenv("OK_ZCODE_HOME", filepath.Join(t.TempDir(), "nonexistent-zcode"))
+	t.Setenv("OK_REASONIX_HOME", filepath.Join(t.TempDir(), "nonexistent-reasonix"))
 	webDir := t.TempDir()
 	files := map[string]string{
 		"index.html":  "<html>token={{TOKEN}}</html>",
@@ -117,8 +118,8 @@ func TestStatusEmptyRegistry(t *testing.T) {
 	if len(res.Projects) != 0 {
 		t.Fatalf("expected empty projects, got %v", res.Projects)
 	}
-	if len(res.Agents) != 3 {
-		t.Fatalf("expected 3 agents, got %d: %s", len(res.Agents), data)
+	if len(res.Agents) != 4 {
+		t.Fatalf("expected 4 agents, got %d: %s", len(res.Agents), data)
 	}
 	if res.SkillsInstalled || res.EmbeddingConfigured || res.Disabled {
 		t.Fatalf("expected flags false, got %+v", res)

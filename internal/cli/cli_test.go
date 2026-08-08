@@ -33,6 +33,7 @@ func TestInitAddSearchList(t *testing.T) {
 	t.Setenv("KIMI_CODE_HOME", filepath.Join(home, "kimi"))
 	t.Setenv("PI_CODING_AGENT_DIR", t.TempDir())
 	t.Setenv("OK_ZCODE_HOME", filepath.Join(t.TempDir(), "nonexistent-zcode"))
+	t.Setenv("OK_REASONIX_HOME", filepath.Join(t.TempDir(), "nonexistent-reasonix"))
 	// KIMI_CODE_HOME 目录需存在（模拟已安装 kimi），否则 agent 检测为假、init 跳过 hooks 写入
 	if err := os.MkdirAll(filepath.Join(home, "kimi"), 0o755); err != nil {
 		t.Fatal(err)
@@ -123,6 +124,7 @@ func TestInitDefaultsToDirBaseName(t *testing.T) {
 	t.Setenv("KIMI_CODE_HOME", filepath.Join(home, "kimi")) // 隔离真实 kimi 配置，Init 会写 hooks
 	t.Setenv("PI_CODING_AGENT_DIR", t.TempDir())
 	t.Setenv("OK_ZCODE_HOME", filepath.Join(t.TempDir(), "nonexistent-zcode"))
+	t.Setenv("OK_REASONIX_HOME", filepath.Join(t.TempDir(), "nonexistent-reasonix"))
 	proj := filepath.Join(home, "myproj")
 	if err := os.MkdirAll(proj, 0o755); err != nil {
 		t.Fatal(err)
@@ -151,6 +153,7 @@ func TestIndexRebuildsIndexWithoutAPIKey(t *testing.T) {
 	t.Setenv("KIMI_CODE_HOME", filepath.Join(home, "kimi")) // 隔离真实 kimi 配置，Init 会写 hooks
 	t.Setenv("PI_CODING_AGENT_DIR", t.TempDir())
 	t.Setenv("OK_ZCODE_HOME", filepath.Join(t.TempDir(), "nonexistent-zcode"))
+	t.Setenv("OK_REASONIX_HOME", filepath.Join(t.TempDir(), "nonexistent-reasonix"))
 	t.Setenv("OPENAI_API_KEY", "")
 	proj := filepath.Join(home, "demo")
 	if err := os.MkdirAll(proj, 0o755); err != nil {
@@ -191,6 +194,7 @@ func TestWikiStatusAndMark(t *testing.T) {
 	t.Setenv("KIMI_CODE_HOME", filepath.Join(home, "kimi"))
 	t.Setenv("PI_CODING_AGENT_DIR", t.TempDir())
 	t.Setenv("OK_ZCODE_HOME", filepath.Join(t.TempDir(), "nonexistent-zcode"))
+	t.Setenv("OK_REASONIX_HOME", filepath.Join(t.TempDir(), "nonexistent-reasonix"))
 	t.Setenv("OPENAI_API_KEY", "") // 防止真实网络调用，保证测试离线
 	// 在临时 git 仓库里跑（cwd 即项目）
 	repo := t.TempDir()
@@ -262,6 +266,7 @@ func TestAddSummaryFlag(t *testing.T) {
 	t.Setenv("KIMI_CODE_HOME", filepath.Join(home, "kimi")) // 隔离真实 kimi 配置，Init 会写 hooks
 	t.Setenv("PI_CODING_AGENT_DIR", t.TempDir())
 	t.Setenv("OK_ZCODE_HOME", filepath.Join(t.TempDir(), "nonexistent-zcode"))
+	t.Setenv("OK_REASONIX_HOME", filepath.Join(t.TempDir(), "nonexistent-reasonix"))
 	t.Setenv("OPENAI_API_KEY", "") // 防止真实网络调用，保证测试离线
 	proj := filepath.Join(home, "demo")
 	if err := os.MkdirAll(proj, 0o755); err != nil {
@@ -306,6 +311,7 @@ func TestAddForceOverwrites(t *testing.T) {
 	t.Setenv("KIMI_CODE_HOME", filepath.Join(home, "kimi")) // 隔离真实 kimi 配置，Init 会写 hooks
 	t.Setenv("PI_CODING_AGENT_DIR", t.TempDir())
 	t.Setenv("OK_ZCODE_HOME", filepath.Join(t.TempDir(), "nonexistent-zcode"))
+	t.Setenv("OK_REASONIX_HOME", filepath.Join(t.TempDir(), "nonexistent-reasonix"))
 	t.Setenv("OPENAI_API_KEY", "") // 防止真实网络调用，保证测试离线
 	proj := filepath.Join(home, "demo")
 	if err := os.MkdirAll(proj, 0o755); err != nil {

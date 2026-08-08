@@ -23,6 +23,7 @@ func setupUninstallEnv(t *testing.T) (kimiHome, okHome string) {
 	t.Setenv("OK_SKILLS_HOME", t.TempDir())
 	t.Setenv("PI_CODING_AGENT_DIR", t.TempDir())
 	t.Setenv("OK_ZCODE_HOME", filepath.Join(t.TempDir(), "nonexistent-zcode"))
+	t.Setenv("OK_REASONIX_HOME", filepath.Join(t.TempDir(), "nonexistent-reasonix"))
 
 	// kimi config：用户内容 + 标记块 + 用户内容
 	kimiCfg := "default_model = \"kimi\"\n\n" + agentx.MarkerBegin + "\n[[hooks]]\nevent = \"Stop\"\n" + agentx.MarkerEnd + "\n\n[providers]\n"

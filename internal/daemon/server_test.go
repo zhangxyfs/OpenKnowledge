@@ -24,6 +24,7 @@ func setupProject(t *testing.T) string {
 	t.Setenv("KIMI_CODE_HOME", filepath.Join(home, "kimi"))
 	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(home, "pi"))
 	t.Setenv("OK_ZCODE_HOME", filepath.Join(t.TempDir(), "nonexistent-zcode"))
+	t.Setenv("OK_REASONIX_HOME", filepath.Join(t.TempDir(), "nonexistent-reasonix"))
 	t.Setenv("OPENAI_API_KEY", "")
 	proj := filepath.Join(home, "demo")
 	if err := os.MkdirAll(proj, 0o755); err != nil {
