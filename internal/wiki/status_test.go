@@ -162,6 +162,45 @@ func TestCheckStatusLegacyOrphan(t *testing.T) {
 	}
 }
 
+func TestCheckStatusLegacyEmptyCommit(t *testing.T) {
+	// 非 git 项目旧版 mark 写空 last_commit：键存在即旧格式，走旧行为路径
+	legacy := `{"last_commit":"","generated_at":"2026-08-08T09:00:00+08:00","entry_count":3}`
+	cases := map[string]func(t *testing.T) string{
+		"非 git 目录": func(t *testing.T) string { return t.TempDir() },
+		"git 仓库":   func(t *testing.T) string { return initRepo(t, 1) },
+	}
+	for name, mkSrc := range cases {
+		t.Run(name, func(t *testing.T) {
+			sd := t.TempDir()
+			if err := os.WriteFile(filepath.Join(sd, "wiki.json"), []byte(legacy), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			s := LoadState(sd)
+			if s == nil || s.Legacy == nil || s.Legacy.LastCommit != "" {
+				t.Fatalf("空 last_commit 旧格式应挂 Legacy（空串）: %+v", s)
+			}
+			st := CheckStatus(sd, mkSrc(t), 1)
+			if !st.HasWiki || st.Behind != -1 || st.BranchState != "" {
+				t.Fatalf("空 commit legacy 应走旧行为路径: %+v", st)
+			}
+		})
+	}
+}
+
+func TestCheckStatusLegacyCommitMissing(t *testing.T) {
+	// Legacy 指向不存在的 commit（40 位假 hash）→ 旧行为路径
+	dir := initRepo(t, 1)
+	sd := t.TempDir()
+	legacy := `{"last_commit":"deadbeefdeadbeefdeadbeefdeadbeefdeadbeef","generated_at":"2026-08-08T09:00:00+08:00","entry_count":3}`
+	if err := os.WriteFile(filepath.Join(sd, "wiki.json"), []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st := CheckStatus(sd, dir, 1)
+	if !st.HasWiki || st.Behind != -1 || st.BranchState != "" {
+		t.Fatalf("commit 不存在的 legacy 应走旧行为路径: %+v", st)
+	}
+}
+
 func headOfAt(t *testing.T, dir, rev string) string {
 	t.Helper()
 	cmd := exec.Command("git", "-C", dir, "rev-parse", rev)

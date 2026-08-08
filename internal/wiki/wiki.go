@@ -75,7 +75,7 @@ func LoadState(stateDir string) *State {
 	var disk struct {
 		BaseBranch  string                  `json:"base_branch"`
 		Cursors     map[string]BranchCursor `json:"cursors"`
-		LastCommit  string                  `json:"last_commit"`
+		LastCommit  *string                 `json:"last_commit"` // 键存在即旧格式（含空值：非 git mark 的时间戳游标）
 		GeneratedAt time.Time               `json:"generated_at"`
 		EntryCount  int                     `json:"entry_count"`
 	}
@@ -83,9 +83,9 @@ func LoadState(stateDir string) *State {
 		return nil
 	}
 	s := &State{BaseBranch: disk.BaseBranch, Cursors: disk.Cursors}
-	if disk.Cursors == nil && disk.LastCommit != "" {
+	if disk.Cursors == nil && disk.LastCommit != nil {
 		s.Legacy = &BranchCursor{
-			LastCommit:  disk.LastCommit,
+			LastCommit:  *disk.LastCommit,
 			GeneratedAt: disk.GeneratedAt,
 			EntryCount:  disk.EntryCount,
 		}
@@ -145,6 +145,10 @@ func CheckStatus(stateDir, srcDir string, threshold int) *Status {
 			// git 不可判：保持旧行为（直接用 legacy 算，失败则 Behind=-1）
 			st.HasWiki = true
 			st.LastCommit = lc
+			if lc == "" {
+				// 空游标（非 git mark 的时间戳游标）：旧版提前返回，不算 behind
+				return st
+			}
 			if n, err := countCommits(srcDir, lc+"..HEAD"); err == nil {
 				st.Behind = n
 				st.Stale = threshold > 0 && n >= threshold
