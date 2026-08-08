@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"openknowledge/internal/procx"
 )
@@ -121,6 +122,75 @@ func TestCheckStatusNoCursor(t *testing.T) {
 	}
 	if st.LastCommit != master {
 		t.Errorf("no_cursor 应展示基准分支游标: %+v", st)
+	}
+}
+
+func TestCheckStatusEmptyCursorsFile(t *testing.T) {
+	// {"base_branch":"dev"}：ok wiki base 首次落盘、尚无任何游标 →
+	// 应走"无 wiki"现状全历史路径（与无状态文件同语义），否则 no-wiki 提示被永久抑制。
+	dir := initRepo(t, 2)
+	sd := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sd, "wiki.json"), []byte(`{"base_branch":"dev"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st := CheckStatus(sd, dir, 1)
+	if st.HasWiki || st.Behind != 2 || !st.Stale {
+		t.Fatalf("空 cursors 状态文件应走全历史现状路径: %+v", st)
+	}
+	if st.BaseBranch != "dev" || st.Branch != "master" {
+		t.Errorf("BaseBranch/Branch 应透传: %+v", st)
+	}
+	if st.BranchState != "" {
+		t.Errorf("现状路径不应带分支状态: %+v", st)
+	}
+}
+
+func TestCheckStatusExplicitEmptyCursors(t *testing.T) {
+	// {"cursors":{}} 显式空表：与空 cursors 状态文件同语义（锁定边界）。
+	dir := initRepo(t, 2)
+	sd := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sd, "wiki.json"), []byte(`{"cursors":{}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st := CheckStatus(sd, dir, 1)
+	if st.HasWiki || st.Behind != 2 || !st.Stale {
+		t.Fatalf("显式空 cursors 应走全历史现状路径: %+v", st)
+	}
+}
+
+func TestAttributeLegacy(t *testing.T) {
+	// 可达：归入当前分支并保留 GeneratedAt/EntryCount。
+	dir := initRepo(t, 2)
+	c0 := headOfAt(t, dir, "HEAD~1")
+	gen := time.Date(2026, 8, 8, 9, 0, 0, 0, time.UTC)
+	s := &State{Legacy: &BranchCursor{LastCommit: c0, GeneratedAt: gen, EntryCount: 5}}
+	if !AttributeLegacy(s, dir) {
+		t.Fatal("可达 legacy 应归入当前分支")
+	}
+	cur, ok := s.Cursors["master"]
+	if !ok || cur.LastCommit != c0 || cur.EntryCount != 5 || !cur.GeneratedAt.Equal(gen) {
+		t.Errorf("归入内容错误: %+v", s.Cursors)
+	}
+	// 不可达：不入任何分支，State 不被改动。
+	dir2 := initRepo(t, 1)
+	run(t, dir2, "checkout", "-q", "-b", "tmp")
+	run(t, dir2, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty", "-m", "orphan")
+	orphan := headOf(t, dir2)
+	run(t, dir2, "checkout", "-q", "master")
+	run(t, dir2, "branch", "-q", "-D", "tmp")
+	s2 := &State{Legacy: &BranchCursor{LastCommit: orphan, EntryCount: 3}}
+	if AttributeLegacy(s2, dir2) {
+		t.Error("不可达 legacy 不得归入")
+	}
+	if len(s2.Cursors) != 0 {
+		t.Errorf("不可达时 Cursors 应保持为空: %+v", s2.Cursors)
+	}
+	// git 不可判（非 git 目录）与空 legacy 同样不归。
+	if AttributeLegacy(&State{Legacy: &BranchCursor{LastCommit: c0}}, t.TempDir()) {
+		t.Error("非 git 目录不得归入")
+	}
+	if AttributeLegacy(&State{}, dir) {
+		t.Error("无 Legacy 应返回 false")
 	}
 }
 

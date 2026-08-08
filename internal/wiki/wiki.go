@@ -96,8 +96,13 @@ func CheckStatus(stateDir, srcDir string, threshold int) *Status {
 	s := LoadState(stateDir)
 	branch := CurrentBranch(srcDir)
 	st.Branch = branch
-	if s == nil {
-		// 无游标文件：现状路径（非 git 时 Behind=-1）
+	if s == nil || (s.Legacy == nil && len(s.Cursors) == 0) {
+		// 无 wiki 游标：现状路径（非 git 时 Behind=-1）。含空 cursors 状态文件
+		// （如仅由 ok wiki base 落盘的 {"base_branch":"dev"}），否则 no-wiki 提示
+		// 会因 HasWiki=false、Behind=-1 直返而被永久抑制。
+		if s != nil {
+			st.BaseBranch = s.BaseBranch
+		}
 		if n, err := countCommits(srcDir, "HEAD"); err == nil {
 			st.Behind = n
 			st.Stale = threshold > 0 && n >= threshold

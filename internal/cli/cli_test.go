@@ -418,6 +418,70 @@ func TestWikiBaseSetAndShow(t *testing.T) {
 	}
 }
 
+// ok wiki base 在旧格式 wiki.json 上设置：legacy 游标可达 → 先归入当前分支再落盘，
+// 绝不弄丢 last_commit（spec §4）。
+func TestWikiBasePreservesLegacyCursor(t *testing.T) {
+	repo, stateDir := setupWikiProject(t)
+	head, err := wiki.HeadCommit(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := `{"last_commit":"` + head + `","generated_at":"2026-08-08T09:00:00+08:00","entry_count":7}`
+	if err := os.WriteFile(wiki.CursorPath(stateDir), []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	if code := WikiCmd([]string{"base", "dev"}, &out, &errb); code != 0 {
+		t.Fatalf("base 设置 exit %d err=%q", code, errb.String())
+	}
+	s := wiki.LoadState(stateDir)
+	if s == nil || s.BaseBranch != "dev" {
+		t.Fatalf("基准应为 dev: %+v", s)
+	}
+	cur, ok := s.Cursors["master"]
+	if !ok || cur.LastCommit != head || cur.EntryCount != 7 {
+		t.Fatalf("legacy 游标应归入当前分支 master: %+v", s.Cursors)
+	}
+	// 无参查询不受影响
+	out.Reset()
+	if code := WikiCmd([]string{"base"}, &out, &errb); code != 0 {
+		t.Fatal(code)
+	}
+	if !strings.Contains(out.String(), "dev") {
+		t.Errorf("查询应显示 dev: %q", out.String())
+	}
+}
+
+// ok wiki base 在旧格式 wiki.json 上设置：legacy 游标不可达 → 拒绝写盘并提示，
+// 旧文件原样保留（不丢 last_commit）。
+func TestWikiBaseLegacyDivergedRefused(t *testing.T) {
+	repo, stateDir := setupWikiProject(t)
+	// 制造与 master 分叉的 orphan commit（对象留在库中但不可达 HEAD）
+	runGit(t, repo, "checkout", "-q", "-b", "tmp")
+	runGit(t, repo, "commit", "--allow-empty", "-m", "orphan")
+	orphan, err := wiki.HeadCommit(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "checkout", "-q", "master")
+	runGit(t, repo, "branch", "-q", "-D", "tmp")
+	legacy := `{"last_commit":"` + orphan + `","generated_at":"2026-08-08T09:00:00+08:00","entry_count":7}`
+	if err := os.WriteFile(wiki.CursorPath(stateDir), []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	if code := WikiCmd([]string{"base", "dev"}, &out, &errb); code != 1 {
+		t.Fatalf("分叉 legacy 应拒绝写盘 exit=1, got %d out=%q", code, out.String())
+	}
+	if !strings.Contains(errb.String(), "为避免丢失未写入") || !strings.Contains(errb.String(), "ok wiki mark") {
+		t.Errorf("stderr 应提示拒绝原因与解决办法: %q", errb.String())
+	}
+	data, _ := os.ReadFile(wiki.CursorPath(stateDir))
+	if string(data) != legacy {
+		t.Errorf("拒绝时不得改写旧文件: %s", data)
+	}
+}
+
 // ok wiki mark：游标应记入当前分支；空基准应设为当前分支；落盘为新格式。
 func TestWikiMarkRecordsCurrentBranch(t *testing.T) {
 	repo, stateDir := setupWikiProject(t)

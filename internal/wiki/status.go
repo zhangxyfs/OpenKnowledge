@@ -43,6 +43,27 @@ func isAncestor(srcDir, a, b string) bool {
 	return cmd.Run() == nil
 }
 
+// AttributeLegacy 把旧格式游标按 git 可达性归入当前分支（与 CheckStatus 同语义）：
+// 当前分支可判、legacy commit 存在且为 HEAD 祖先时，写入 s.Cursors[当前分支]
+// （保留 GeneratedAt/EntryCount）并返回 true；其余情况（分叉/非 git/游标失效/
+// 无 Legacy）不改动 s、返回 false。供写盘路径（ok wiki base）落盘前调用，
+// 保证旧 last_commit 不丢（spec §4）。
+func AttributeLegacy(s *State, srcDir string) bool {
+	if s == nil || s.Legacy == nil {
+		return false
+	}
+	branch := CurrentBranch(srcDir)
+	lc := s.Legacy.LastCommit
+	if branch == "" || !commitExists(srcDir, lc) || !isAncestor(srcDir, lc, "HEAD") {
+		return false
+	}
+	if s.Cursors == nil {
+		s.Cursors = map[string]BranchCursor{}
+	}
+	s.Cursors[branch] = *s.Legacy
+	return true
+}
+
 // mergeBase 返回两引用的分叉点；无共同祖先返回空串。
 func mergeBase(srcDir, a, b string) string {
 	out, err := gitOut(srcDir, "merge-base", a, b)

@@ -657,6 +657,20 @@ func WikiCmd(args []string, stdout, stderr io.Writer) int {
 		if s == nil {
 			s = &wiki.State{}
 		}
+		// 旧格式文件首次写操作若是 base：先按 git 可达性把 legacy 游标归入当前
+		// 分支（与 CheckStatus 同语义），绝不弄丢 last_commit（spec §4）；
+		// 归属不可判时拒绝写盘，引导用户先在生成 wiki 的分支上 mark。
+		if s.Legacy != nil && !wiki.AttributeLegacy(s, cwd) {
+			short := s.Legacy.LastCommit
+			if len(short) > 7 {
+				short = short[:7]
+			}
+			if short == "" {
+				short = "(空)"
+			}
+			fmt.Fprintf(stderr, "旧 wiki 游标（%s）与当前分支分叉，为避免丢失未写入；请先在生成 wiki 的分支上运行 ok wiki mark，或先切回该分支再设置基准。\n", short)
+			return 1
+		}
 		s.BaseBranch = name
 		if err := wiki.SaveState(pc.Store.StateDir(), s); err != nil {
 			fmt.Fprintln(stderr, "写基准分支失败:", err)
