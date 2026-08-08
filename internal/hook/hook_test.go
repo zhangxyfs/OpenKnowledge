@@ -631,6 +631,53 @@ func TestPromptWikiNoContextOnBaseBranch(t *testing.T) {
 	}
 }
 
+func TestPromptFiltersOtherBranchEntries(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	initGitRepo(t, projDir, 1) // 当前分支 master
+	writeEntry(t, kbRoot, "共享.md", "---\ntitle: 共享规约\ntype: note\ntags: []\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\n共享正文含线索词 FilterCue。\n")
+	writeEntry(t, kbRoot, "dev差异.md", "---\ntitle: dev 差异经验\ntype: note\ntags: [\"branch:dev\"]\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\ndev 正文也含线索词 FilterCue。\n")
+	// 预置已基础注入：INDEX 主列表按现状收录全部 note 条目（含 branch:dev 标题，
+	// 主列表不按分支过滤是 INDEX 既有行为），本测试只断言检索过滤通道，
+	// 须隔离首次基础注入的 INDEX 噪音，否则标题经主列表泄漏使断言失真
+	st := state.Load(filepath.Join(kbRoot, "state"), "s1")
+	st.BaseInjected = true
+	if err := st.Save(filepath.Join(kbRoot, "state")); err != nil {
+		t.Fatal(err)
+	}
+	in := fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":"FilterCue"}`, projDir)
+	var out bytes.Buffer
+	if code := HandlePrompt(strings.NewReader(in), &out, ""); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	got := out.String()
+	if !strings.Contains(got, "共享规约") {
+		t.Errorf("共享条目应命中: %q", got)
+	}
+	if strings.Contains(got, "dev 差异经验") {
+		t.Errorf("master 会话不得命中 branch:dev 条目: %q", got)
+	}
+}
+
+func TestPromptIndexTrimmedByBranch(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	initGitRepo(t, projDir, 1)
+	// 一条 dev 差异 wiki 条目（触发 INDEX 双段）
+	writeEntry(t, kbRoot, "差异.md", "---\ntitle: 架构总览（dev 分支差异）\ntype: reference\ntags: [\"wiki\", \"branch:dev\"]\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\n正文。\n")
+	writeEntry(t, kbRoot, "主条目.md", "---\ntitle: 架构总览\ntype: reference\ntags: [\"wiki\"]\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\n正文。\n")
+	in := fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s2","cwd":%q,"prompt":"hello"}`, projDir)
+	var out bytes.Buffer
+	if code := HandlePrompt(strings.NewReader(in), &out, ""); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	got := out.String()
+	if !strings.Contains(got, "架构总览") {
+		t.Errorf("主目录应注入: %q", got)
+	}
+	if strings.Contains(got, "分支差异（dev）") || strings.Contains(got, "（dev 分支差异）") {
+		t.Errorf("master 会话的 INDEX 注入不得含 dev 差异小节: %q", got)
+	}
+}
+
 func TestPromptWikiGoneNudge(t *testing.T) {
 	projDir, kbRoot := setupProject(t)
 	initGitRepo(t, projDir, 1)

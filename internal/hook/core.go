@@ -67,6 +67,10 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 		}
 	}
 	st := state.Load(pc.Store.StateDir(), sessionID)
+	// CheckStatus 每次注入只算一次：INDEX 分支裁剪、检索分支过滤、分支上下文行
+	// 与 nudge 共用同一份 Status。分支未知（非 git）时 ws.Branch 为空，
+	// 裁剪与过滤均为恒等（宁多勿漏，零回归）。
+	ws := wiki.CheckStatus(pc.Store.StateDir(), cwd, pc.Config.Wiki.StaleCommits)
 	var b strings.Builder
 	if !st.BaseInjected {
 		_ = state.Clean(pc.Store.StateDir(), 7*24*time.Hour)
@@ -79,7 +83,8 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 			fmt.Fprintf(&b, "## %s\n\n%s\n\n", h.Title, h.Body)
 		}
 		if idx, err := os.ReadFile(pc.Store.IndexPath()); err == nil {
-			b.Write(idx)
+			// 按当前分支裁剪 INDEX 的"分支差异（X）"小节，防止检索过滤被 INDEX 绕过
+			b.WriteString(index.TrimIndexBranchSections(string(idx), ws.Branch))
 		}
 		if b.Len() > base {
 			st.BaseInjected = true
@@ -100,6 +105,8 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 	if err != nil {
 		logErr("prompt query: %v", err)
 	}
+	// 丢弃其他分支的差异条目；无 branch 标签的条目与未知分支场景不受影响
+	hits = index.FilterHitsByBranch(hits, ws.Branch)
 	if len(hits) > 0 {
 		b.WriteString("## 相关知识（需要全文时读取对应文件）\n\n")
 		for _, h := range hits {
@@ -113,9 +120,7 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 		b.WriteString("\n")
 	}
 	out := store.TruncateToBudget(b.String(), pc.Config.Inject.MaxTokens)
-	// CheckStatus 只算一次：分支上下文行（注入开头）与 nudge（末尾）共用同一份 Status。
-	threshold := pc.Config.Wiki.StaleCommits
-	ws := wiki.CheckStatus(pc.Store.StateDir(), cwd, threshold)
+	// 分支上下文行（注入开头）与 nudge（末尾）复用前移的同一份 Status
 	if line := wikiContextLine(ws); line != "" && strings.TrimSpace(out) != "" {
 		out = line + "\n" + out
 	}

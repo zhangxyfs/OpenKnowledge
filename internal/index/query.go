@@ -171,7 +171,11 @@ func (db *DB) WikiEntries() ([]WikiEntry, error) {
 }
 
 // HasBranchWiki 报告指定分支是否存在已转正的差异条目（wiki 标签且 branch 精确匹配）。
+// 空分支（非 git/未知）直接 false：无分支 wiki 条目不是任何分支的差异条目。
 func (db *DB) HasBranchWiki(branch string) (bool, error) {
+	if branch == "" {
+		return false, nil
+	}
 	entries, err := db.WikiEntries()
 	if err != nil {
 		return false, err

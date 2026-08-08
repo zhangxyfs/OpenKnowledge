@@ -43,7 +43,8 @@ func FilterHitsByBranch(hits []Hit, branch string) []Hit {
 }
 
 // TrimIndexBranchSections 裁剪 INDEX.md 的"## 分支差异（X）"小节：只保留 branch 的，
-// 其余整节移除；branch 为空或无差异小节时逐字节返回原文（零回归）。
+// 其余整节移除；branch 为空、无差异小节或全程未裁任何节时逐字节返回原文
+// （零回归 + 幂等：重复调用结果稳定，不会每次多一个尾部换行）。
 // 小节边界：下一个 "## " 级标题或 EOF。
 func TrimIndexBranchSections(idx, branch string) string {
 	if branch == "" || !strings.Contains(idx, "## 分支差异（") {
@@ -52,6 +53,7 @@ func TrimIndexBranchSections(idx, branch string) string {
 	lines := strings.Split(idx, "\n")
 	var b strings.Builder
 	dropping := false
+	dropped := false
 	for _, ln := range lines {
 		if strings.HasPrefix(ln, "## ") {
 			dropping = false
@@ -66,7 +68,13 @@ func TrimIndexBranchSections(idx, branch string) string {
 		if !dropping {
 			b.WriteString(ln)
 			b.WriteString("\n")
+		} else {
+			dropped = true
 		}
+	}
+	// 全程未裁任何节：直接返回原文字节（重组会在尾部多拼一个 "\n"，破坏幂等）
+	if !dropped {
+		return idx
 	}
 	// 重组后规整末尾换行：与原文末尾形态保持一致（原文无末换行则去掉，有则恰好一个）
 	return strings.TrimSuffix(b.String(), "\n") + trailingNL(idx)
