@@ -105,35 +105,99 @@ func SaveState(stateDir string, s *State) error {
 	return os.WriteFile(CursorPath(stateDir), data, 0o644)
 }
 
-// Status 是 ok wiki status 的结果。Behind=-1 表示 git 不可用。
+// Status 是 ok wiki status 的结果。Behind=-1 表示 git 不可用或状态无法计算。
+// BranchState 分支状态："ok"（正常）、"no_cursor"（本分支无基线）、"diverged"
+// （游标与本分支分叉）、"gone"（游标 commit 被改写）、"legacy_orphan"（旧格式
+// 游标归属不可判）；非 git 项目与旧行为路径为空串。
 type Status struct {
-	HasWiki    bool   `json:"has_wiki"`
-	LastCommit string `json:"last_commit,omitempty"`
-	Behind     int    `json:"behind"`
-	Stale      bool   `json:"stale"`
-	Threshold  int    `json:"threshold"`
+	HasWiki     bool   `json:"has_wiki"`
+	LastCommit  string `json:"last_commit,omitempty"`
+	Behind      int    `json:"behind"`
+	Stale       bool   `json:"stale"`
+	Threshold   int    `json:"threshold"`
+	Branch      string `json:"branch,omitempty"`
+	BaseBranch  string `json:"base_branch,omitempty"`
+	BranchState string `json:"branch_state,omitempty"`
+	MergeBase   string `json:"merge_base,omitempty"`
 }
 
-// CheckStatus 计算 wiki 落后状态。srcDir 为项目源码目录（git 仓库）。
-// 无游标时 Behind 为全历史 commit 数；游标 commit 失踪/非 git 项目时 Behind=-1。
+// CheckStatus 计算 wiki 状态（只读 git 与游标文件，绝不写盘；迁移落盘只发生
+// 在 mark/base 写入路径）。srcDir 为项目源码目录。非 git 项目行为同旧版。
 func CheckStatus(stateDir, srcDir string, threshold int) *Status {
 	st := &Status{Behind: -1, Threshold: threshold}
-	c := LoadCursor(stateDir)
-	if c == nil {
+	s := LoadState(stateDir)
+	branch := CurrentBranch(srcDir)
+	st.Branch = branch
+	if s == nil {
+		// 无游标文件：现状路径（非 git 时 Behind=-1）
 		if n, err := countCommits(srcDir, "HEAD"); err == nil {
 			st.Behind = n
 			st.Stale = threshold > 0 && n >= threshold
 		}
 		return st
 	}
-	st.HasWiki = true
-	st.LastCommit = c.LastCommit
-	if c.LastCommit == "" {
+	st.BaseBranch = s.BaseBranch
+	// 旧格式惰性迁移判定（不写盘）
+	if s.Legacy != nil {
+		lc := s.Legacy.LastCommit
+		switch {
+		case branch == "" || !commitExists(srcDir, lc):
+			// git 不可判：保持旧行为（直接用 legacy 算，失败则 Behind=-1）
+			st.HasWiki = true
+			st.LastCommit = lc
+			if n, err := countCommits(srcDir, lc+"..HEAD"); err == nil {
+				st.Behind = n
+				st.Stale = threshold > 0 && n >= threshold
+			}
+			return st
+		case isAncestor(srcDir, lc, "HEAD"):
+			// 可达 → 视同归入当前分支（内存升级，不落盘）
+			st.HasWiki = true
+			st.LastCommit = lc
+			st.BranchState = "ok"
+			if s.BaseBranch == "" {
+				st.BaseBranch = branch
+			}
+			if n, err := countCommits(srcDir, lc+"..HEAD"); err == nil {
+				st.Behind = n
+				st.Stale = threshold > 0 && n >= threshold
+			}
+			return st
+		default:
+			// 存在但不可达：报疑，不归入任何分支
+			st.HasWiki = true
+			st.BranchState = "legacy_orphan"
+			return st
+		}
+	}
+	st.HasWiki = len(s.Cursors) > 0
+	cur, ok := s.Cursors[branch]
+	if !ok {
+		// 本分支无基线：展示基准分支游标供提示使用
+		if bc, ok2 := s.Cursors[s.BaseBranch]; ok2 {
+			st.LastCommit = bc.LastCommit
+		}
+		if st.HasWiki {
+			st.BranchState = "no_cursor"
+		}
 		return st
 	}
-	if n, err := countCommits(srcDir, c.LastCommit+"..HEAD"); err == nil {
-		st.Behind = n
-		st.Stale = threshold > 0 && n >= threshold
+	st.LastCommit = cur.LastCommit
+	if cur.LastCommit == "" {
+		return st // 非 git mark 的时间戳游标：无 behind 可算，同旧行为
+	}
+	switch {
+	case !commitExists(srcDir, cur.LastCommit):
+		st.BranchState = "gone"
+	case isAncestor(srcDir, cur.LastCommit, "HEAD"):
+		st.BranchState = "ok"
+		if n, err := countCommits(srcDir, cur.LastCommit+"..HEAD"); err == nil {
+			st.Behind = n
+			st.Stale = threshold > 0 && n >= threshold
+		}
+	default:
+		st.BranchState = "diverged"
+		st.MergeBase = mergeBase(srcDir, cur.LastCommit, "HEAD")
 	}
 	return st
 }

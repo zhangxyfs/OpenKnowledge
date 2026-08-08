@@ -63,7 +63,7 @@ func TestLoadCursorCorrupt(t *testing.T) {
 	}
 }
 
-func TestCheckStatusNoCursor(t *testing.T) {
+func TestCheckStatusNoStateFile(t *testing.T) {
 	repo := gitRepo(t, 3)
 	st := CheckStatus(t.TempDir(), repo, 20)
 	if st.HasWiki || st.Behind != 3 || st.Stale {
