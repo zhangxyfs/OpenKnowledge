@@ -37,6 +37,7 @@ func newEnv(t *testing.T) (*Handler, string, string) {
 		"app.js":      "console.log(1)",
 		"style.css":   "body{}",
 		"favicon.ico": "ico",
+		"help.md":     "# 帮助\n",
 	}
 	for name, content := range files {
 		if err := os.WriteFile(filepath.Join(webDir, name), []byte(content), 0o644); err != nil {
@@ -151,7 +152,7 @@ func TestStaticNoCache(t *testing.T) {
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 
-	for _, p := range []string{"/", "/app.js", "/style.css"} {
+	for _, p := range []string{"/", "/app.js", "/style.css", "/help.md"} {
 		res, err := http.Get(srv.URL + p)
 		if err != nil {
 			t.Fatal(err)
@@ -187,7 +188,7 @@ func TestStaticAllowlist(t *testing.T) {
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 
-	for _, p := range []string{"/app.js", "/style.css", "/favicon.ico"} {
+	for _, p := range []string{"/app.js", "/style.css", "/favicon.ico", "/help.md"} {
 		if code, _ := do(t, "GET", srv.URL+p, "", nil); code != 200 {
 			t.Fatalf("GET %s: status = %d", p, code)
 		}
@@ -200,6 +201,24 @@ func TestStaticAllowlist(t *testing.T) {
 		if code, _ := do(t, "GET", srv.URL+p, "", nil); code != 404 {
 			t.Fatalf("GET %s: status = %d, want 404", p, code)
 		}
+	}
+}
+
+// TestHelpMdServed 使用帮助页 help.md 作为白名单静态资源可直接 GET：
+// 前端"使用帮助"卡点击后 fetch 此文件复用 changelog 弹窗渲染。
+func TestHelpMdServed(t *testing.T) {
+	h, _, _ := newEnv(t)
+	req := httptest.NewRequest("GET", "/help.md", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("help.md 应 200，got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "# 帮助") {
+		t.Errorf("内容不符: %q", rec.Body.String())
+	}
+	if rec.Header().Get("Cache-Control") != "no-cache" {
+		t.Errorf("静态资源必须 no-cache")
 	}
 }
 

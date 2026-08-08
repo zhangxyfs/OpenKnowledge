@@ -428,6 +428,19 @@
     openChangelogModal("更新日志", state.changelog ? state.changelog.all : null);
   });
 
+  // 使用帮助：拉取 help.md 复用 changelog 弹窗渲染；不属于升级弹窗，不影响 seen
+  $("btn-help").addEventListener("click", function () {
+    changelogFromPending = false;
+    fetch("/help.md").then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.text();
+    }).then(function (md) {
+      openChangelogModal("使用帮助", [{ log: md }]);
+    }).catch(function () {
+      openChangelogModal("使用帮助", [{ log: "帮助文档加载失败，请检查安装是否完整。" }]);
+    });
+  });
+
   $("f-cancel").addEventListener("click", closeForm);
   $("btn-new").addEventListener("click", function () { openForm(null, false); });
 

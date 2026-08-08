@@ -47,6 +47,8 @@ func NewHandler(webDir, token string, beats chan<- struct{}) *Handler {
 	mux.HandleFunc("GET /app.js", h.serveStatic)
 	mux.HandleFunc("GET /style.css", h.serveStatic)
 	mux.HandleFunc("GET /favicon.ico", h.serveStatic)
+	// 使用帮助页：字面量路由即白名单，前端"使用帮助"卡 fetch 后复用 changelog 弹窗渲染
+	mux.HandleFunc("GET /help.md", h.serveStatic)
 	api := func(pattern string, fn http.HandlerFunc) {
 		mux.HandleFunc(pattern, h.withAuth(fn))
 	}
