@@ -98,8 +98,8 @@ func DiffSummary(srcDir, base string) (string, error) {
 }
 
 // MergedIntoBase 返回已并入基准的分支清单：cursors 中每条非基准分支，
-// 分支引用仍存在、tip 已是 HEAD 祖先、且 hasDelta 报告有差异条目时计入。
-// 仅在当前处于基准分支时由调用方触发；分支已删除的静默跳过。
+// hasDelta 报告有差异条目（先判，SQL 远廉于 spawn）、分支引用仍存在、
+// tip 已是 HEAD 祖先时计入。仅在当前处于基准分支时由调用方触发；分支已删除的静默跳过。
 func MergedIntoBase(s *State, srcDir string, hasDelta func(string) bool) []string {
 	if s == nil {
 		return nil
@@ -109,13 +109,15 @@ func MergedIntoBase(s *State, srcDir string, hasDelta func(string) bool) []strin
 		if name == "" || name == s.BaseBranch {
 			continue
 		}
+		// hasDelta（一次 SQL）先于 git spawn 判定：无差异条目的分支不值得付
+		// rev-parse + merge-base 两次子进程，全无差异条目的项目 0 额外 spawn
+		if hasDelta != nil && !hasDelta(name) {
+			continue
+		}
 		if _, err := gitOut(srcDir, "rev-parse", "--verify", "--quiet", name); err != nil {
 			continue // 分支已删
 		}
 		if !isAncestor(srcDir, name, "HEAD") {
-			continue
-		}
-		if hasDelta != nil && !hasDelta(name) {
 			continue
 		}
 		out = append(out, name)

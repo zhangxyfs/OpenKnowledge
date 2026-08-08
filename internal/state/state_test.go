@@ -25,6 +25,28 @@ func TestSessionRoundtrip(t *testing.T) {
 	}
 }
 
+// MergedChecked 持久化回环：置位后 Save/Load 仍为真（merged 检测每会话熔断
+// 依赖此字段跨进程存活——hook 每次 prompt 都是新进程）。
+func TestSessionMergedCheckedRoundtrip(t *testing.T) {
+	dir := t.TempDir()
+	s := Load(dir, "s1")
+	if s.MergedChecked {
+		t.Fatal("新会话 MergedChecked 应为 false")
+	}
+	s.MergedChecked = true
+	if err := s.Save(dir); err != nil {
+		t.Fatal(err)
+	}
+	s2 := Load(dir, "s1")
+	if !s2.MergedChecked {
+		t.Fatalf("MergedChecked 未持久化: %+v", s2)
+	}
+	// 与 WikiNudged 相互独立：置 MergedChecked 不得连带 WikiNudged
+	if s2.WikiNudged {
+		t.Fatalf("MergedChecked 不得误置 WikiNudged: %+v", s2)
+	}
+}
+
 func TestClean(t *testing.T) {
 	dir := t.TempDir()
 	old := filepath.Join(dir, "session-old.json")

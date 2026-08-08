@@ -104,3 +104,25 @@ func TestMergedIntoBase(t *testing.T) {
 		t.Fatalf("nil State 应返回 nil: %v", got)
 	}
 }
+
+// hasDelta 前置顺序：hasDelta 判定必须先于 git spawn（rev-parse / merge-base）。
+// 反证法：srcDir 不存在时任何 git 调用必然失败走"分支已删"短路——若 hasDelta
+// 在 git 之后判定，hasDelta 永远不会被调用；前置时每条非基准游标都会先问
+// hasDelta，false 直接跳过、0 次 spawn 且不报错。
+func TestMergedIntoBaseHasDeltaBeforeGit(t *testing.T) {
+	s := &State{BaseBranch: "master", Cursors: map[string]BranchCursor{
+		"master": {LastCommit: "x"},
+		"dev":    {LastCommit: "y"},
+	}}
+	var asked []string
+	got := MergedIntoBase(s, filepath.Join(t.TempDir(), "不存在的目录"), func(b string) bool {
+		asked = append(asked, b)
+		return false
+	})
+	if len(got) != 0 {
+		t.Fatalf("hasDelta false 不得报 merged: %v", got)
+	}
+	if len(asked) != 1 || asked[0] != "dev" {
+		t.Fatalf("hasDelta 应先于 git 被调用（不存在的 srcDir 下仍问到 dev）: %v", asked)
+	}
+}

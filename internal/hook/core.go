@@ -130,12 +130,19 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 	// 已并入提示（merged 变体）：仅在基准分支、有其他分支 tip 已并入且其差异条目
 	// 仍在库中时触发；db 仍在 InjectForPrompt 作用域（defer Close 之前）可直接复用。
 	// 与 wikiNudge 共用 WikiNudged 每会话一次预算（本回合已提示则跳过计算）。
-	if !st.WikiNudged && ws.Branch != "" && ws.Branch == ws.BaseBranch {
+	// MergedChecked 是检测本身的每会话熔断（独立于 WikiNudged）：merged 为空时
+	// WikiNudged 不置位，若无此熔断每次 prompt 都为每条非基准游标付两次 git spawn；
+	// 因此计算后无论结果均置位（仅值变化才 Save，与 WikiNudged 保存惯例一致）。
+	if !st.WikiNudged && !st.MergedChecked && ws.Branch != "" && ws.Branch == ws.BaseBranch {
 		if s := wiki.LoadState(pc.Store.StateDir()); s != nil {
 			merged := wiki.MergedIntoBase(s, cwd, func(b string) bool {
 				ok, _ := db.HasBranchWiki(b)
 				return ok
 			})
+			st.MergedChecked = true
+			if err := st.Save(pc.Store.StateDir()); err != nil {
+				logErr("prompt save state: %v", err)
+			}
 			if nudge := wikiNudgeMerged(pc, st, ws.BaseBranch, merged); nudge != "" {
 				out += nudge
 			}

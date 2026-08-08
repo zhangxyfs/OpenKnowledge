@@ -730,6 +730,45 @@ func TestPromptWikiMergedNudge(t *testing.T) {
 	}
 }
 
+// merged 检测每会话熔断（MergedChecked）：基准分支 + 有非基准游标 + 无差异条目
+// 时 merged 必为空，首次 prompt 后 MergedChecked 置位（之后每 prompt 0 额外
+// git spawn）；且不得误置 WikiNudged——后续 stale nudge 不受影响。
+func TestPromptMergedCheckedCircuitBreaker(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	initGitRepo(t, projDir, 2) // 当前在 master
+	runGit(t, projDir, "checkout", "-q", "-b", "dev")
+	runGit(t, projDir, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty", "-m", "d1")
+	devTip := gitHead(t, projDir)
+	runGit(t, projDir, "checkout", "-q", "master")
+	runGit(t, projDir, "-c", "user.email=t@t", "-c", "user.name=t", "merge", "-q", "--no-ff", "dev", "-m", "merge dev")
+	// 基准 + 非基准游标，但库中无任何 dev 差异条目 → merged 检测为空结果
+	st := &wiki.State{BaseBranch: "master", Cursors: map[string]wiki.BranchCursor{
+		"master": {LastCommit: gitHead(t, projDir)},
+		"dev":    {LastCommit: devTip},
+	}}
+	if err := wiki.SaveState(filepath.Join(kbRoot, "state"), st); err != nil {
+		t.Fatal(err)
+	}
+	mkPrompt := func(session string) string {
+		return fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":%q,"cwd":%q,"prompt":"hello"}`, session, projDir)
+	}
+	var out bytes.Buffer
+	if code := HandlePrompt(strings.NewReader(mkPrompt("s1")), &out, ""); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if strings.Contains(out.String(), "已并入") {
+		t.Fatalf("无差异条目不得提示已并入: %q", out.String())
+	}
+	// 空结果也要置位熔断：merged 为空不应每 prompt 重付 git spawn
+	got := state.Load(filepath.Join(kbRoot, "state"), "s1")
+	if !got.MergedChecked {
+		t.Fatalf("首次 prompt 后 MergedChecked 应置位（无论检测结果）: %+v", got)
+	}
+	if got.WikiNudged {
+		t.Fatalf("merged 为空不得误置 WikiNudged（会抑制后续 stale nudge）: %+v", got)
+	}
+}
+
 func TestPromptWikiGoneNudge(t *testing.T) {
 	projDir, kbRoot := setupProject(t)
 	initGitRepo(t, projDir, 1)

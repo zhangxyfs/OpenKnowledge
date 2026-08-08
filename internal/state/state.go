@@ -16,6 +16,10 @@ type Session struct {
 	StopCount           int      `json:"stop_count"`
 	LastExtractReminder int      `json:"last_extract_reminder"`
 	WikiNudged          bool     `json:"wiki_nudged"`
+	// MergedChecked 标记 merged 检测本会话已算过（无论结果）：与 WikiNudged 独立——
+	// merged 为空时 WikiNudged 不置位，若无此字段基准分支上每次 prompt 都会为每条
+	// 非基准游标重付 rev-parse + merge-base 两次 git spawn。
+	MergedChecked bool `json:"merged_checked"`
 }
 
 func fileName(sessionID string) string {
