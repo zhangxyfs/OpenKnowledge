@@ -53,6 +53,10 @@ func TestReasonixInstallAndInstalled(t *testing.T) {
 	if !strings.Contains(string(st), `"openknowledge"`) {
 		t.Errorf("plugin-packages.json 未登记: %s", st)
 	}
+	// 反向断言：manifest 登记的 exe 与当前进程 exe 不一致时必须判定为未安装
+	if a.HooksInstalled() {
+		t.Error("exe 不匹配时应为 false")
+	}
 	// HooksInstalled 以当前进程 exe 为判定基准（zcode 模式）：
 	// 换当前 exe 重装后应为 true。
 	if err := a.InstallHooks(currentExe(t)); err != nil {

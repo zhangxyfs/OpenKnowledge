@@ -49,7 +49,7 @@ func TestDaemonEndToEnd(t *testing.T) {
 
 	// 前台拉起 daemon（子进程，测试结束杀掉）
 	daemonCmd := exec.Command(binPath, "daemon")
-	daemonCmd.Env = append(os.Environ(), "OK_HOME="+home, "KIMI_CODE_HOME="+filepath.Join(home, "kimi"), "OK_ZCODE_HOME="+filepath.Join(home, "zcode-nonexistent"), "OPENAI_API_KEY=")
+	daemonCmd.Env = append(os.Environ(), "OK_HOME="+home, "KIMI_CODE_HOME="+filepath.Join(home, "kimi"), "OK_ZCODE_HOME="+filepath.Join(home, "zcode-nonexistent"), "OK_REASONIX_HOME="+filepath.Join(home, "reasonix-nonexistent"), "OPENAI_API_KEY=") // reasonix 指向不存在路径防污染真实用户配置
 	if err := daemonCmd.Start(); err != nil {
 		t.Fatal(err)
 	}
