@@ -261,19 +261,19 @@ v1 仅 `changelog_required`：触碰文件中存在匹配 `code_globs` 的 且 �
 - `setup.go`：见第 6.4 节
 - `toggle.go`：`On`/`Off` 即删除/创建 `~/.openknowledge/hooks-disabled` 标志文件
 
-### 5.11 gui — Web 管理界面（server.go 27 行 + window_*.go + api.go 891 行）
+### 5.11 gui — Web 管理界面（server.go 31 行 + window_*.go + api.go 1130 行 + changelog.go 156 行）
 
 `ok gui` 或无参数运行（双击 exe）启动的本地 Web 管理界面，供不熟悉命令行的用户完成首次引导与日常知识维护。
 
 - **server.go**：`net.Listen("tcp", "127.0.0.1:0")` 随机端口、仅监听回环；16 字节随机 hex 令牌；启动后自动打开浏览器（Edge/Chrome 应用模式 → 默认浏览器，全失败只打印 URL）；最大化窗口（`maximizeWindowByTitle`，window_windows.go 轮询置顶窗口标题，非 Windows 无操作）为**同步调用**——daemon 化后 `ok gui` 开浏览器即退，协程会随进程死亡。web 资源目录由 `cmd/ok` 定位：`<exe目录>/web` 优先，其次 `<当前目录>/web`（`scripts/build-dist.sh` 产出的 dist/ 布局正好满足前者）。
-- **api.go**：`/api/*` 全部经 `X-Ok-Token` 头鉴权（缺失/错误 401）；`/` 返回注入令牌的 index.html（`{{TOKEN}}` 替换）；静态资源仅白名单 `app.js`/`style.css`；条目文件名参数必须是不含 `..` 与路径分隔符的 `.md` 基本名（防路径穿越）；写操作（POST/PUT/DELETE entry）落盘后自动 `index.Sync` 同步索引库。
+- **api.go**：`/api/*` 全部经 `X-Ok-Token` 头鉴权（缺失/错误 401）；`/` 返回注入令牌的 index.html（`{{TOKEN}}` 替换）；静态资源仅白名单 `app.js`/`style.css`/`favicon.ico`/`help.md`；条目文件名参数必须是不含 `..` 与路径分隔符的 `.md` 基本名（防路径穿越）；写操作（POST/PUT/DELETE entry）落盘后自动 `index.Sync` 同步索引库。项目列表（`/api/status`、`/api/projects`）附 `last_update`（kb.db mtime）并按其降序——最近有知识写入的项目排最前。`DELETE /api/project` 删除项目知识库：**先注销注册表**（`registry.RemoveProject` + Save，失败 500 中止、目录不动）**再 `os.RemoveAll` 项目目录**（失败 200 + `warning`/`dir`——兜底永远偏向留数据）；目录名取注册表匹配后的 `p.Name`，不接受用户原始输入拼路径。
 
 API 一览：
 
 | 方法 | 路径 | 作用 |
 |------|------|------|
-| GET | `/api/status` | 项目列表 + `agents` 数组（每个已注册 agent 的 `id/name/detected/hooksInstalled`，顶层 `hooksInstalled` 已移除）+ `skillsInstalled` + embedding 安装状态 + 全局开关状态 + `app_version`（构建期注入版本）与 `home`（KB 根目录）（前端据此决定默认标签页） |
-| GET | `/api/projects` | 注册表项目列表 |
+| GET | `/api/status` | 项目列表（含 `last_update`，按最近更新降序）+ `agents` 数组（每个已注册 agent 的 `id/name/detected/hooksInstalled`，顶层 `hooksInstalled` 已移除）+ `skillsInstalled` + embedding 安装状态 + 全局开关状态 + `app_version`（构建期注入版本）与 `home`（KB 根目录）（前端据此决定默认标签页） |
+| GET | `/api/projects` | 注册表项目列表（同 `last_update` 降序） |
 | GET | `/api/entries?project=` | 项目条目摘要列表 |
 | GET | `/api/entry?project=&file=` | 条目详情（含正文） |
 | POST | `/api/entry` | 新建条目（标题 slug 定文件名，重复 409）→ 同步索引 |
@@ -284,16 +284,21 @@ API 一览：
 | GET | `/api/capture?project=` | 当前捕获模式 `{mode, turn_interval}`（合并配置） |
 | POST | `/api/capture` | `{"project","mode"}` 写项目 `[capture]` 小节（等价 `ok capture <mode>`；非法模式 400） |
 | POST | `/api/setup/hooks` | 等价 `ok setup` 的 hooks 步骤；body 可指定 `{"agent":"<id>"}` 只装单个 agent（未知 id 400），缺省为全部已检测 agent；响应 `installed` 列出每个 agent 的写入目标 |
-| POST | `/api/setup/skills` | 安装五个 kimi 技能 |
+| POST | `/api/setup/skills` | 安装六个技能（init/on/off/propose/capture/wiki）到已检测 agent 的技能目录并集 |
 | POST | `/api/setup/embedding` | 保存 embedding 配置并当场连通性验证（`{"ok":bool,"error":…}`） |
+| POST | `/api/reasonix/enforce-mode` | `{"mode":"mixed"\|"soft"\|"hard"}` 写 reasonix 强制检查档位（落盘即生效，sidecar 实时读） |
 | POST | `/api/toggle` | `{"on":bool}` 全局开关（等价 `ok on`/`ok off`） |
-| POST | `/api/heartbeat` | 页面心跳（204） |
+| POST | `/api/heartbeat?project=` | 页面心跳 + 返回该项目 kb.db mtime 作为 `version`——前端 5s 轮询，版本变化才重拉条目列表 |
+| GET | `/api/project/branch-info?project=` | 基准分支/当前分支/合并谱系（GUI 工具条分支上下文与谱系行数据源） |
+| DELETE | `/api/project?project=` | 删除项目知识库：先注销注册表（Save 失败 500 中止）再删目录（失败 200 + `warning`/`dir`）；未注册 404 |
+| GET | `/api/changelog` | 更新日志：`current/pending/all`（pending 只算严格大于 last_seen 且不超过 current 的版本） |
+| POST | `/api/changelog/seen` | 标记已读（写 `~/.openknowledge/gui.json`；只有弹窗"知道了"才标记） |
 | POST | `/api/shutdown` | 停服 |
 | POST | `/api/uninstall` | 卸载集成：移除 hooks 标记块、技能目录、全局 [embedding]；KB 数据保留（`setupx.Uninstall`） |
 | GET | `/api/export?project=<名\|all>` | 知识库导出 zip（`backup.Export`；project 缺省 all，项目不存在 404） |
 | POST | `/api/import` | multipart `file` 上传备份 zip 导入（`backup.Import`，32MB 上限；`ErrBadPackage` → 400，成功返回 `Report{imported, skipped, projects}`） |
 
-前端 `web/`（零依赖原生 HTML/JS/CSS）：「管理」标签页（项目/条目列表、新建/编辑/删除、检索预览带命中高亮、草稿条目带「草稿」徽标与「采纳」按钮、全局开关）+「引导」标签页（hooks/技能/embedding/全局开关状态卡、「经验沉淀」卡片查看/切换 capture 模式与轮次间隔、危险区「卸载」卡片）+「其他」标签页（数据导出/导入、关于卡片显示版本与项目数）。hooks 未安装时「管理」页隐藏，「引导」为默认页。
+前端 `web/`（零依赖原生 HTML/JS/CSS）：「管理」标签页（项目下拉按 `last_update` 降序、条目列表每页 12 条、新建/编辑/删除、检索预览带命中高亮、草稿徽标与「采纳」按钮、分支上下文/⎇born⇢scope 双徽标/分支过滤器/合并谱系行、摘要列两行截断+悬停浮窗显示全文、「刷新」按钮全量拉齐项目与条目并带三态反馈、全局开关；daemon 被替换致 token 过期 401 时自动刷新一次页面取新 token，sessionStorage 标志防循环）+「引导」标签页（hooks/技能/embedding/全局开关状态卡、agents 下拉联动、「经验沉淀」卡片查看/切换 capture 模式与轮次间隔、reasonix 强制检查三档卡、危险区「卸载」卡片）+「其他」标签页（数据导出/导入、更新日志弹窗与常驻入口、使用帮助卡、**「删除项目知识库」危险卡**——弹窗明示影响面 + 默认勾选的删除前 zip 备份 + 「我已了解后果」勾选与输入完整项目名双重解锁、关于卡片）。hooks 未安装时「管理」页隐藏，「引导」为默认页。
 
 ### 5.12 backup — 知识库导出/导入（251 行）
 
@@ -415,6 +420,8 @@ hook prompt（基础注入之后）
 **分支差异条目（v2.7.0，二期）**：长期并行分支只维护与基准的结构 delta（tags 含 `branch:<名>`）；注入按当前分支过滤（含 INDEX 差异小节裁剪，分支未知不过滤）；`ok wiki diff` 给技能供结构变化素材，非基准分支只写差异条目（写侧防呆）；基准分支检测 merged_branches 提示清理（status 输出 + prompt 每会话一次 nudge）；GUI 管理页分支列+过滤器+sticky 操作列；CheckStatus git 调用收敛为 merge-base 判别。无 `branch:` 标签条目的项目行为与旧版完全一致。
 
 **合并谱系落盘（v2.8.0）**：`ok wiki status`/`mark` 在基准分支检出"tip 已并入且有差异条目"的分支时，向 wiki.json `merges` 数组追加合并谱系 `{from, to, commit, time}`——from+commit 判重（重复检出不重复记录），to 取基准分支；检出/落盘失败 fail-open 仅记日志，不影响 status/mark 主流程。GUI 管理页显示谱系行（"dev → master"）与 born 徽标，工具条显示"基准分支 · 当前分支"上下文、不一致时警示；`[provenance] auto_born` 由 GUI 沉淀卡 checkbox 或手改配置控制（写盘复用 SetCapture 同款小节替换，其余内容原样保留）。
+
+**GUI 打磨与项目删除（v2.8.1~v2.9.0）**：表头/类型显示中文化（存储值保持英文）；摘要列 `line-clamp:2` 两行截断 + 单例浮窗跟随鼠标（溢出视口自动翻转、滚动收起）；项目列表接口附 `last_update`（kb.db mtime）降序，打开默认选中最近写入的项目；「刷新」从只重拉条目改为全量 `refreshStatus` + 三态反馈；v2.9.0 落地「删除项目知识库」——GUI 三重确认（影响面计数 + 默认勾 zip 备份 + 勾选/输名解锁）+ 后端先注销后删目录，删除当前选中项目时前端先清 `state.project` 再刷新，避免 capture 接口 404 误报。
 
 **目标**：wiki 由 AI 技能生成、但"该不该更新"由机制提醒——游标 + 阈值把 wiki 新鲜度变成可检查的状态，提示复用现有 prompt 注入通道，不增加新 hook。
 
