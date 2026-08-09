@@ -14,7 +14,7 @@
     branchFilter: "", // "" = 全部；选中后 = born==X ∪ scope==X ∪ 无 born 无 scope 的条目
     sortDir: "desc", // 时间排序方向：desc 新→旧 / asc 旧→新
     page: 1,
-    pageSize: 20,
+    pageSize: 12,
     lastVersion: 0 // 最近一次自动刷新见到的 kb.db 版本（mtime）
   };
   state.agent = localStorage.getItem("ok.agent") || "";
