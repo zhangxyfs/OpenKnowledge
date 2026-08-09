@@ -59,6 +59,10 @@ func Uninstall() (*UninstallResult, error) {
 		return r, fmt.Errorf("移除 embedding 配置: %w", err)
 	}
 	r.EmbeddingRemoved = removed
+
+	// 4. 移除登录自启项（XDG；Windows 注册表项由安装器卸载清除，此处 no-op）。
+	// 错误容忍：与 daemon 停止同级，不进 UninstallResult。
+	_ = RemoveAutostart()
 	if len(hookErrs) > 0 {
 		return r, fmt.Errorf("移除 hooks 失败: %s", strings.Join(hookErrs, "; "))
 	}

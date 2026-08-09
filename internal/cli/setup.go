@@ -49,6 +49,9 @@ func Setup(args []string, in io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	if err := setupx.WriteAutostart(exe); err != nil {
+		fmt.Fprintf(stderr, "警告：登录自启写入失败: %v\n", err)
+	}
 	fmt.Fprintf(stdout, "技能已安装到 %s\n", strings.Join(setupx.SkillDirs(), "；"))
 	embeddingSet := false
 	fs.Visit(func(f *flag.Flag) {
