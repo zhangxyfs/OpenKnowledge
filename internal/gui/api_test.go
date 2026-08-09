@@ -1234,3 +1234,99 @@ func TestExportImportEndpoints(t *testing.T) {
 		t.Fatal("entry not restored via endpoint")
 	}
 }
+
+func TestProjectDelete(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	// 注意：mkProject 每次从空注册表重建，连续调用会互相覆盖——两个项目必须一次写入
+	reg := &registry.Registry{}
+	if err := reg.AddProject("demo", filepath.Join(t.TempDir(), "demo-src")); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.AddProject("keep", filepath.Join(t.TempDir(), "keep-src")); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.Save(registry.DefaultPath()); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"demo", "keep"} {
+		if err := os.MkdirAll(filepath.Join(okHome, "projects", name, "knowledge"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	// 造一条知识，让 projects/demo 目录有内容
+	code, data := do(t, "POST", srv.URL+"/api/entry", testToken, entryPayload("橙子种植"))
+	if code != 200 {
+		t.Fatalf("create: status = %d, body %s", code, data)
+	}
+
+	// 无 token → 401
+	code, _ = do(t, "DELETE", srv.URL+"/api/project?project=demo", "", nil)
+	if code != 401 {
+		t.Fatalf("no token: status = %d, want 401", code)
+	}
+
+	// 缺参 → 400；未注册 → 404
+	code, _ = do(t, "DELETE", srv.URL+"/api/project", testToken, nil)
+	if code != 400 {
+		t.Fatalf("missing param: status = %d, want 400", code)
+	}
+	code, _ = do(t, "DELETE", srv.URL+"/api/project?project=ghost", testToken, nil)
+	if code != 404 {
+		t.Fatalf("unknown project: status = %d, want 404", code)
+	}
+
+	// 正常删除
+	code, data = do(t, "DELETE", srv.URL+"/api/project?project=demo", testToken, nil)
+	if code != 200 {
+		t.Fatalf("delete: status = %d, body %s", code, data)
+	}
+	var resp struct {
+		OK      bool   `json:"ok"`
+		Warning string `json:"warning"`
+	}
+	if err := json.Unmarshal(data, &resp); err != nil {
+		t.Fatal(err)
+	}
+	if !resp.OK || resp.Warning != "" {
+		t.Fatalf("unexpected delete response: %s", data)
+	}
+
+	// 目录已删
+	if _, err := os.Stat(filepath.Join(okHome, "projects", "demo")); !os.IsNotExist(err) {
+		t.Fatalf("project dir should be gone, stat err = %v", err)
+	}
+	// 注册表已注销（从磁盘重读验证）
+	reg, err := registry.Load(registry.DefaultPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range reg.Projects {
+		if p.Name == "demo" {
+			t.Fatal("demo should be unregistered")
+		}
+	}
+	// /api/status 不再列出 demo、仍列出 keep
+	code, data = do(t, "GET", srv.URL+"/api/status", testToken, nil)
+	if code != 200 {
+		t.Fatalf("status: %d", code)
+	}
+	var st struct {
+		Projects []struct {
+			Name string `json:"name"`
+		} `json:"projects"`
+	}
+	if err := json.Unmarshal(data, &st); err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Projects) != 1 || st.Projects[0].Name != "keep" {
+		t.Fatalf("status projects after delete: %s", data)
+	}
+	// 重复删除 → 404
+	code, _ = do(t, "DELETE", srv.URL+"/api/project?project=demo", testToken, nil)
+	if code != 404 {
+		t.Fatalf("re-delete: status = %d, want 404", code)
+	}
+}

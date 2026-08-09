@@ -62,6 +62,7 @@ func NewHandler(webDir, token string, beats chan<- struct{}) *Handler {
 	api("POST /api/entry", h.apiEntryCreate)
 	api("PUT /api/entry", h.apiEntryUpdate)
 	api("DELETE /api/entry", h.apiEntryDelete)
+	api("DELETE /api/project", h.apiProjectDelete)
 	api("GET /api/search", h.apiSearch)
 	api("POST /api/approve", h.apiApprove)
 	api("GET /api/capture", h.apiCaptureGet)
@@ -415,6 +416,49 @@ func (h *Handler) apiProjects(w http.ResponseWriter, _ *http.Request) {
 	}
 	projects := listProjects(reg)
 	writeJSON(w, http.StatusOK, projects)
+}
+
+// apiProjectDelete 删除项目知识库：先注销注册表（Save 失败则中止、目录不动），
+// 再删除 projects/<name>/ 目录；目录删除失败时项目已注销，返回 warning 供前端提示手动清理。
+// 目录名取注册表匹配后的 p.Name，不接受用户原始输入，无路径穿越面。
+func (h *Handler) apiProjectDelete(w http.ResponseWriter, r *http.Request) {
+	name := r.URL.Query().Get("project")
+	if name == "" {
+		writeErr(w, http.StatusBadRequest, "缺少 project 参数")
+		return
+	}
+	reg, err := registry.Load(registry.DefaultPath())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	found := false
+	for _, p := range reg.Projects {
+		if p.Name == name {
+			name = p.Name // 以注册表登记名为准
+			found = true
+			break
+		}
+	}
+	if !found {
+		writeErr(w, http.StatusNotFound, fmt.Sprintf("项目未注册: %q", name))
+		return
+	}
+	reg.RemoveProject(name)
+	if err := reg.Save(registry.DefaultPath()); err != nil {
+		writeErr(w, http.StatusInternalServerError, fmt.Sprintf("注册表保存失败（未删除任何数据）: %v", err))
+		return
+	}
+	dir := filepath.Join(registry.Home(), "projects", name)
+	if err := os.RemoveAll(dir); err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":      true,
+			"warning": fmt.Sprintf("目录删除失败: %v", err),
+			"dir":     dir,
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // ---------- 条目 ----------
