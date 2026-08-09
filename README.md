@@ -39,7 +39,7 @@
 
 发布产物提供两种格式（均无依赖、静态编译）：
 
-- `openknowledge_<版本>_linux_amd64.tar.gz`：解压后 `cd openknowledge_* && ./ok setup`（写 hooks/技能 + 配置登录自启）
+- `openknowledge_<版本>_linux_amd64.tar.gz`：解压后 `cd openknowledge_* && ./ok setup`（写 hooks/技能 + 配置登录自启）（自启 Exec 指向解压目录，删除目录前请先 uninstall 或重新 setup）
 - `openknowledge_<版本>_amd64.deb`：`sudo dpkg -i` 安装到 `/usr/lib/openknowledge/`（`ok` 进 PATH），然后运行 `ok setup`
 
 > 构建命令（维护者）：`bash scripts/build-linux.sh`（.deb 需先 `go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest`）。

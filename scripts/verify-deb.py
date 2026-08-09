@@ -50,6 +50,9 @@ def main():
     link = data.getmember("./usr/bin/ok" if "./usr/bin/ok" in data.getnames() else "usr/bin/ok")
     if not link.issym():
         sys.exit("usr/bin/ok 不是符号链接")
+    okm = data.getmember("./usr/lib/openknowledge/ok" if "./usr/lib/openknowledge/ok" in data.getnames() else "usr/lib/openknowledge/ok")
+    if not (okm.mode & 0o111):
+        sys.exit(f"usr/lib/openknowledge/ok 无可执行位: {oct(okm.mode)}")
     print(f"deb OK: 版本 {expect_ver}，{len(names)} 个文件项，usr/bin/ok -> {link.linkname}")
 
 

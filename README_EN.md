@@ -40,7 +40,7 @@ Just run the released `OpenKnowledgeSetup-<version>.exe` — no Go toolchain, no
 
 Two formats (both dependency-free, statically compiled):
 
-- `openknowledge_<version>_linux_amd64.tar.gz`: extract, then `cd openknowledge_* && ./ok setup` (hooks/skills + login autostart)
+- `openknowledge_<version>_linux_amd64.tar.gz`: extract, then `cd openknowledge_* && ./ok setup` (hooks/skills + login autostart) (the autostart Exec points at the extracted directory — uninstall or re-run setup before deleting it)
 - `openknowledge_<version>_amd64.deb`: `sudo dpkg -i` installs to `/usr/lib/openknowledge/` (`ok` lands in PATH), then run `ok setup`
 
 > Build (maintainers): `bash scripts/build-linux.sh` (.deb requires `go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest` first).

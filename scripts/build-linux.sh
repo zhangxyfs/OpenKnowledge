@@ -13,6 +13,9 @@ mkdir -p "$STAGE"
 GOOS=linux GOARCH=amd64 go build \
   -ldflags "-s -w -X openknowledge/internal/version.Version=$VERSION" \
   -o "$STAGE/ok" ./cmd/ok
+# Windows 宿主落盘为 0644，须钉权限位；Git Bash 挂载 noacl 时本行是静默 no-op，
+# 此时由下方 tar --mode 与 nfpm file_info 兜底（Linux/macOS 宿主本行生效）
+chmod 0755 "$STAGE/ok"
 cp -r web "$STAGE/web"
 cp -r docs/changelogs "$STAGE/changelogs"
 
@@ -22,7 +25,12 @@ mkdir -p installer/output
 rm -rf "dist/$PKG"
 mkdir -p "dist/$PKG"
 cp -r "$STAGE/ok" "$STAGE/web" "$STAGE/changelogs" "dist/$PKG/"
-tar -czf "installer/output/$PKG.tar.gz" -C dist "$PKG"
+# Git Bash 挂载 noacl：chmod 不改 ACL，stat 只认 .exe/MZ/#! 不识 ELF，
+# 文件权限位进不了 tar——打包时强制 ok 条目 mode=0755（双保险之一，另一处是 nfpm file_info）
+TAR="installer/output/$PKG.tar"
+tar -cf "$TAR" -C dist --exclude="$PKG/ok" "$PKG"
+tar -rf "$TAR" -C dist --mode=0755 "$PKG/ok"
+gzip -f "$TAR"
 rm -rf "dist/$PKG"
 echo "tar.gz built: installer/output/$PKG.tar.gz"
 
