@@ -1,8 +1,21 @@
-# OpenKnowledge
+<p align="center">
+  <img src="docs/assets/logo.svg" alt="OpenKnowledge" width="580">
+</p>
 
-为 AI 编程助手提供的**项目知识库**——知识按项目隔离，通过各 AI 助手的 hooks/扩展自动注入 AI 上下文，并能强制执行"改代码必须写变更日志"这类工作流规则。
+<p align="center">
+  <b>简体中文</b> · <a href="README_EN.md">English</a> · <a href="docs/ARCHITECTURE.md">架构文档</a> · <a href="docs/changelogs/">更新日志</a>
+</p>
 
-单二进制 Go CLI（`ok`），零运行时依赖。
+<p align="center">
+  <img alt="version" src="https://img.shields.io/badge/version-2.9.0-2563eb">
+  <img alt="go" src="https://img.shields.io/badge/go-%3E%3D1.25-00ADD8">
+  <img alt="platform" src="https://img.shields.io/badge/platform-windows-0078d6">
+</p>
+
+<p align="center">
+  为 AI 编程助手提供的**项目知识库**——知识按项目隔离，通过各 AI 助手的 hooks/扩展自动注入 AI 上下文，<br>
+  并能强制执行"改代码必须写变更日志"这类工作流规则。单二进制 Go CLI（<code>ok</code>），零运行时依赖。
+</p>
 
 ## 它能做什么
 
