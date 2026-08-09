@@ -39,9 +39,18 @@
       opts.body = JSON.stringify(opts.body);
     }
     return fetch(path, opts).then(function (res) {
+      if (res.ok) sessionStorage.removeItem("ok-401-reload");
       if (res.status === 204) return null;
       return res.json().then(function (data) {
         if (!res.ok) {
+          // daemon 被替换（多 exe 共存/重启）后页面 token 过期：自动刷新一次取新 token
+          // （sessionStorage 标志防刷新循环；任一成功响应后清除，见上）
+          if (res.status === 401 && !sessionStorage.getItem("ok-401-reload")) {
+            sessionStorage.setItem("ok-401-reload", "1");
+            showError("服务已重启，正在刷新…");
+            setTimeout(function () { location.reload(); }, 800);
+            return new Promise(function () {});
+          }
           var err = new Error((data && data.error) || ("请求失败: " + res.status));
           err.status = res.status;
           throw err;
