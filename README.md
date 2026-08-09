@@ -16,13 +16,11 @@
 
 ## 安装
 
-**方式 A：安装程序（Windows，中文界面）**
+**方式 A：安装程序（Windows，中文界面，推荐给最终用户）**
 
-```bash
-bash scripts/build-installer.sh   # 产出 installer/output/OpenKnowledgeSetup-<版本>.exe
-```
+直接运行发布产物 `OpenKnowledgeSetup-<版本>.exe`——无需安装 Go、无需任何构建步骤：默认装到 `%LOCALAPPDATA%\Programs\OpenKnowledge`（免管理员），可选桌面快捷方式 / 加入 PATH / 安装后自动运行首次引导。卸载默认保留知识库数据（交互卸载时可选删除，静默卸载一律保留）。
 
-运行安装包：默认装到 `%LOCALAPPDATA%\Programs\OpenKnowledge`（免管理员），可选桌面快捷方式 / 加入 PATH / 安装后自动运行首次引导。卸载默认保留知识库数据（交互卸载时可选删除，静默卸载一律保留）。
+> 维护者自己打包安装程序：`bash scripts/build-installer.sh`（产出 `installer/output/OpenKnowledgeSetup-<版本>.exe`）。
 
 **方式 B：手动构建**
 
