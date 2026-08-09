@@ -31,5 +31,5 @@ if ! command -v nfpm >/dev/null 2>&1; then
   echo "未找到 nfpm。安装：go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest" >&2
   exit 1
 fi
-VERSION="$VERSION" nfpm package --config installer/nfpm.yaml --target installer/output/
+VERSION="$VERSION" nfpm package --packager deb --config installer/nfpm.yaml --target installer/output/
 echo "deb built into installer/output/"

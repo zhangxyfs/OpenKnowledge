@@ -1,0 +1,21 @@
+name: openknowledge
+arch: amd64
+platform: linux
+version: ${VERSION}
+maintainer: OpenKnowledge
+description: |
+  为 AI 编程助手提供的项目知识库：hooks 自动注入 + 混合检索 + 强制工作流规则。
+  安装后运行 ok setup 完成首次引导（hooks / 技能 / embedding / 登录自启）。
+homepage: https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge
+recommends:
+  - xdg-utils
+contents:
+  - src: dist/linux-amd64/ok
+    dst: /usr/lib/openknowledge/ok
+  - src: dist/linux-amd64/web/
+    dst: /usr/lib/openknowledge/web/
+  - src: dist/linux-amd64/changelogs/
+    dst: /usr/lib/openknowledge/changelogs/
+  - src: /usr/lib/openknowledge/ok
+    dst: /usr/bin/ok
+    type: symlink
