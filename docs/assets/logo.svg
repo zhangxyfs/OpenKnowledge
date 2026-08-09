@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 580 120" width="580" height="120" role="img" aria-label="OpenKnowledge">
-  <!-- 原创图标：打开的书（缩小至 75%）+ 独立放大的知识火花 -->
+  <!-- 原创图标：打开的书（75%）+ 独立知识火花（全程常驻） -->
   <g transform="translate(16,38) scale(0.75)">
     <path d="M32 14 C24 7 12 5 2 7 L2 58 C12 56 24 58 32 65 C40 58 52 56 62 58 L62 7 C52 5 40 7 32 14 Z"
           fill="none" stroke="#2563eb" stroke-width="5" stroke-linejoin="round"/>
@@ -8,18 +8,34 @@
   <circle cx="73" cy="31" r="5.5" fill="#2563eb">
     <animate attributeName="opacity" values="1;0.25;1" keyTimes="0;0.5;1" dur="5s" repeatCount="indefinite"/>
   </circle>
-  <!-- 字标：Open 深蓝 + Knowledge 亮蓝；K 每 5 秒水平翻转一次（绕字母垂直中线，SMIL） -->
-  <text x="92" y="86" font-family="Segoe UI, Arial, sans-serif" font-size="64" font-weight="700"
-        fill="#1e40af" textLength="140" lengthAdjust="spacingAndGlyphs">Open</text>
-  <g transform="translate(255,0)">
+
+  <!-- 入场编排（2.4s，只演一次并定格；基准值即最终态，无 SMIL 时退化为完整静态 logo）：
+       开场只有 Knowledge 贴着书本；0.9s 后 Open 从书本右边沿 scaleX 展开"挤"进来，
+       Knowledge 同步右移、带过冲回弹；之后 K 的翻转循环接管。 -->
+  <g transform="translate(92,0)">
     <g>
       <animateTransform attributeName="transform" type="scale"
-                        values="1 1;1 1;-1 1;-1 1;1 1;1 1"
-                        keyTimes="0;0.72;0.8;0.86;0.94;1" dur="5s" repeatCount="indefinite"/>
-      <text x="-21" y="86" font-family="Segoe UI, Arial, sans-serif" font-size="64" font-weight="700"
-            fill="#2563eb" textLength="42" lengthAdjust="spacingAndGlyphs" text-anchor="start">K</text>
+                        values="0 1;0 1;1.05 1;1 1;1 1"
+                        keyTimes="0;0.375;0.875;0.958;1" dur="2.4s" fill="freeze"/>
+      <text x="0" y="86" font-family="Segoe UI, Arial, sans-serif" font-size="64" font-weight="700"
+            fill="#1e40af" textLength="140" lengthAdjust="spacingAndGlyphs">Open</text>
     </g>
   </g>
-  <text x="276" y="86" font-family="Segoe UI, Arial, sans-serif" font-size="64" font-weight="700"
-        fill="#2563eb" textLength="278" lengthAdjust="spacingAndGlyphs">nowledge</text>
+  <g>
+    <animateTransform attributeName="transform" type="translate"
+                      values="-150 0;-150 0;3 0;0 0;0 0"
+                      keyTimes="0;0.375;0.875;0.958;1" dur="2.4s" fill="freeze"/>
+    <!-- K：每 5 秒水平翻转一次（绕字母垂直中线，SMIL），首次翻转发生在入场定格之后 -->
+    <g transform="translate(255,0)">
+      <g>
+        <animateTransform attributeName="transform" type="scale"
+                          values="1 1;1 1;-1 1;-1 1;1 1;1 1"
+                          keyTimes="0;0.72;0.8;0.86;0.94;1" dur="5s" repeatCount="indefinite"/>
+        <text x="-21" y="86" font-family="Segoe UI, Arial, sans-serif" font-size="64" font-weight="700"
+              fill="#2563eb" textLength="42" lengthAdjust="spacingAndGlyphs" text-anchor="start">K</text>
+      </g>
+    </g>
+    <text x="276" y="86" font-family="Segoe UI, Arial, sans-serif" font-size="64" font-weight="700"
+          fill="#2563eb" textLength="278" lengthAdjust="spacingAndGlyphs">nowledge</text>
+  </g>
 </svg>
