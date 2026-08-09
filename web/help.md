@@ -35,6 +35,7 @@ OpenKnowledge 是 AI 编码助手的**本地知识库**：把项目经验、规�
 - `ok setup [--agent <id>]`——写 hooks/插件 + 装技能 + 配 embedding（交互向导）
 - `ok add --title T --type note`——直接添加条目（`--tags/--summary/--mandatory/--force/--file`）
 - `ok propose` / `ok approve`——沉淀草稿 / 采纳草稿
+- `ok backfill-born`——按当前分支回填存量条目的 born 标签（预览确认，已有值不覆盖）
 - `ok list` / `ok search <词>`——列条目 / 检索
 - `ok capture`——查看或设置沉淀模式（propose/auto、轮次间隔）
 - `ok wiki status / mark / base / diff`——wiki 状态 / 记游标 / 基准分支 / 分支结构差异
@@ -58,6 +59,7 @@ daemon 常驻后台、按需自动拉起，无需手动管理；托盘图标右�
 
 - `[capture] mode`（默认 propose）——沉淀模式：propose=AI 自主判断 / auto=到间隔自动提醒。改法：GUI 管理页"经验沉淀"卡，或 `ok capture`
 - `[capture] turn_interval`（默认 5）——auto 模式的提醒间隔（回合数）。改法：同上
+- `[provenance] auto_born`（默认 true）——新建条目自动记录出生分支（born 标签）。改法：GUI 管理页"经验沉淀"卡 checkbox，或手改文件
 - `[enforce]`（默认空）——强制检查规则（如 changelog_required：改了代码必须更新 CHANGELOG，否则阻断）。改法：手改文件
 - `[wiki] stale_commits`（默认 20）——wiki 落后多少 commit 开始提醒；0 = 关闭提醒。改法：手改文件
 - `[retrieve] top_n`（默认 2）——每次注入最多检索命中条数。改法：手改文件
@@ -68,6 +70,7 @@ daemon 常驻后台、按需自动拉起，无需手动管理；托盘图标右�
 - `mandatory: true` → 每会话首次提问**全文注入**（规约类内容用）
 - `draft: true` → 草稿，不参与检索注入；GUI 点"采纳"或 `ok approve` 转正
 - `tags` 含 `branch:<分支名>` → 该条目只在对应分支注入（2.7+，长期并行分支用）
+- `tags` 含 `born:<分支名>` → 出生分支溯源（2.8+，自动记录，只展示不过滤）
 
 ## 常见问题
 
