@@ -67,25 +67,32 @@ type Reasonix struct {
 	EnforceMode string `toml:"enforce_mode"` // soft|hard|mixed；缺省/非法按 mixed
 }
 
+// Provenance 控制分支溯源（born 标签的自动记录）。
+type Provenance struct {
+	AutoBorn bool `toml:"auto_born"` // 默认 true（见 Default）
+}
+
 type Config struct {
-	Embedding Embedding     `toml:"embedding"`
-	Inject    Inject        `toml:"inject"`
-	Retrieve  Retrieve      `toml:"retrieve"`
-	Enforce   []EnforceRule `toml:"enforce"`
-	Capture   Capture       `toml:"capture"`
-	Wiki      Wiki          `toml:"wiki"`
-	Hooks     Hooks         `toml:"hooks"`
-	Reasonix  Reasonix      `toml:"reasonix"`
+	Embedding  Embedding     `toml:"embedding"`
+	Inject     Inject        `toml:"inject"`
+	Retrieve   Retrieve      `toml:"retrieve"`
+	Enforce    []EnforceRule `toml:"enforce"`
+	Capture    Capture       `toml:"capture"`
+	Wiki       Wiki          `toml:"wiki"`
+	Hooks      Hooks         `toml:"hooks"`
+	Reasonix   Reasonix      `toml:"reasonix"`
+	Provenance Provenance    `toml:"provenance"`
 }
 
 func Default() Config {
 	return Config{
-		Embedding: Embedding{TimeoutSec: 5},
-		Inject:    Inject{MaxTokens: 800},
-		Retrieve:  Retrieve{Alpha: 1.0, Beta: 1.0, TopN: 2},
-		Capture:   Capture{Mode: "propose", TurnInterval: 5},
-		Wiki:      Wiki{StaleCommits: 20},
-		Hooks:     Hooks{TimeoutSec: 10},
+		Embedding:  Embedding{TimeoutSec: 5},
+		Inject:     Inject{MaxTokens: 800},
+		Retrieve:   Retrieve{Alpha: 1.0, Beta: 1.0, TopN: 2},
+		Capture:    Capture{Mode: "propose", TurnInterval: 5},
+		Wiki:       Wiki{StaleCommits: 20},
+		Hooks:      Hooks{TimeoutSec: 10},
+		Provenance: Provenance{AutoBorn: true},
 	}
 }
 

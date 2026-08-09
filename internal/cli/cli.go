@@ -101,6 +101,33 @@ func Init(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+// bornTag 返回当前分支的 born 标签（born:<分支>）；auto_born 关闭、
+// 非 git 仓库或探测失败返回 ""（fail-open，不阻断建条目）。
+func bornTag(pc *project.Context) string {
+	if !pc.Config.Provenance.AutoBorn {
+		return ""
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	b := wiki.CurrentBranch(cwd)
+	if b == "" {
+		return ""
+	}
+	return "born:" + b
+}
+
+// hasBorn 报告 tags 中已存在 born 标签（用户显式传入时自动记录不覆盖）。
+func hasBorn(tags []string) bool {
+	for _, t := range tags {
+		if strings.HasPrefix(t, "born:") {
+			return true
+		}
+	}
+	return false
+}
+
 // Add: ok add --title T --type rule --tags a,b --summary S --mandatory [--file body.md] [--force]
 func Add(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("add", flag.ContinueOnError)
@@ -140,6 +167,11 @@ func Add(args []string, stdout, stderr io.Writer) int {
 	if *tags != "" {
 		for _, t := range strings.Split(*tags, ",") {
 			e.Tags = append(e.Tags, strings.TrimSpace(t))
+		}
+	}
+	if !hasBorn(e.Tags) {
+		if bt := bornTag(pc); bt != "" {
+			e.Tags = append(e.Tags, bt)
 		}
 	}
 	path := filepath.Join(pc.Store.KnowledgeDir(), entry.Slug(*title)+".md")
@@ -424,6 +456,11 @@ func Propose(args []string, stdout, stderr io.Writer) int {
 	if *tags != "" {
 		for _, t := range strings.Split(*tags, ",") {
 			e.Tags = append(e.Tags, strings.TrimSpace(t))
+		}
+	}
+	if !hasBorn(e.Tags) {
+		if bt := bornTag(pc); bt != "" {
+			e.Tags = append(e.Tags, bt)
 		}
 	}
 	path := filepath.Join(pc.Store.KnowledgeDir(), entry.Slug(*title)+".md")

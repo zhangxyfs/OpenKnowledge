@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -724,4 +725,103 @@ func writeBody(t *testing.T, dir, content string) string {
 		t.Fatal(err)
 	}
 	return p
+}
+
+// setupOKProject 在隔离 OK_HOME 下初始化 demo 项目并 chdir 进去；
+// 返回项目目录与知识库根目录（git 仓库由 initGitForTest 另行初始化）。
+func setupOKProject(t *testing.T) (projDir, kbRoot string) {
+	t.Helper()
+	home, kb := setupProject(t)
+	return filepath.Join(home, "demo"), kb
+}
+
+// initGitForTest 把 dir 初始化为 git 仓库（master 分支）并提交 commits 个空提交。
+func initGitForTest(t *testing.T, dir string, commits int) {
+	t.Helper()
+	runGit(t, dir, "init", "-b", "master")
+	for i := 0; i < commits; i++ {
+		runGit(t, dir, "commit", "--allow-empty", "-m", fmt.Sprintf("c%d", i+1))
+	}
+}
+
+// ok add 在 git 仓库中应自动记录 born:<当前分支> 标签（auto_born 默认开）。
+func TestAddAutoBorn(t *testing.T) {
+	projDir, kbRoot := setupOKProject(t)
+	initGitForTest(t, projDir, 1) // 当前分支 master
+	var out, errb bytes.Buffer
+	if code := Add([]string{"--title", "测试条目", "--type", "note"}, &out, &errb); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	data, err := os.ReadFile(filepath.Join(kbRoot, "knowledge", "测试条目.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "born:master") {
+		t.Errorf("应自动带 born:master: %s", data)
+	}
+}
+
+// 配置文件显式写 auto_born = false 时，add 不得自动标 born。
+func TestAddBornDisabled(t *testing.T) {
+	projDir, kbRoot := setupOKProject(t)
+	initGitForTest(t, projDir, 1)
+	os.WriteFile(filepath.Join(kbRoot, "config.toml"), []byte("[provenance]\nauto_born = false\n"), 0o644)
+	var out, errb bytes.Buffer
+	if code := Add([]string{"--title", "测试条目", "--type", "note"}, &out, &errb); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	data, _ := os.ReadFile(filepath.Join(kbRoot, "knowledge", "测试条目.md"))
+	if strings.Contains(string(data), "born:") {
+		t.Errorf("关闭后不得标 born: %s", data)
+	}
+}
+
+// 用户显式传入 born 标签时，自动记录不得覆盖也不得叠加。
+func TestAddBornNotOverrideExplicit(t *testing.T) {
+	projDir, kbRoot := setupOKProject(t)
+	initGitForTest(t, projDir, 1)
+	var out, errb bytes.Buffer
+	if code := Add([]string{"--title", "测试条目", "--type", "note", "--tags", "born:hotfix"}, &out, &errb); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	data, _ := os.ReadFile(filepath.Join(kbRoot, "knowledge", "测试条目.md"))
+	if !strings.Contains(string(data), "born:hotfix") || strings.Contains(string(data), "born:master") {
+		t.Errorf("显式 born 不得被覆盖/叠加: %s", data)
+	}
+}
+
+// ok propose 同样应在创建草稿时自动记录 born 标签。
+func TestProposeAutoBorn(t *testing.T) {
+	projDir, kbRoot := setupOKProject(t)
+	initGitForTest(t, projDir, 1)
+	var out, errb bytes.Buffer
+	if code := Propose([]string{"--title", "草稿条目", "--type", "pitfall", "--body", "正文"}, &out, &errb); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	data, err := os.ReadFile(filepath.Join(kbRoot, "knowledge", "草稿条目.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "born:master") {
+		t.Errorf("propose 应自动带 born: %s", data)
+	}
+}
+
+// 回归钉：approve 转正只翻 draft 标志，不得改写/丢失 born（出生以创建时刻为准）。
+func TestApproveKeepsBorn(t *testing.T) {
+	projDir, kbRoot := setupOKProject(t)
+	initGitForTest(t, projDir, 1)
+	var out, errb bytes.Buffer
+	Propose([]string{"--title", "草稿条目", "--type", "note", "--body", "x"}, &out, &errb)
+	out.Reset()
+	if code := Approve([]string{"草稿条目.md"}, &out, &errb); code != 0 {
+		t.Fatalf("approve exit %d", code)
+	}
+	data, _ := os.ReadFile(filepath.Join(kbRoot, "knowledge", "草稿条目.md"))
+	if !strings.Contains(string(data), "born:master") {
+		t.Errorf("approve 不得丢 born: %s", data)
+	}
+	if strings.Contains(string(data), "draft: true") {
+		t.Errorf("approve 后不应仍为草稿")
+	}
 }
