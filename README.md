@@ -1,6 +1,6 @@
 # OpenKnowledge
 
-为 AI 编程助手提供的**项目知识库**——知识按项目隔离，通过 Kimi Code 的 hooks 自动注入 AI 上下文，并能强制执行"改代码必须写变更日志"这类工作流规则。
+为 AI 编程助手提供的**项目知识库**——知识按项目隔离，通过各 AI 助手的 hooks/扩展自动注入 AI 上下文，并能强制执行"改代码必须写变更日志"这类工作流规则。
 
 单二进制 Go CLI（`ok`），零运行时依赖。
 
@@ -8,11 +8,11 @@
 
 - **基础注入**：每个会话第一次提问时，自动把项目的强制约定（mandatory 条目）全文 + 知识索引发送给 AI
 - **检索注入**：每次提问时按 关键词 + 向量语义 混合检索，把最相关的知识条目注入上下文（如"git 提交规范"）
-- **强制检查**：跟踪 AI 改过的文件；回合结束时发现改了代码却没写变更日志，就阻断并要求补齐（同会话只阻断一次）
+- **强制检查**：跟踪 AI 改过的文件；回合结束时发现改了代码却没写变更日志，就阻断并要求补齐（同会话同规则只阻断一次）
 - **多 agent 支持**：Kimi Code、Pi、ZCode、Reasonix 共用同一套知识库（可扩展适配器架构）——kimi 走 TOML hooks 标记块，pi 走 TypeScript 扩展，zcode 走 Claude JSON 协议，reasonix 走 Extension Protocol sidecar
 - **一键引导**：`ok setup` 自动完成 hooks 配置、技能安装、embedding 配置
 - **随时开关**：`ok off` 全局停用，`ok on` 恢复
-- **Web GUI 与常驻 daemon**：双击 exe 或 `ok gui` 打开管理界面；系统只有一个常驻 `ok.exe daemon` 进程（登录自启），统一承载 GUI 与 kimi hook 请求——hook 毫秒级转发，多会话不再起多个进程
+- **Web GUI 与常驻 daemon**：双击 exe 或 `ok gui` 打开管理界面；系统只有一个常驻 `ok.exe daemon` 进程（登录自启），统一承载 GUI 与各 agent 的 hook 请求——hook 毫秒级转发，多会话不再起多个进程
 
 ## 安装
 
@@ -35,8 +35,8 @@ go build -o ok ./cmd/ok            # Linux/macOS
 
 `ok setup` 会依次：
 
-1. 把 3 条 hook 写入 `~/.kimi-code/config.toml`（标记块幂等，自动备份原配置；已存在的 ok hooks 会被检测并覆盖更新 exe 路径，不会重复堆积）
-2. 安装 `openknowledge-init / on / off / propose / capture / wiki` 六个 kimi 技能到 `~/.agents/skills/`
+1. 为**全部已检测的 AI 助手**写入 hooks 配置——kimi 是 `~/.kimi-code/config.toml` 的 3 条 hook 标记块（幂等，自动备份；已存在的 ok hooks 会被检测并覆盖更新 exe 路径，不重复堆积），pi 是 TypeScript 扩展，zcode 是 `config.json` 合并写；`ok setup --agent <id>` 可只装指定 agent
+2. 安装 `openknowledge-init / on / off / propose / capture / wiki` 六个技能到各 agent 的技能目录（kimi/pi 共享 `~/.agents/skills/`，zcode 为 `~/.zcode/skills`）
 3. 询问 embedding 配置（base_url / model / API key，可直接粘贴；回车跳过则只用关键词检索），写入全局配置并当场验证连通性
 
 ## 快速开始
@@ -50,16 +50,16 @@ ok add --title "Git 提交规范" --type note --tags git --file git.md
 ok index                     # 配好 embedding 后同步索引与向量
 ```
 
-然后**新开一个 Kimi Code 会话**（hooks 在会话启动时加载）即可生效：
+然后**新开一个 AI 助手会话**（hooks 在会话启动时加载）即可生效：
 
 - 问 "git 提交规范是什么" → AI 直接引用知识库内容回答
 - AI 改了代码没写变更日志 → 回合结束时被阻断提醒
 
-也可以在 kimi 会话里直接说"初始化知识库""关闭知识库 hooks"——对应技能会自动调用。
+也可以在会话里直接说"初始化知识库""关闭知识库 hooks"——对应技能会自动调用。
 
 ## Web GUI
 
-**双击 `ok.exe`（无参数运行）或执行 `ok gui`** 即可启动 Web 管理界面：浏览器自动打开 `http://127.0.0.1:<随机端口>/?token=…`。GUI 由 daemon 托管，关闭页面/窗口不会退出进程；用 `ok daemon stop` 停止常驻服务。
+**双击 `ok.exe`（无参数运行）或执行 `ok gui`** 即可启动 Web 管理界面：浏览器自动打开 `http://127.0.0.1:17888`（固定端口兼作单实例锁；访问令牌随页面自动注入，不出现在 URL 里）。GUI 由 daemon 托管，关闭页面/窗口不会退出进程；用 `ok daemon stop` 停止常驻服务。
 
 三个标签页：
 
@@ -106,7 +106,7 @@ summary: 每次代码修改必须立即记录变更日志
 | `ok approve <文件>` | 批准草稿转正（同步索引与向量） |
 | `ok backfill-born` | 回填存量条目的 born 分支溯源标签（预览确认后写入，已有值不覆盖） |
 | `ok capture [propose\|auto\|interval <n>]` | 查看/切换经验沉淀模式，配置轮次间隔 |
-| `ok wiki status` / `ok wiki mark [commit]` | 查看 wiki 落后状态（JSON）/ 记录 wiki 游标（缺省取 HEAD） |
+| `ok wiki status` / `mark` / `base` / `diff` | wiki 状态（JSON）/ 记游标 / 查看或设置基准分支 / 输出分支差异素材 |
 | `ok search <词>` | 命令行预览检索效果 |
 | `ok index` | 同步索引与向量（手改条目后执行；删除 kb.db 后执行 = 全量重建） |
 | `ok list` | 列出项目与条目 |
@@ -138,7 +138,7 @@ message = "本次会话修改了代码但未更新变更日志，请先按规范
 
 - **关键词通道**：FTS5 全文索引 + BM25 打分（稀有词更值钱、长文不占优），按 标题/标签/摘要/正文 分权重；中文用二元组分词，零依赖
 - **语义通道**：OpenAI 兼容 embedding + 余弦相似度，召回"问法不同但意思相近"的条目
-- 两路分数归一化后加权混合（α/β 可调），取 top-3 注入
+- 两路分数归一化后加权混合（α/β 可调），取 top-2 注入（`top_n` 可配）
 - **草稿条目（`ok propose` 产生）不进索引的检索通道**：FTS 与向量都排除，批准后自动参与
 
 **为什么这么选**：关键词和语义互补是检索质量的基本盘；用 SQLite（纯 Go 移植，无 CGO）承载索引而不是引入向量数据库/搜索服务，是为了守住"单二进制、零基础设施"的部署形态——一个 `kb.db` 文件就是全部。
@@ -147,7 +147,7 @@ message = "本次会话修改了代码但未更新变更日志，请先按规范
 
 ## 工作原理（简版）
 
-Kimi Code 在三个时机调用 `ok`：
+以 Kimi Code 为例，AI 助手在三个时机调用 `ok`（其他 agent 经各自适配器等价触发）：
 
 | hook | 何时执行 | ok 内部放行条件 | 作用 |
 |------|----------|----------------|------|
@@ -160,7 +160,7 @@ Kimi Code 在三个时机调用 `ok`：
 ## 开发
 
 ```bash
-go test ./...    # 15 个包全部测试（零网络，含端到端）
+go test ./...    # 25 个包全部测试（零网络，含端到端）
 go vet ./...
 ```
 
