@@ -9,22 +9,23 @@
     <animate attributeName="opacity" values="1;0.25;1" keyTimes="0;0.5;1" dur="5s" repeatCount="indefinite"/>
   </circle>
 
-  <!-- 入场编排（2.4s，只演一次并定格；基准值即最终态，无 SMIL 时退化为完整静态 logo）：
-       开场只有 Knowledge 贴着书本；0.9s 后 Open 从书本右边沿 scaleX 展开"挤"进来，
-       Knowledge 同步右移、带过冲回弹；之后 K 的翻转循环接管。 -->
+  <!-- 入场编排（2.6s，只演一次并定格；基准值即最终态，无 SMIL 时退化为完整静态 logo）：
+       开场只有 Knowledge 贴着书本；0.8s 后 Open 从书本右边沿快速展开"挤"进来（0.7s），
+       Knowledge 被顶得冲过终点再多飞 18px（像被炸过去），随后回弹过 -3px 归位；
+       之后 K 的翻转循环接管。 -->
   <g transform="translate(92,0)">
     <g>
       <animateTransform attributeName="transform" type="scale"
-                        values="0 1;0 1;1.05 1;1 1;1 1"
-                        keyTimes="0;0.375;0.875;0.958;1" dur="2.4s" fill="freeze"/>
+                        values="0 1;0 1;1.03 1;1 1;1 1;1 1"
+                        keyTimes="0;0.3077;0.5769;0.6731;1;1" dur="2.6s" fill="freeze"/>
       <text x="0" y="86" font-family="Segoe UI, Arial, sans-serif" font-size="64" font-weight="700"
             fill="#1e40af" textLength="140" lengthAdjust="spacingAndGlyphs">Open</text>
     </g>
   </g>
   <g>
     <animateTransform attributeName="transform" type="translate"
-                      values="-150 0;-150 0;3 0;0 0;0 0"
-                      keyTimes="0;0.375;0.875;0.958;1" dur="2.4s" fill="freeze"/>
+                      values="-150 0;-150 0;18 0;-3 0;0 0;0 0"
+                      keyTimes="0;0.3077;0.6731;0.75;0.8269;1" dur="2.6s" fill="freeze"/>
     <!-- K：每 5 秒水平翻转一次（绕字母垂直中线，SMIL），首次翻转发生在入场定格之后 -->
     <g transform="translate(255,0)">
       <g>
