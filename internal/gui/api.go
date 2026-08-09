@@ -485,6 +485,42 @@ func writeEntry(w http.ResponseWriter, st *store.Store, path string, req *entryR
 	writeJSON(w, http.StatusOK, summaryOf(e))
 }
 
+// guiBornTag 返回 GUI 新建条目时应自动写入的 born 标签（born:<分支>）。
+// 分支按注册表项目第一个路径（Paths[0]）探测——daemon 的 cwd 未必是项目目录；
+// auto_born 关闭、非 git 或探测失败返回 ""（fail-open，不阻断创建）。
+func guiBornTag(st *store.Store, project string) string {
+	cfg, err := config.LoadMerged(st.ConfigPath(), filepath.Join(registry.Home(), "config.toml"))
+	if err != nil || !cfg.Provenance.AutoBorn {
+		return ""
+	}
+	reg, err := registry.Load(registry.DefaultPath())
+	if err != nil {
+		return ""
+	}
+	for _, p := range reg.Projects {
+		if p.Name == project {
+			if len(p.Paths) == 0 {
+				return ""
+			}
+			if b := wiki.CurrentBranch(p.Paths[0]); b != "" {
+				return "born:" + b
+			}
+			return ""
+		}
+	}
+	return ""
+}
+
+// hasBornTag 报告 tags 中已存在 born 标签（用户表单显式传入时自动记录不覆盖）。
+func hasBornTag(tags []string) bool {
+	for _, t := range tags {
+		if strings.HasPrefix(t, "born:") {
+			return true
+		}
+	}
+	return false
+}
+
 func (h *Handler) apiEntryCreate(w http.ResponseWriter, r *http.Request) {
 	var req entryRequest
 	if !decodeJSON(w, r, &req) {
@@ -507,6 +543,12 @@ func (h *Handler) apiEntryCreate(w http.ResponseWriter, r *http.Request) {
 	if _, err := os.Stat(path); err == nil {
 		writeErr(w, http.StatusConflict, fmt.Sprintf("条目已存在: %s", slug+".md"))
 		return
+	}
+	// 新建条目自动记 born（与 ok add 同语义；仅创建路径，更新不补标）
+	if !hasBornTag(req.Tags) {
+		if bt := guiBornTag(st, req.Project); bt != "" {
+			req.Tags = append(req.Tags, bt)
+		}
 	}
 	writeEntry(w, st, path, &req)
 }

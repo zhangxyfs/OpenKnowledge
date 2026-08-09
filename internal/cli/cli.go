@@ -670,6 +670,9 @@ func recordMerges(pc *project.Context, cwd string, merged []string) {
 		return
 	}
 	head, _ := wiki.HeadCommit(cwd)
+	if head == "" {
+		return // HEAD 读不到（git 异常/裸仓库无提交）：宁可不记，不落空 commit 谱系
+	}
 	changed := false
 	for _, b := range merged {
 		if s.AppendMerge(b, s.BaseBranch, head, time.Now()) {
@@ -817,10 +820,13 @@ func WikiCmd(args []string, stdout, stderr io.Writer) int {
 			cmd := exec.Command("git", "-C", cwd, "branch", "--format", "%(refname:short)")
 			procx.HideWindow(cmd)
 			if out, err := cmd.Output(); err == nil {
-				fmt.Fprintln(stdout, "候选分支:")
-				for _, b := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-					if b != "" {
-						fmt.Fprintf(stdout, "  %s\n", b)
+				// 裸仓库无提交时输出为空：不打印"候选分支:"空头
+				if names := strings.TrimSpace(string(out)); names != "" {
+					fmt.Fprintln(stdout, "候选分支:")
+					for _, b := range strings.Split(names, "\n") {
+						if b != "" {
+							fmt.Fprintf(stdout, "  %s\n", b)
+						}
 					}
 				}
 			}

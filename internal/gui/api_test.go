@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -52,6 +53,32 @@ func mkProject(t *testing.T, okHome, name string) {
 	t.Helper()
 	reg := &registry.Registry{}
 	if err := reg.AddProject(name, filepath.Join(t.TempDir(), "src")); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.Save(registry.DefaultPath()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(okHome, "projects", name, "knowledge"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// mkGitProject 注册一个项目，其注册路径指向新建的临时 git 仓库（master，1 个提交）。
+func mkGitProject(t *testing.T, okHome, name string) {
+	t.Helper()
+	repo := t.TempDir()
+	runGit := func(args ...string) {
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	runGit("init", "-b", "master")
+	runGit("commit", "--allow-empty", "-m", "c1")
+	reg := &registry.Registry{}
+	if err := reg.AddProject(name, repo); err != nil {
 		t.Fatal(err)
 	}
 	if err := reg.Save(registry.DefaultPath()); err != nil {
@@ -376,6 +403,57 @@ func TestEntryValidation(t *testing.T) {
 	bad["project"] = "ghost"
 	if code, data := do(t, "POST", srv.URL+"/api/entry", testToken, bad); code != 404 {
 		t.Fatalf("unknown project: status = %d, body %s", code, data)
+	}
+}
+
+// TestEntryCreateBorn GUI 新建条目按项目注册路径探测分支自动记 born；
+// 用户显式传 born 不覆盖；auto_born=false 后不标。
+func TestEntryCreateBorn(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	mkGitProject(t, okHome, "demo")
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	readEntry := func(title string) string {
+		t.Helper()
+		data, err := os.ReadFile(filepath.Join(okHome, "projects", "demo", "knowledge", title+".md"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+
+	// git 夹具项目下创建 → 落盘文件含 born:master
+	code, data := do(t, "POST", srv.URL+"/api/entry", testToken, entryPayload("架构约定"))
+	if code != 200 {
+		t.Fatalf("create: status = %d, body %s", code, data)
+	}
+	if got := readEntry("架构约定"); !strings.Contains(got, "born:master") {
+		t.Errorf("应自动带 born:master: %s", got)
+	}
+
+	// 显式 born 不覆盖也不叠加
+	explicit := entryPayload("显式born")
+	explicit["tags"] = []string{"born:hotfix"}
+	code, data = do(t, "POST", srv.URL+"/api/entry", testToken, explicit)
+	if code != 200 {
+		t.Fatalf("create explicit: status = %d, body %s", code, data)
+	}
+	if got := readEntry("显式born"); !strings.Contains(got, "born:hotfix") || strings.Contains(got, "born:master") {
+		t.Errorf("显式 born 不得被覆盖/叠加: %s", got)
+	}
+
+	// auto_born=false → 不标
+	cfgPath := filepath.Join(okHome, "projects", "demo", "config.toml")
+	if err := os.WriteFile(cfgPath, []byte("[provenance]\nauto_born = false\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, data = do(t, "POST", srv.URL+"/api/entry", testToken, entryPayload("关闭后不标"))
+	if code != 200 {
+		t.Fatalf("create disabled: status = %d, body %s", code, data)
+	}
+	if got := readEntry("关闭后不标"); strings.Contains(got, "born:") {
+		t.Errorf("auto_born=false 不得标 born: %s", got)
 	}
 }
 
