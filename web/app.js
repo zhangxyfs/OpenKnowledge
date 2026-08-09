@@ -950,6 +950,7 @@
     }).then(function (res) {
       $("del-modal").classList.add("hidden");
       state.lastVersion = 0;
+      if (state.project === name) state.project = ""; // 删的是当前选中项目：先清空，避免 refreshCapture 拿着已删项目名 404 误报
       refreshStatus();
       if (res && res.warning) {
         showError("项目已注销，但" + res.warning + "，请手动清理 " + (res.dir || ""));
