@@ -195,7 +195,7 @@ input:focus, select:focus, textarea:focus {
 .entries thead th.ops { background: #f0f1f4; z-index: 2; }
 .badge-branch { background: #e0e7ff; color: #3730a3; border-radius: 4px; padding: 1px 6px; font-size: 12px; white-space: nowrap; }
 /* 分支溯源双徽标：born 灰蓝（出生分支），scope 蓝紫（badge-branch 既有色） */
-.badge-born { background: #475569; color: #ffffff; border-radius: 4px; padding: 1px 6px; font-size: 12px; white-space: nowrap; }
+.badge-born { background: #2563eb; color: #ffffff; border-radius: 4px; padding: 1px 6px; font-size: 12px; white-space: nowrap; }
 .branch-warn { color: #b45309; font-weight: 600; }
 .merge-lineage { padding: 2px 4px; font-size: 12px; }
 
