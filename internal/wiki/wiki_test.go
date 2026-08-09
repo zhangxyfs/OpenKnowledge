@@ -152,6 +152,24 @@ func TestLoadStateMissingAndCorrupt(t *testing.T) {
 	}
 }
 
+// AppendMerge：from+commit 判重；不同 commit 视为新合并。
+func TestAppendMergeDedup(t *testing.T) {
+	s := &State{}
+	tm := time.Date(2026, 8, 9, 10, 0, 0, 0, time.UTC)
+	if !s.AppendMerge("dev", "master", "abc123", tm) {
+		t.Fatal("首次应新增")
+	}
+	if s.AppendMerge("dev", "master", "abc123", tm) {
+		t.Fatal("from+commit 相同应判重")
+	}
+	if !s.AppendMerge("dev", "master", "def456", tm) {
+		t.Fatal("不同 commit 应新增")
+	}
+	if len(s.Merges) != 2 {
+		t.Fatalf("应为 2 条: %+v", s.Merges)
+	}
+}
+
 func TestCheckStatusGitUnavailable(t *testing.T) {
 	// 非 git 目录：behind = -1，不 stale
 	st := CheckStatus(t.TempDir(), t.TempDir(), 20)

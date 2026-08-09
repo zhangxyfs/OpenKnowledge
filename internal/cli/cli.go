@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -18,6 +19,7 @@ import (
 	"openknowledge/internal/embed"
 	"openknowledge/internal/entry"
 	"openknowledge/internal/index"
+	"openknowledge/internal/procx"
 	"openknowledge/internal/project"
 	"openknowledge/internal/registry"
 	"openknowledge/internal/retrieve"
@@ -233,6 +235,9 @@ func BackfillBorn(args []string, in io.Reader, stdout, stderr io.Writer) int {
 	for _, f := range pending {
 		data, _ := os.ReadFile(f)
 		e, _ := entry.Parse(data)
+		if e == nil {
+			continue // 确认瞬间文件被删/损坏：Parse 出错返回 nil，跳过防 panic
+		}
 		e.Tags = append(e.Tags, "born:"+branch)
 		if err := os.WriteFile(f, e.Serialize(), 0o644); err != nil {
 			fmt.Fprintf(stderr, "写回失败 %s: %v\n", f, err)
@@ -655,6 +660,29 @@ func CaptureCmd(args []string, stdout, stderr io.Writer) int {
 	}
 }
 
+// recordMerges 检出已并入分支时落盘谱系（from+commit 判重）。fail-open 仅记日志。
+func recordMerges(pc *project.Context, cwd string, merged []string) {
+	if len(merged) == 0 {
+		return
+	}
+	s := wiki.LoadState(pc.Store.StateDir())
+	if s == nil {
+		return
+	}
+	head, _ := wiki.HeadCommit(cwd)
+	changed := false
+	for _, b := range merged {
+		if s.AppendMerge(b, s.BaseBranch, head, time.Now()) {
+			changed = true
+		}
+	}
+	if changed {
+		if err := wiki.SaveState(pc.Store.StateDir(), s); err != nil {
+			fmt.Fprintln(os.Stderr, "谱系落盘失败:", err)
+		}
+	}
+}
+
 // WikiCmd 处理 ok wiki status|mark|base|diff。
 func WikiCmd(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("wiki", flag.ContinueOnError)
@@ -702,6 +730,7 @@ func WikiCmd(args []string, stdout, stderr io.Writer) int {
 						return ok
 					})
 					db.Close()
+					recordMerges(pc, cwd, merged)
 					if len(merged) > 0 {
 						out["merged_branches"] = merged
 					}
@@ -725,14 +754,25 @@ func WikiCmd(args []string, stdout, stderr io.Writer) int {
 			}
 			commit = full
 		}
+		branch := wiki.CurrentBranch(cwd) // 非 git 为 ""：游标挂在 "" 键下（与旧单游标等价）
 		count := 0
+		var merged []string
 		if db, err := index.Open(pc.Store.KbPath()); err == nil {
 			if err := db.Sync(pc.Store.KnowledgeDir(), nil); err == nil {
 				count, _ = db.WikiCount()
 			}
+			// mark 前先算 merged（与 status 同款检测，仅在基准分支上检出）；
+			// mark 落盘后再由 recordMerges 记录，避免被 mark 自身的 SaveState 覆盖
+			if branch != "" {
+				if s0 := wiki.LoadState(pc.Store.StateDir()); s0 != nil && branch == s0.BaseBranch {
+					merged = wiki.MergedIntoBase(s0, cwd, func(b string) bool {
+						ok, _ := db.HasBranchWiki(b)
+						return ok
+					})
+				}
+			}
 			db.Close()
 		}
-		branch := wiki.CurrentBranch(cwd) // 非 git 为 ""：游标挂在 "" 键下（与旧单游标等价）
 		s := wiki.LoadState(pc.Store.StateDir())
 		if s == nil {
 			s = &wiki.State{}
@@ -749,6 +789,7 @@ func WikiCmd(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "写游标失败:", err)
 			return 1
 		}
+		recordMerges(pc, cwd, merged)
 		short := commit
 		if len(short) > 7 {
 			short = short[:7]
@@ -757,6 +798,7 @@ func WikiCmd(args []string, stdout, stderr io.Writer) int {
 			short = "(无 git)"
 		}
 		fmt.Fprintf(stdout, "已记录 wiki 游标 %s（%d 条 wiki 条目）\n", short, count)
+		fmt.Fprintf(stdout, "基准分支: %s\n", s.BaseBranch)
 		return 0
 	case "base":
 		s := wiki.LoadState(pc.Store.StateDir())
@@ -769,7 +811,18 @@ func WikiCmd(args []string, stdout, stderr io.Writer) int {
 			if base == "" {
 				fmt.Fprintln(stdout, "(未设置基准分支)")
 			} else {
-				fmt.Fprintln(stdout, base)
+				fmt.Fprintf(stdout, "基准分支: %s\n", base)
+			}
+			// 候选：本地分支清单（git 不可用时静默省略，fail-open）
+			cmd := exec.Command("git", "-C", cwd, "branch", "--format", "%(refname:short)")
+			procx.HideWindow(cmd)
+			if out, err := cmd.Output(); err == nil {
+				fmt.Fprintln(stdout, "候选分支:")
+				for _, b := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+					if b != "" {
+						fmt.Fprintf(stdout, "  %s\n", b)
+					}
+				}
 			}
 			return 0
 		}

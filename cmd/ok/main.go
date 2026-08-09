@@ -117,7 +117,7 @@ func runExtensionServe() int {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "用法: ok [gui] <setup|init|add|propose|approve|capture|wiki|search|index|list|doctor|on|off|hook> ...")
+	fmt.Fprintln(os.Stderr, "用法: ok [gui] <setup|init|add|propose|approve|backfill-born|capture|wiki|search|index|list|doctor|on|off|hook> ...")
 }
 
 // runGUI 确保 daemon 在线后打开浏览器并立即返回（进程生命周期由 daemon 托管）。

@@ -884,3 +884,84 @@ func TestApproveKeepsBorn(t *testing.T) {
 		t.Errorf("approve 后不应仍为草稿")
 	}
 }
+
+// ok wiki status 检出"已并入基准"的分支时应落盘合并谱系（dev→master），
+// 重复执行按 from+commit 判重不得重复记录。
+func TestWikiStatusRecordsMerge(t *testing.T) {
+	projDir, kbRoot := setupOKProject(t)
+	initGitForTest(t, projDir, 2)
+	var out, errb bytes.Buffer
+	// master 上先 mark：确立基准分支为 master 并记 master 游标
+	if code := WikiCmd([]string{"mark"}, &out, &errb); code != 0 {
+		t.Fatal(code)
+	}
+	runGit(t, projDir, "checkout", "-q", "-b", "dev")
+	runGit(t, projDir, "commit", "--allow-empty", "-q", "-m", "d1")
+	// dev 差异条目（HasBranchWiki 为真的前提；随后 dev 上 mark 的 db.Sync 收进索引）
+	writeEntryFile(t, kbRoot, "差异.md", "---\ntitle: 架构（dev 分支差异）\ntype: reference\ntags: [\"wiki\", \"branch:dev\"]\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\n正文。\n")
+	out.Reset()
+	if code := WikiCmd([]string{"mark"}, &out, &errb); code != 0 { // 在 dev 上记游标
+		t.Fatal(code)
+	}
+	runGit(t, projDir, "checkout", "-q", "master")
+	runGit(t, projDir, "merge", "-q", "--no-ff", "dev", "-m", "merge dev")
+	out.Reset()
+	if code := WikiCmd([]string{"status"}, &out, &errb); code != 0 {
+		t.Fatal(code)
+	}
+	s := wiki.LoadState(filepath.Join(kbRoot, "state"))
+	found := false
+	for _, m := range s.Merges {
+		if m.From == "dev" && m.To == "master" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("谱系应记录 dev→master: %+v", s.Merges)
+	}
+	// 再次 status 不重复记录
+	n1 := len(s.Merges)
+	WikiCmd([]string{"status"}, &out, &errb)
+	s2 := wiki.LoadState(filepath.Join(kbRoot, "state"))
+	if len(s2.Merges) != n1 {
+		t.Errorf("重复执行不得重复记录: %d→%d", n1, len(s2.Merges))
+	}
+}
+
+// ok wiki mark 输出应明示基准分支（"基准分支: X"行）。
+func TestWikiMarkPrintsBase(t *testing.T) {
+	setupWikiProject(t)
+	var out, errb bytes.Buffer
+	if code := WikiCmd([]string{"mark"}, &out, &errb); code != 0 {
+		t.Fatalf("mark exit %d err=%q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "已记录 wiki 游标") || !strings.Contains(out.String(), "基准分支: master") {
+		t.Errorf("mark 输出应含游标记录与基准分支行: %q", out.String())
+	}
+}
+
+// ok wiki base 无参：输出当前基准 + 本地候选分支清单；未设基准时提示。
+func TestWikiBaseListsCandidates(t *testing.T) {
+	setupWikiProject(t)
+	var out, errb bytes.Buffer
+	if code := WikiCmd([]string{"base"}, &out, &errb); code != 0 {
+		t.Fatalf("base 查询 exit %d err=%q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "(未设置基准分支)") {
+		t.Errorf("未设基准应提示: %q", out.String())
+	}
+	if !strings.Contains(out.String(), "候选分支:") || !strings.Contains(out.String(), "  master") {
+		t.Errorf("应列出本地候选分支 master: %q", out.String())
+	}
+	out.Reset()
+	if code := WikiCmd([]string{"base", "dev"}, &out, &errb); code != 0 {
+		t.Fatalf("base 设置 exit %d err=%q", code, errb.String())
+	}
+	out.Reset()
+	if code := WikiCmd([]string{"base"}, &out, &errb); code != 0 {
+		t.Fatal(code)
+	}
+	if !strings.Contains(out.String(), "基准分支: dev") || !strings.Contains(out.String(), "候选分支:") {
+		t.Errorf("设置后查询应显示基准行与候选清单: %q", out.String())
+	}
+}

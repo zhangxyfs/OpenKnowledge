@@ -24,13 +24,33 @@ type BranchCursor struct {
 	EntryCount  int       `json:"entry_count,omitempty"`
 }
 
-// State 是 wiki.json 的新格式：基准分支 + 按分支游标表。
+// MergeRecord 是一条合并谱系：from 分支于 time 被并入 to（检出时 HEAD 为 commit）。
+type MergeRecord struct {
+	From   string    `json:"from"`
+	To     string    `json:"to"`
+	Commit string    `json:"commit"`
+	Time   time.Time `json:"time"`
+}
+
+// State 是 wiki.json 的新格式：基准分支 + 按分支游标表 + 合并谱系。
 // Legacy 承载旧格式（顶层 last_commit）的惰性迁移：LoadState 识别后挂在此处、
 // 不落盘；归属判定（git 可达性）由 CheckStatus 完成（见 status.go）。
 type State struct {
 	BaseBranch string                  `json:"base_branch,omitempty"`
 	Cursors    map[string]BranchCursor `json:"cursors,omitempty"`
+	Merges     []MergeRecord           `json:"merges,omitempty"`
 	Legacy     *BranchCursor           `json:"-"`
+}
+
+// AppendMerge 追加合并谱系（from+commit 判重）；返回是否实际新增。
+func (s *State) AppendMerge(from, to, commit string, t time.Time) bool {
+	for _, m := range s.Merges {
+		if m.From == from && m.Commit == commit {
+			return false
+		}
+	}
+	s.Merges = append(s.Merges, MergeRecord{From: from, To: to, Commit: commit, Time: t})
+	return true
 }
 
 // LoadState 读 wiki.json：不存在/损坏返回 nil；旧格式（顶层 last_commit 且
@@ -43,6 +63,7 @@ func LoadState(stateDir string) *State {
 	var disk struct {
 		BaseBranch  string                  `json:"base_branch"`
 		Cursors     map[string]BranchCursor `json:"cursors"`
+		Merges      []MergeRecord           `json:"merges"`
 		LastCommit  *string                 `json:"last_commit"` // 键存在即旧格式（含空值：非 git mark 的时间戳游标）
 		GeneratedAt time.Time               `json:"generated_at"`
 		EntryCount  int                     `json:"entry_count"`
@@ -50,7 +71,7 @@ func LoadState(stateDir string) *State {
 	if json.Unmarshal(data, &disk) != nil {
 		return nil
 	}
-	s := &State{BaseBranch: disk.BaseBranch, Cursors: disk.Cursors}
+	s := &State{BaseBranch: disk.BaseBranch, Cursors: disk.Cursors, Merges: disk.Merges}
 	if disk.Cursors == nil && disk.LastCommit != nil {
 		s.Legacy = &BranchCursor{
 			LastCommit:  *disk.LastCommit,
