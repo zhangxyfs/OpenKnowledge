@@ -191,6 +191,14 @@
           <p class="card-desc muted">怎么调用、怎么配置、常见问题。</p>
           <div class="card-actions"><button id="btn-help" type="button" class="btn">查看使用帮助</button></div>
         </div>
+        <div class="card card-danger">
+          <div class="card-head"><h3>删除项目知识库</h3></div>
+          <p class="card-desc muted">永久删除所选项目的全部知识、索引与配置，并注销注册表（hooks 不再注入）。项目源码目录不受影响。</p>
+          <div class="card-actions">
+            <select id="del-project-select"></select>
+            <button id="btn-del-project" type="button" class="btn btn-danger">删除…</button>
+          </div>
+        </div>
         <div class="card">
           <div class="card-head"><h3>关于</h3></div>
           <p id="misc-version" class="card-desc muted"></p>
@@ -223,6 +231,20 @@
           <button id="f-cancel" type="button" class="btn">关闭</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <div id="del-modal" class="modal hidden">
+    <div class="modal-box">
+      <h3>删除项目知识库</h3>
+      <p id="del-impact"></p>
+      <label class="checkbox"><input id="del-backup" type="checkbox" checked> 删除前先导出 zip 备份</label>
+      <label class="checkbox"><input id="del-ack" type="checkbox"> 我已了解后果，此操作不可撤销</label>
+      <label id="del-name-hint">请输入完整项目名以确认 <input id="del-name" type="text" autocomplete="off"></label>
+      <div class="modal-actions">
+        <button id="btn-del-confirm" type="button" class="btn btn-danger" disabled>永久删除</button>
+        <button id="btn-del-cancel" type="button" class="btn">取消</button>
+      </div>
     </div>
   </div>
 

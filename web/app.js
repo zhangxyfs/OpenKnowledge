@@ -175,6 +175,17 @@
         exp.appendChild(o);
       });
     }
+    // 删除项目卡下拉：与管理页项目列表同序同步（无"全部"项）
+    var del = $("del-project-select");
+    if (del) {
+      del.innerHTML = "";
+      (projects || []).forEach(function (p) {
+        var o = document.createElement("option");
+        o.value = p.name;
+        o.textContent = p.name;
+        del.appendChild(o);
+      });
+    }
     loadEntries();
   }
 
@@ -869,6 +880,87 @@
           loadEntries();
         });
       }).catch(function (err) { showError("网络错误: " + err.message); });
+  });
+
+  // ---------- 其他页：删除项目知识库（三重确认：备份可选 + 勾选了解 + 输入项目名） ----------
+
+  var delTarget = ""; // 当前弹窗要删的项目名
+
+  function updateDelConfirm() {
+    var ok = $("del-ack").checked && $("del-name").value.trim() === delTarget && delTarget !== "";
+    $("btn-del-confirm").disabled = !ok;
+  }
+
+  $("btn-del-project").addEventListener("click", function () {
+    delTarget = $("del-project-select").value || "";
+    if (!delTarget) return;
+    $("del-impact").textContent = "正在统计条目…";
+    $("del-backup").checked = true;
+    $("del-ack").checked = false;
+    $("del-name").value = "";
+    $("del-name-hint").firstChild.textContent = "请输入完整项目名 " + delTarget + " 以确认 ";
+    $("btn-del-confirm").textContent = "永久删除";
+    $("del-modal").classList.remove("hidden");
+    updateDelConfirm();
+    // 影响面统计失败不阻塞确认流程
+    api("/api/entries?project=" + encodeURIComponent(delTarget)).then(function (list) {
+      list = list || [];
+      var drafts = list.filter(function (e) { return e.draft; }).length;
+      $("del-impact").textContent = "将永久删除项目「" + delTarget + "」的知识库：共 " +
+        list.length + " 条知识（含 " + drafts + " 条草稿）、索引与项目配置，并注销注册表" +
+        "（hooks 不再注入）。项目源码目录不受影响。";
+    }).catch(function () {
+      $("del-impact").textContent = "条目统计失败（不影响删除操作）。将删除项目「" + delTarget +
+        "」的知识库、索引与项目配置，并注销注册表。项目源码目录不受影响。";
+    });
+  });
+
+  ["del-ack", "del-name"].forEach(function (id) {
+    $(id).addEventListener("input", updateDelConfirm);
+    $(id).addEventListener("change", updateDelConfirm);
+  });
+  $("btn-del-cancel").addEventListener("click", function () {
+    $("del-modal").classList.add("hidden");
+  });
+
+  $("btn-del-confirm").addEventListener("click", function () {
+    var btn = this;
+    if (btn.disabled) return;
+    btn.disabled = true;
+    btn.textContent = "删除中…";
+    var name = delTarget;
+    // 可选备份：复用导出卡的 blob 下载写法；导出失败中止删除
+    var backup = Promise.resolve();
+    if ($("del-backup").checked) {
+      backup = fetch("/api/export?project=" + encodeURIComponent(name), {
+        headers: { "X-Ok-Token": TOKEN },
+      }).then(function (res) {
+        if (!res.ok) throw new Error("备份导出失败（" + res.status + "），已中止删除");
+        return res.blob().then(function (blob) {
+          var a = document.createElement("a");
+          a.href = URL.createObjectURL(blob);
+          a.download = "openknowledge-backup-" + name + ".zip";
+          a.click();
+          URL.revokeObjectURL(a.href);
+        });
+      });
+    }
+    backup.then(function () {
+      return api("/api/project?project=" + encodeURIComponent(name), { method: "DELETE" });
+    }).then(function (res) {
+      $("del-modal").classList.add("hidden");
+      state.lastVersion = 0;
+      refreshStatus();
+      if (res && res.warning) {
+        showError("项目已注销，但" + res.warning + "，请手动清理 " + (res.dir || ""));
+      }
+    }).catch(function (err) {
+      showError(err.message);
+    }).then(function () {
+      btn.disabled = false;
+      btn.textContent = "永久删除";
+      updateDelConfirm();
+    });
   });
 
   // ---------- 心跳（5s 轮询，变更才重拉；进程由 daemon 托管，页面关闭不退出） ----------
