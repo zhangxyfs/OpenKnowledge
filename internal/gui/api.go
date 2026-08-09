@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +26,7 @@ import (
 	"openknowledge/internal/setupx"
 	"openknowledge/internal/store"
 	"openknowledge/internal/version"
+	"openknowledge/internal/wiki"
 )
 
 // Handler 是 GUI 的 HTTP 处理器：/ 与静态资源来自 webDir，/api/* 走令牌鉴权。
@@ -63,6 +65,7 @@ func NewHandler(webDir, token string, beats chan<- struct{}) *Handler {
 	api("POST /api/approve", h.apiApprove)
 	api("GET /api/capture", h.apiCaptureGet)
 	api("POST /api/capture", h.apiCaptureSet)
+	api("GET /api/project/branch-info", h.apiProjectBranchInfo)
 	api("POST /api/heartbeat", h.apiHeartbeat)
 	api("POST /api/shutdown", h.apiShutdown)
 	api("POST /api/uninstall", h.apiUninstall)
@@ -690,7 +693,7 @@ func (h *Handler) apiApprove(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, summaryOf(e))
 }
 
-// apiCaptureGet 返回项目合并配置中的捕获模式与 turn_interval。
+// apiCaptureGet 返回项目合并配置中的捕获模式、turn_interval 与 provenance auto_born。
 func (h *Handler) apiCaptureGet(w http.ResponseWriter, r *http.Request) {
 	st := resolveProject(w, r.URL.Query().Get("project"))
 	if st == nil {
@@ -704,16 +707,62 @@ func (h *Handler) apiCaptureGet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"mode":          cfg.Capture.Mode,
 		"turn_interval": cfg.Capture.TurnInterval,
+		"auto_born":     cfg.Provenance.AutoBorn,
 	})
 }
 
-// apiCaptureSet 设置 capture 模式与轮次间隔：写项目 config.toml 的 [capture] 小节。
-// mode 为空表示保持不变；turn_interval 为 0 表示保持不变。
+// setProvenanceAutoBorn 重写 config.toml 的 [provenance] 小节（auto_born 键）：
+// 已存在则整段替换（到下一个 [section] 或文件尾），不存在则在文件尾追加；
+// 其余内容（含注释）原样保留。算法与 config.SetCapture 同款（[capture] → [provenance]）。
+func setProvenanceAutoBorn(path string, autoBorn bool) error {
+	block := "[provenance]\nauto_born = " + strconv.FormatBool(autoBorn) + "\n"
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return os.WriteFile(path, []byte(block), 0o644)
+	}
+	if err != nil {
+		return err
+	}
+	lines := strings.Split(string(data), "\n")
+	start, end := -1, len(lines)
+	for i, l := range lines {
+		t := strings.TrimSpace(l)
+		if start < 0 {
+			if t == "[provenance]" {
+				start = i
+			}
+			continue
+		}
+		if strings.HasPrefix(t, "[") {
+			end = i
+			break
+		}
+	}
+	var out []string
+	if start >= 0 {
+		out = append(out, lines[:start]...)
+		out = append(out, strings.TrimSuffix(block, "\n"))
+		out = append(out, lines[end:]...)
+	} else {
+		out = append(out, lines...)
+		// 与上文保持空行分隔
+		if n := len(out); n > 0 && strings.TrimSpace(out[n-1]) != "" {
+			out = append(out, "")
+		}
+		out = append(out, strings.TrimSuffix(block, "\n"))
+	}
+	return os.WriteFile(path, []byte(strings.Join(out, "\n")), 0o644)
+}
+
+// apiCaptureSet 设置 capture 模式、轮次间隔与 provenance auto_born：
+// [capture] 小节走 config.SetCapture；[provenance] 小节走 setProvenanceAutoBorn。
+// mode 为空、turn_interval 为 0、auto_born 缺省（null）均表示保持不变。
 func (h *Handler) apiCaptureSet(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Project      string `json:"project"`
 		Mode         string `json:"mode"`
 		TurnInterval int    `json:"turn_interval"`
+		AutoBorn     *bool  `json:"auto_born"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
@@ -747,7 +796,42 @@ func (h *Handler) apiCaptureSet(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "mode": mode, "turn_interval": interval})
+	autoBorn := cfg.Provenance.AutoBorn
+	if req.AutoBorn != nil {
+		autoBorn = *req.AutoBorn
+		if err := setProvenanceAutoBorn(st.ConfigPath(), autoBorn); err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "mode": mode, "turn_interval": interval, "auto_born": autoBorn})
+}
+
+// apiProjectBranchInfo 返回项目的分支上下文：基准分支（wiki.json）、
+// 项目目录实际 checkout 分支、合并谱系（无谱系给 [] 便于前端）。
+func (h *Handler) apiProjectBranchInfo(w http.ResponseWriter, r *http.Request) {
+	name := r.URL.Query().Get("project")
+	st := resolveProject(w, name)
+	if st == nil {
+		return
+	}
+	out := map[string]any{"base_branch": "", "current_branch": "", "merges": []wiki.MergeRecord{}}
+	if s := wiki.LoadState(st.StateDir()); s != nil {
+		out["base_branch"] = s.BaseBranch
+		if len(s.Merges) > 0 {
+			out["merges"] = s.Merges
+		}
+	}
+	// 当前分支取注册表项目第一个路径的 checkout 分支（非 git/失败为空串，fail-open）
+	if reg, err := registry.Load(registry.DefaultPath()); err == nil {
+		for _, p := range reg.Projects {
+			if p.Name == name && len(p.Paths) > 0 {
+				out["current_branch"] = wiki.CurrentBranch(p.Paths[0])
+				break
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // ---------- 心跳与停服 ----------

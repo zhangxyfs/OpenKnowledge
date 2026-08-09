@@ -11,7 +11,7 @@
     readOnly: false,
     hitFiles: null, // 搜索命中的条目 file 集合；null 表示无搜索高亮
     typeFilter: "", // "" = 全部；"draft" = 仅草稿；其余按条目类型过滤
-    branchFilter: "", // "" = 全部；选中后 = 共享条目（无 branch 标签）∪ branch:<名> 条目
+    branchFilter: "", // "" = 全部；选中后 = born==X ∪ scope==X ∪ 无 born 无 scope 的条目
     sortDir: "desc", // 时间排序方向：desc 新→旧 / asc 旧→新
     page: 1,
     pageSize: 20,
@@ -139,6 +139,7 @@
     state.page = 1;
     state.lastVersion = 0;
     renderBranchFilter(); // 项目切换：先按现有条目重聚合分支选项（loadEntries 完成后会再次聚合）
+    renderBranchInfo(); // 分支上下文随项目联动（loadEntries 完成后会再刷一次）
     loadEntries();
     runSearch();
     refreshCapture();
@@ -183,6 +184,7 @@
       state.entries = list || [];
       renderBranchFilter(); // 分支选项随条目（含项目切换）重新聚合
       renderEntries();
+      renderBranchInfo(); // 分支上下文/谱系随条目加载完成刷新
     }).catch(function (err) { showError(err.message); });
   }
 
@@ -203,7 +205,45 @@
     return "";
   }
 
-  // renderBranchFilter 按当前项目条目聚合分支选项（项目切换时重聚合，联动）
+  // bornOf 取条目出生分支（born:<名>，第一个）；无则空串
+  function bornOf(e) {
+    var tags = e.tags || [];
+    for (var i = 0; i < tags.length; i++) {
+      if (tags[i].indexOf("born:") === 0) return tags[i].slice(5);
+    }
+    return "";
+  }
+
+  // renderBranchInfo 拉取并渲染分支上下文与合并谱系（随项目联动）
+  function renderBranchInfo() {
+    var el = $("branch-context");
+    if (!el || !state.project) return;
+    api("/api/project/branch-info?project=" + encodeURIComponent(state.project)).then(function (info) {
+      var base = info.base_branch || "—";
+      var cur = info.current_branch || "—";
+      el.innerHTML = "";
+      var b = document.createElement("span");
+      b.textContent = "基准分支: " + base + " · 当前分支: ";
+      var c = document.createElement("span");
+      c.textContent = cur;
+      if (info.base_branch && info.current_branch && info.base_branch !== info.current_branch) {
+        c.className = "branch-warn";
+      }
+      el.appendChild(b); el.appendChild(c);
+      var lineage = $("merge-lineage");
+      var ms = info.merges || [];
+      if (ms.length > 0) {
+        var last = ms[ms.length - 1];
+        lineage.textContent = "合并谱系: " + last.from + " → " + last.to +
+          "（" + String(last.time || "").slice(0, 10) + "，共 " + ms.length + " 条）";
+        lineage.classList.remove("hidden");
+      } else {
+        lineage.classList.add("hidden");
+      }
+    }).catch(function () {});
+  }
+
+  // renderBranchFilter 按当前项目条目聚合分支选项（born ∪ scope；项目切换时重聚合，联动）
   function renderBranchFilter() {
     var sel = $("branch-filter");
     if (!sel) return;
@@ -211,6 +251,8 @@
     (state.entries || []).forEach(function (e) {
       var b = entryBranch(e);
       if (b) seen[b] = true;
+      var bo = bornOf(e);
+      if (bo) seen[bo] = true;
     });
     var cur = state.branchFilter || "";
     sel.innerHTML = '<option value="">全部</option>';
@@ -226,13 +268,13 @@
   function renderEntries() {
     var tbody = $("entries-body");
     tbody.innerHTML = "";
-    // 类型过滤（draft 选项只看草稿）+ 分支过滤（选中分支 = 共享条目 ∪ 该分支条目）
+    // 类型过滤（draft 选项只看草稿）+ 分支过滤（选中 X = born==X ∪ scope==X ∪ 无 born 无 scope）
     var list = state.entries.filter(function (e) {
       if (state.typeFilter === "draft" && !e.draft) return false;
       if (state.typeFilter && state.typeFilter !== "draft" && e.type !== state.typeFilter) return false;
       if (state.branchFilter) {
-        var b = entryBranch(e);
-        if (b !== "" && b !== state.branchFilter) return false;
+        var bo = bornOf(e), sc = entryBranch(e);
+        if (bo !== state.branchFilter && sc !== state.branchFilter && (bo !== "" || sc !== "")) return false;
       }
       return true;
     });
@@ -258,9 +300,14 @@
     pageItems.forEach(function (e) {
       var tr = document.createElement("tr");
       if (state.hitFiles && state.hitFiles[e.file]) tr.classList.add("hit-row");
+      // 分支格双徽标：born（出生分支，溯源）+ scope（branch: 作用域标签）
+      var born = bornOf(e), scope = entryBranch(e);
+      var branchCell = "";
+      if (born) branchCell += '<span class="badge badge-born">⎇ ' + esc(born) + "</span> ";
+      if (scope) branchCell += '<span class="badge badge-branch">⇢ ' + esc(scope) + "</span>";
       tr.innerHTML =
         '<td class="muted">' + fmtTime(e.mtime) + "</td>" +
-        '<td>' + (entryBranch(e) ? '<span class="badge badge-branch">⎇ ' + esc(entryBranch(e)) + "</span>" : "") + "</td>" +
+        '<td>' + branchCell + "</td>" +
         "<td>" + esc(e.title) + (e.draft ? ' <span class="badge badge-draft">草稿</span>' : "") + "</td>" +
         "<td>" + esc(typeLabel(e.type)) + "</td>" +
         "<td>" + esc((e.tags || []).join(", ")) + "</td>" +
@@ -581,11 +628,27 @@
       statusEl.textContent = "当前模式：" + c.mode +
         "（turn_interval=" + c.turn_interval + "，项目 " + project + "）";
       $("capture-interval").value = c.turn_interval;
+      $("auto-born").checked = !!c.auto_born;
       $("capture-mode-note").textContent = c.mode === "auto"
         ? "auto 模式：每 " + c.turn_interval + " 个回合结束强制自省一次"
         : "propose 模式：由 AI 自主判断，无轮次限制";
     }).catch(function (err) { showError(err.message); });
   }
+
+  // provenance 开关：勾选变更即随 capture 保存路径落盘（nil=不变，显式布尔才改写）
+  $("auto-born").addEventListener("change", function () {
+    var project = captureProject();
+    if (!project) {
+      showError("尚无已注册项目，请先 ok init");
+      this.checked = !this.checked;
+      return;
+    }
+    api("/api/capture", {
+      method: "POST",
+      body: { project: project, auto_born: this.checked }
+    }).then(refreshCapture)
+      .catch(function (err) { showError(err.message); refreshCapture(); });
+  });
 
   function setCaptureMode(mode) {
     var project = captureProject();

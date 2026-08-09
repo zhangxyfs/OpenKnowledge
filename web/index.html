@@ -43,10 +43,12 @@
             <option value="">全部</option>
           </select>
         </label>
+        <span id="branch-context" class="muted"></span>
         <input id="search-input" type="search" placeholder="搜索条目…" autocomplete="off">
         <button id="btn-new" type="button" class="btn btn-primary">新建</button>
         <button id="btn-refresh" type="button" class="btn" title="刷新列表（数据库变更时也会自动刷新）">刷新</button>
       </div>
+      <div id="merge-lineage" class="merge-lineage muted hidden"></div>
       <div id="search-results" class="search-results hidden"></div>
       <div class="entries-wrap">
       <table class="entries">
@@ -142,6 +144,7 @@
               <input id="capture-interval" type="number" min="1" max="100" value="5">
               <button id="btn-capture-interval" type="button" class="btn">保存</button>
             </span>
+            <label class="capture-auto-born"><input id="auto-born" type="checkbox"> 自动记录出生分支</label>
           </div>
         </div>
         <div class="card card-danger">

@@ -867,6 +867,156 @@ func TestCaptureRoundTrip(t *testing.T) {
 	}
 }
 
+// TestBranchInfoAPI 分支上下文端点：base_branch 与 merges 透传 wiki.json，
+// current_branch 键恒存在（非 git 项目为空串）；无谱系时 merges 给 [] 而非 null。
+func TestBranchInfoAPI(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	mkProject(t, okHome, "demo")
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	// 夹具：wiki.json 含基准分支、游标与一条合并谱系
+	stateDir := filepath.Join(okHome, "projects", "demo", "state")
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	wikiJSON := `{
+	  "base_branch": "master",
+	  "cursors": {"master": {"last_commit": "abc123", "generated_at": "2026-08-01T00:00:00Z"}},
+	  "merges": [{"from": "dev", "to": "master", "commit": "deadbeefcafe", "time": "2026-08-05T10:00:00Z"}]
+	}`
+	if err := os.WriteFile(filepath.Join(stateDir, "wiki.json"), []byte(wikiJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	code, data := do(t, "GET", srv.URL+"/api/project/branch-info?project=demo", testToken, nil)
+	if code != 200 {
+		t.Fatalf("branch-info: status = %d, body %s", code, data)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(data, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["base_branch"] != "master" {
+		t.Errorf("base_branch 错误: %v", body)
+	}
+	merges, _ := body["merges"].([]any)
+	if len(merges) != 1 {
+		t.Errorf("merges 应透传: %v", body["merges"])
+	} else if m, _ := merges[0].(map[string]any); m["from"] != "dev" || m["to"] != "master" {
+		t.Errorf("merge 内容错误: %v", merges[0])
+	}
+	if _, ok := body["current_branch"]; !ok {
+		t.Errorf("应含 current_branch 键")
+	}
+
+	// 缺 project → 400；未注册 → 404
+	if code, _ := do(t, "GET", srv.URL+"/api/project/branch-info", testToken, nil); code != 400 {
+		t.Errorf("缺 project 应 400，got %d", code)
+	}
+	if code, _ := do(t, "GET", srv.URL+"/api/project/branch-info?project=ghost", testToken, nil); code != 404 {
+		t.Errorf("未注册项目应 404，got %d", code)
+	}
+
+	// 无 wiki.json 的项目：merges 应为 [] 而非 null（mkProject 会重建注册表，改为增量注册）
+	reg, err := registry.Load(registry.DefaultPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.AddProject("empty", filepath.Join(t.TempDir(), "src")); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.Save(registry.DefaultPath()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(okHome, "projects", "empty", "knowledge"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	code, data = do(t, "GET", srv.URL+"/api/project/branch-info?project=empty", testToken, nil)
+	if code != 200 {
+		t.Fatalf("empty branch-info: status = %d, body %s", code, data)
+	}
+	if !strings.Contains(string(data), `"merges":[]`) {
+		t.Errorf("无谱系时 merges 应为 []: %s", data)
+	}
+}
+
+// TestCaptureAutoBorn provenance 开关：GET 恒返回当前值（无 [provenance] 节默认 true）；
+// POST auto_born（*bool，nil=不变）落盘项目 config.toml 的 [provenance] 节，替换不追加。
+func TestCaptureAutoBorn(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	mkProject(t, okHome, "demo")
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	// GET 默认 true（无 [provenance] 节）
+	code, data := do(t, "GET", srv.URL+"/api/capture?project=demo", testToken, nil)
+	if code != 200 {
+		t.Fatalf("capture get: status = %d, body %s", code, data)
+	}
+	var cap1 struct {
+		Mode         string `json:"mode"`
+		TurnInterval int    `json:"turn_interval"`
+		AutoBorn     bool   `json:"auto_born"`
+	}
+	if err := json.Unmarshal(data, &cap1); err != nil {
+		t.Fatal(err)
+	}
+	if !cap1.AutoBorn {
+		t.Fatalf("无 [provenance] 节时 auto_born 应默认 true: %s", data)
+	}
+
+	// POST auto_born=false → GET 为 false 且项目 config.toml 落盘 [provenance]
+	code, data = do(t, "POST", srv.URL+"/api/capture", testToken,
+		map[string]any{"project": "demo", "auto_born": false})
+	if code != 200 {
+		t.Fatalf("capture set auto_born: status = %d, body %s", code, data)
+	}
+	cfgPath := filepath.Join(okHome, "projects", "demo", "config.toml")
+	cfgData, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("project config not written: %v", err)
+	}
+	if !strings.Contains(string(cfgData), "[provenance]") || !strings.Contains(string(cfgData), "auto_born = false") {
+		t.Fatalf("config 应含 [provenance] auto_born = false: %q", cfgData)
+	}
+	code, data = do(t, "GET", srv.URL+"/api/capture?project=demo", testToken, nil)
+	if code != 200 || !strings.Contains(string(data), `"auto_born":false`) {
+		t.Fatalf("GET 应反映 auto_born=false: status = %d, body %s", code, data)
+	}
+
+	// 再设回 true → 整段替换而非重复追加；[capture] 节保留
+	code, data = do(t, "POST", srv.URL+"/api/capture", testToken,
+		map[string]any{"project": "demo", "auto_born": true})
+	if code != 200 {
+		t.Fatalf("capture re-set auto_born: status = %d, body %s", code, data)
+	}
+	cfgData, err = os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(cfgData), "[provenance]") != 1 || !strings.Contains(string(cfgData), "auto_born = true") {
+		t.Fatalf("[provenance] 应唯一且 auto_born = true: %q", cfgData)
+	}
+	if !strings.Contains(string(cfgData), "[capture]") {
+		t.Fatalf("[capture] 节应保留: %q", cfgData)
+	}
+
+	// 不传 auto_born（nil）→ 保持不变
+	code, data = do(t, "POST", srv.URL+"/api/capture", testToken,
+		map[string]any{"project": "demo", "mode": "auto"})
+	if code != 200 {
+		t.Fatalf("capture set mode: status = %d, body %s", code, data)
+	}
+	cfgData, err = os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(cfgData), "auto_born = true") || !strings.Contains(string(cfgData), `mode = "auto"`) {
+		t.Fatalf("mode 保存不应改动 auto_born: %q", cfgData)
+	}
+}
+
 // reasonix 三档：status 暴露 rxEnforceMode（缺省 mixed）；POST 保存后 status 反映；
 // 非法值 400 且不落盘。
 func TestReasonixEnforceModeAPI(t *testing.T) {
