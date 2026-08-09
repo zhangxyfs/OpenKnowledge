@@ -807,6 +807,65 @@ func TestProposeAutoBorn(t *testing.T) {
 	}
 }
 
+// writeEntryFile 在知识库 knowledge 目录下直接落一个条目文件（绕过 Add，模拟存量条目）。
+func writeEntryFile(t *testing.T, kbRoot, name, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(kbRoot, "knowledge", name), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// ok backfill-born 应按当前分支给无 born 的存量条目回填，已有 born 的不得覆盖。
+func TestBackfillBorn(t *testing.T) {
+	projDir, kbRoot := setupOKProject(t)
+	initGitForTest(t, projDir, 1)
+	// 两条无 born 条目 + 一条已有 born
+	writeEntryFile(t, kbRoot, "老条目1.md", "---\ntitle: 老条目1\ntype: note\ntags: []\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\n正文。\n")
+	writeEntryFile(t, kbRoot, "老条目2.md", "---\ntitle: 老条目2\ntype: note\ntags: []\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\n正文。\n")
+	writeEntryFile(t, kbRoot, "已标.md", "---\ntitle: 已标\ntype: note\ntags: [\"born:dev\"]\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\n正文。\n")
+	var out, errb bytes.Buffer
+	in := strings.NewReader("y\n")
+	if code := BackfillBorn(nil, in, &out, &errb); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if !strings.Contains(out.String(), "master") || !strings.Contains(out.String(), "2") {
+		t.Errorf("预览应含分支与数量: %q", out.String())
+	}
+	d1, _ := os.ReadFile(filepath.Join(kbRoot, "knowledge", "老条目1.md"))
+	if !strings.Contains(string(d1), "born:master") {
+		t.Errorf("老条目1 应被回填: %s", d1)
+	}
+	d3, _ := os.ReadFile(filepath.Join(kbRoot, "knowledge", "已标.md"))
+	if !strings.Contains(string(d3), "born:dev") || strings.Contains(string(d3), "born:master") {
+		t.Errorf("已有 born 不得覆盖: %s", d3)
+	}
+}
+
+// 预览后输入 n 取消，不得写入任何 born。
+func TestBackfillBornAbort(t *testing.T) {
+	projDir, kbRoot := setupOKProject(t)
+	initGitForTest(t, projDir, 1)
+	writeEntryFile(t, kbRoot, "老条目.md", "---\ntitle: 老条目\ntype: note\ntags: []\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\n正文。\n")
+	var out, errb bytes.Buffer
+	in := strings.NewReader("n\n")
+	if code := BackfillBorn(nil, in, &out, &errb); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	data, _ := os.ReadFile(filepath.Join(kbRoot, "knowledge", "老条目.md"))
+	if strings.Contains(string(data), "born:") {
+		t.Errorf("取消后不得写入: %s", data)
+	}
+}
+
+// 非 git 项目无法确定回填分支，应报错退出 1。
+func TestBackfillBornNonGit(t *testing.T) {
+	setupOKProject(t) // 不 init git
+	var out, errb bytes.Buffer
+	if code := BackfillBorn(nil, strings.NewReader(""), &out, &errb); code != 1 {
+		t.Fatalf("非 git 应返回 1，got %d", code)
+	}
+}
+
 // 回归钉：approve 转正只翻 draft 标志，不得改写/丢失 born（出生以创建时刻为准）。
 func TestApproveKeepsBorn(t *testing.T) {
 	projDir, kbRoot := setupOKProject(t)

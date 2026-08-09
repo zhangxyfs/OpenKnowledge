@@ -187,6 +187,63 @@ func Add(args []string, stdout, stderr io.Writer) int {
 	return afterAdd(pc, stdout, stderr)
 }
 
+// BackfillBorn: ok backfill-born —— 按当前分支给无 born 的存量条目回填 born 标签。
+// 预览确认后写入；只补无 born 的条目，不覆盖已有值。非 git 项目报错退出。
+func BackfillBorn(args []string, in io.Reader, stdout, stderr io.Writer) int {
+	pc, code := resolveFromCwd(stderr)
+	if pc == nil {
+		return code
+	}
+	cwd, _ := os.Getwd()
+	branch := wiki.CurrentBranch(cwd)
+	if branch == "" {
+		fmt.Fprintln(stderr, "当前目录不是 git 仓库，无法确定回填分支")
+		return 1
+	}
+	files, err := filepath.Glob(filepath.Join(pc.Store.KnowledgeDir(), "*.md"))
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	var pending []string
+	for _, f := range files {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		e, err := entry.Parse(data)
+		if err != nil {
+			continue // 损坏条目跳过（与其他路径一致的容忍口径）
+		}
+		if !hasBorn(e.Tags) {
+			pending = append(pending, f)
+		}
+	}
+	if len(pending) == 0 {
+		fmt.Fprintln(stdout, "所有条目已有 born 标签，无需回填")
+		return 0
+	}
+	fmt.Fprintf(stdout, "将按当前分支 %s 回填 %d 条无 born 条目，确认？(y/N) ", branch, len(pending))
+	var ans string
+	if _, err := fmt.Fscanln(in, &ans); err != nil || (ans != "y" && ans != "Y") {
+		fmt.Fprintln(stdout, "已取消")
+		return 0
+	}
+	n := 0
+	for _, f := range pending {
+		data, _ := os.ReadFile(f)
+		e, _ := entry.Parse(data)
+		e.Tags = append(e.Tags, "born:"+branch)
+		if err := os.WriteFile(f, e.Serialize(), 0o644); err != nil {
+			fmt.Fprintf(stderr, "写回失败 %s: %v\n", f, err)
+			continue
+		}
+		n++
+	}
+	fmt.Fprintf(stdout, "已回填 %d 条\n", n)
+	return afterAdd(pc, stdout, stderr) // 重建索引与 INDEX
+}
+
 // afterAdd 增量同步索引库（重建 INDEX.md；有 API key 时为变化条目重算向量）。
 func afterAdd(pc *project.Context, stdout, stderr io.Writer) int {
 	db, err := index.Open(pc.Store.KbPath())

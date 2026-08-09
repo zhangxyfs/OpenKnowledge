@@ -49,6 +49,8 @@ func run(argv []string) int {
 		return cli.Propose(argv[2:], os.Stdout, os.Stderr)
 	case "approve":
 		return cli.Approve(argv[2:], os.Stdout, os.Stderr)
+	case "backfill-born":
+		return cli.BackfillBorn(argv[2:], os.Stdin, os.Stdout, os.Stderr)
 	case "capture":
 		return cli.CaptureCmd(argv[2:], os.Stdout, os.Stderr)
 	case "wiki":
