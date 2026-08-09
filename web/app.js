@@ -73,6 +73,41 @@
   var TYPE_LABELS = { rule: "规则", pitfall: "踩坑", note: "笔记", reference: "参考" };
   function typeLabel(t) { return TYPE_LABELS[t] || t || ""; }
 
+  // ---------- 摘要浮窗（悬停显示完整内容） ----------
+
+  var tipEl = null;
+  function ensureTip() {
+    if (!tipEl) {
+      tipEl = document.createElement("div");
+      tipEl.id = "summary-tip";
+      tipEl.className = "hidden";
+      document.body.appendChild(tipEl);
+    }
+    return tipEl;
+  }
+  function showTip(text, x, y) {
+    if (!text) return;
+    var tip = ensureTip();
+    tip.textContent = text;
+    tip.classList.remove("hidden");
+    moveTip(x, y);
+  }
+  function moveTip(x, y) {
+    if (!tipEl || tipEl.classList.contains("hidden")) return;
+    var pad = 12;
+    var left = x + 14, top = y + 16;
+    // 溢出视口右侧/底部时翻到另一侧/贴底，保证完整可见
+    if (left + tipEl.offsetWidth + pad > window.innerWidth) left = Math.max(pad, x - tipEl.offsetWidth - 14);
+    if (top + tipEl.offsetHeight + pad > window.innerHeight) top = Math.max(pad, window.innerHeight - tipEl.offsetHeight - pad);
+    tipEl.style.left = left + "px";
+    tipEl.style.top = top + "px";
+  }
+  function hideTip() {
+    if (tipEl) tipEl.classList.add("hidden");
+  }
+  // 滚动（含表格横滑容器）时收起浮窗，避免浮窗与行错位
+  window.addEventListener("scroll", hideTip, true);
+
   // ---------- 选项卡 ----------
 
   function switchTab(name) {
@@ -321,13 +356,17 @@
         "<td>" + esc(typeLabel(e.type)) + "</td>" +
         "<td>" + esc((e.tags || []).join(", ")) + "</td>" +
         "<td>" + (e.mandatory ? "✓" : "") + "</td>" +
-        "<td>" + esc(e.summary) + "</td>" +
+        '<td><span class="summary-clip">' + esc(e.summary) + "</span></td>" +
         '<td class="ops">' +
         '<button type="button" data-act="view">查看</button> ' +
         '<button type="button" data-act="edit">编辑</button> ' +
         (e.draft ? '<button type="button" data-act="approve">采纳</button> ' : "") +
         '<button type="button" data-act="del" class="danger-link">删除</button>' +
         "</td>";
+      var sumEl = tr.querySelector(".summary-clip");
+      sumEl.addEventListener("mouseenter", function (ev) { showTip(e.summary, ev.clientX, ev.clientY); });
+      sumEl.addEventListener("mousemove", function (ev) { moveTip(ev.clientX, ev.clientY); });
+      sumEl.addEventListener("mouseleave", hideTip);
       tr.querySelectorAll("button").forEach(function (btn) {
         btn.addEventListener("click", function () {
           var act = btn.getAttribute("data-act");

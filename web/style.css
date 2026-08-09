@@ -172,6 +172,33 @@ input:focus, select:focus, textarea:focus {
 .entries tr.hit-row td { background: #fef9c3; }
 .entries td:nth-child(7) { max-width: 320px; }
 
+/* 摘要列：最多 2 行，超出省略号；悬停浮窗显示完整内容 */
+.summary-clip {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+#summary-tip {
+  position: fixed;
+  z-index: 20;
+  max-width: 480px;
+  max-height: 40vh;
+  overflow-y: auto;
+  padding: 8px 12px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.14);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  pointer-events: none; /* 不抢鼠标，避免浮窗闪烁 */
+}
+
 .ops { white-space: nowrap; }
 .ops button {
   background: none;
