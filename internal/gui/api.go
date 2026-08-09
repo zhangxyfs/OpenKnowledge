@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -211,8 +212,30 @@ func exePath() (string, error) {
 // ---------- JSON 类型 ----------
 
 type projectJSON struct {
-	Name  string   `json:"name"`
-	Paths []string `json:"paths"`
+	Name       string   `json:"name"`
+	Paths      []string `json:"paths"`
+	LastUpdate int64    `json:"last_update"` // kb.db mtime（unix 秒），无索引库为 0；项目下拉按它降序
+}
+
+// listProjects 汇总注册表项目：附带 kb.db mtime 作为最近更新时间，按它降序
+// （最近有知识写入的项目排前面；无索引库的垫底，同名按名称稳定排序）。
+func listProjects(reg *registry.Registry) []projectJSON {
+	projects := make([]projectJSON, 0, len(reg.Projects))
+	for _, p := range reg.Projects {
+		var last int64
+		kb := filepath.Join(registry.Home(), "projects", p.Name, "kb.db")
+		if fi, err := os.Stat(kb); err == nil {
+			last = fi.ModTime().Unix()
+		}
+		projects = append(projects, projectJSON{Name: p.Name, Paths: p.Paths, LastUpdate: last})
+	}
+	sort.SliceStable(projects, func(i, j int) bool {
+		if projects[i].LastUpdate != projects[j].LastUpdate {
+			return projects[i].LastUpdate > projects[j].LastUpdate
+		}
+		return projects[i].Name < projects[j].Name
+	})
+	return projects
 }
 
 type entrySummaryJSON struct {
@@ -281,10 +304,7 @@ func (h *Handler) apiStatus(w http.ResponseWriter, _ *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	projects := make([]projectJSON, 0, len(reg.Projects))
-	for _, p := range reg.Projects {
-		projects = append(projects, projectJSON{Name: p.Name, Paths: p.Paths})
-	}
+	projects := listProjects(reg)
 	agents := make([]map[string]any, 0, len(agentx.All()))
 	for _, a := range agentx.All() {
 		agents = append(agents, map[string]any{
@@ -393,10 +413,7 @@ func (h *Handler) apiProjects(w http.ResponseWriter, _ *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	projects := make([]projectJSON, 0, len(reg.Projects))
-	for _, p := range reg.Projects {
-		projects = append(projects, projectJSON{Name: p.Name, Paths: p.Paths})
-	}
+	projects := listProjects(reg)
 	writeJSON(w, http.StatusOK, projects)
 }
 

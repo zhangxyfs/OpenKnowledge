@@ -208,8 +208,17 @@
   });
 
   $("btn-refresh").addEventListener("click", function () {
+    var btn = this;
+    if (btn.disabled) return;
+    btn.disabled = true;
+    btn.textContent = "刷新中…";
     state.lastVersion = 0; // 手动刷新后重新记录版本，避免下一次心跳重复拉取
-    loadEntries();
+    // 全量刷新：状态（含项目下拉/排序）+ 条目列表（renderProjectSelect 内部触发 loadEntries）；
+    // refreshStatus 内部已 catch（错误走横幅），then 必定到达，按钮态必恢复
+    refreshStatus().then(function () {
+      btn.textContent = "已刷新 ✓";
+      setTimeout(function () { btn.disabled = false; btn.textContent = "刷新"; }, 1200);
+    });
   });
 
   $("btn-prev").addEventListener("click", function () {
