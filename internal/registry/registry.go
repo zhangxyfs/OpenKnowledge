@@ -95,6 +95,17 @@ func (r *Registry) AddProject(name, path string) error {
 	return nil
 }
 
+// RemoveProject 按名移除项目，返回是否找到；持久化需另调 Save。
+func (r *Registry) RemoveProject(name string) bool {
+	for i, p := range r.Projects {
+		if p.Name == name {
+			r.Projects = append(r.Projects[:i], r.Projects[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
 // HooksDisabled 报告 hooks 全局开关是否关闭（标志文件存在）。
 func HooksDisabled() bool {
 	_, err := os.Stat(filepath.Join(Home(), "hooks-disabled"))

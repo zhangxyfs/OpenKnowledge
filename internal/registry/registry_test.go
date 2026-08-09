@@ -55,3 +55,37 @@ func TestLoadMissing(t *testing.T) {
 		t.Fatalf("expected empty registry, got %+v err=%v", r, err)
 	}
 }
+
+func TestRemoveProject(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("OK_HOME", dir)
+	reg := &Registry{}
+	if err := reg.AddProject("alpha", "D:/src/alpha"); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.AddProject("beta", "D:/src/beta"); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.Save(DefaultPath()); err != nil {
+		t.Fatal(err)
+	}
+
+	if !reg.RemoveProject("alpha") {
+		t.Fatal("RemoveProject(alpha) = false, want true")
+	}
+	if reg.RemoveProject("alpha") {
+		t.Fatal("RemoveProject(alpha) again = true, want false")
+	}
+
+	// Save 往返后注册表只剩 beta
+	if err := reg.Save(DefaultPath()); err != nil {
+		t.Fatal(err)
+	}
+	back, err := Load(DefaultPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(back.Projects) != 1 || back.Projects[0].Name != "beta" {
+		t.Fatalf("unexpected projects after remove: %+v", back.Projects)
+	}
+}
