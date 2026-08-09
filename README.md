@@ -35,6 +35,15 @@
 
 > 维护者自己打包安装程序：`bash scripts/build-installer.sh`（产出 `installer/output/OpenKnowledgeSetup-<版本>.exe`）。
 
+**方式 C：Linux（amd64）**
+
+发布产物提供两种格式（均无依赖、静态编译）：
+
+- `openknowledge_<版本>_linux_amd64.tar.gz`：解压后 `cd openknowledge_* && ./ok setup`（写 hooks/技能 + 配置登录自启）
+- `openknowledge_<版本>_amd64.deb`：`sudo dpkg -i` 安装到 `/usr/lib/openknowledge/`（`ok` 进 PATH），然后运行 `ok setup`
+
+> 构建命令（维护者）：`bash scripts/build-linux.sh`（.deb 需先 `go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest`）。
+
 **方式 B：手动构建**
 
 ```bash
