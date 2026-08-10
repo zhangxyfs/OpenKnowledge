@@ -82,6 +82,60 @@ func TestExportAll(t *testing.T) {
 	}
 }
 
+// state/wiki.json（基准分支+游标+合并谱系）须随包导出；缺失时静默跳过
+func TestExportIncludesWikiState(t *testing.T) {
+	home := setupHome(t)
+	stateDir := filepath.Join(home, "projects", "alpha", "state")
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	wikiJSON := `{"base":"master","cursors":{"master":"abc"},"merges":[]}`
+	if err := os.WriteFile(filepath.Join(stateDir, "wiki.json"), []byte(wikiJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := Export(&buf, "all"); err != nil {
+		t.Fatal(err)
+	}
+	names := zipNames(t, buf.Bytes())
+	if names["projects/alpha/state/wiki.json"] != wikiJSON {
+		t.Fatalf("wiki.json missing or mismatch in %v", names)
+	}
+	// beta 无 state 目录：不得产生空条目
+	if _, ok := names["projects/beta/state/wiki.json"]; ok {
+		t.Fatal("phantom wiki.json for beta")
+	}
+}
+
+// 往返：删除项目前导出的备份，重导入后 wiki.json 谱系须还原
+func TestImportRestoresWikiState(t *testing.T) {
+	home := setupHome(t)
+	stateDir := filepath.Join(home, "projects", "alpha", "state")
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	wikiPath := filepath.Join(stateDir, "wiki.json")
+	wikiJSON := `{"base":"master","merges":[{"from":"dev","to":"master"}]}`
+	if err := os.WriteFile(wikiPath, []byte(wikiJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := Export(&buf, "all"); err != nil {
+		t.Fatal(err)
+	}
+	// 破坏现场：整个 state 目录随项目删除
+	if err := os.RemoveAll(stateDir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Import(bytes.NewReader(buf.Bytes()), int64(buf.Len())); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(wikiPath)
+	if err != nil || string(data) != wikiJSON {
+		t.Fatalf("wiki.json not restored: %v", err)
+	}
+}
+
 func TestExportSingleProject(t *testing.T) {
 	setupHome(t)
 	var buf bytes.Buffer

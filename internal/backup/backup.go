@@ -34,8 +34,8 @@ type Report struct {
 	Projects []string `json:"projects"`
 }
 
-// Export 把 registry 与项目条目/config 写入 zip。project 为 "all" 全导，否则只导该项目
-// （registry.toml 随之过滤）。
+// Export 把 registry 与项目条目/config/wiki 状态（state/wiki.json）写入 zip。
+// project 为 "all" 全导，否则只导该项目（registry.toml 随之过滤）。
 func Export(w io.Writer, project string) error {
 	reg, err := registry.Load(registry.DefaultPath())
 	if err != nil {
@@ -76,6 +76,13 @@ func Export(w io.Writer, project string) error {
 				return err
 			}
 		}
+		// wiki 状态（基准分支+游标+合并谱系）随包走，缺失时跳过
+		ws := filepath.Join(root, "state", "wiki.json")
+		if _, err := os.Stat(ws); err == nil {
+			if err := addFile(zw, ws, "projects/"+p.Name+"/state/wiki.json"); err != nil {
+				return err
+			}
+		}
 	}
 	return zw.Close()
 }
@@ -98,7 +105,7 @@ func addBytes(zw *zip.Writer, name string, data []byte) error {
 }
 
 // Import 解包并写入知识库：注册缺失项目（同名已注册则合并进现有项目）、
-// 条目同名覆盖、config 覆盖，最后逐项目 Sync 重建索引。
+// 条目同名覆盖、config 覆盖、state/wiki.json 原样还原，最后逐项目 Sync 重建索引。
 func Import(r io.ReaderAt, size int64) (*Report, error) {
 	if size > MaxSize {
 		return nil, fmt.Errorf("%w: 超过 32MB 上限", ErrBadPackage)
@@ -115,6 +122,7 @@ func Import(r io.ReaderAt, size int64) (*Report, error) {
 	var regData []byte
 	var entries []item
 	var configs []item
+	var wikis []item
 	budget := maxDecompressed
 	for _, f := range zr.File {
 		if !validName(f.Name) {
@@ -138,6 +146,12 @@ func Import(r io.ReaderAt, size int64) (*Report, error) {
 				return nil, err
 			}
 			configs = append(configs, item{parts[1], parts[2], data})
+		case len(parts) == 4 && parts[0] == "projects" && parts[2] == "state" && parts[3] == "wiki.json":
+			data, err := readZipFile(f, &budget)
+			if err != nil {
+				return nil, err
+			}
+			wikis = append(wikis, item{parts[1], parts[3], data})
 		default:
 			return nil, fmt.Errorf("%w: 不允许的文件 %q", ErrBadPackage, f.Name)
 		}
@@ -206,6 +220,17 @@ func Import(r io.ReaderAt, size int64) (*Report, error) {
 			return nil, err
 		}
 		if err := os.WriteFile(filepath.Join(root, "config.toml"), it.data, 0o644); err != nil {
+			return nil, err
+		}
+		seen[it.project] = true
+	}
+	// wiki 状态（基准分支+游标+合并谱系）原样还原
+	for _, it := range wikis {
+		dir := filepath.Join(registry.Home(), "projects", it.project, "state")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return nil, err
+		}
+		if err := os.WriteFile(filepath.Join(dir, it.file), it.data, 0o644); err != nil {
 			return nil, err
 		}
 		seen[it.project] = true
