@@ -10,6 +10,7 @@
   <img alt="version" src="https://img.shields.io/badge/version-2.10.1-2563eb">
   <img alt="go" src="https://img.shields.io/badge/go-%3E%3D1.25-00ADD8">
   <img alt="platform" src="https://img.shields.io/badge/platform-windows%20%7C%20linux-0078d6">
+  <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-green"></a>
 </p>
 
 <p align="center">
@@ -18,34 +19,67 @@
   Single-binary Go CLI (<code>ok</code>) with zero runtime dependencies.
 </p>
 
-## What it does
+---
 
-- **Base injection**: on the first question of each session, the project's mandatory entries (full text) plus the knowledge index are sent to the AI
-- **Retrieval injection**: every question is matched by hybrid keyword + vector-semantic retrieval, injecting the most relevant entries (e.g. "git commit conventions")
-- **Enforcement**: tracks files the AI modified; if code changed but no changelog was written by the end of the turn, the turn is blocked until it's fixed (at most once per rule per session)
-- **Multi-agent support**: Kimi Code, Pi, ZCode and Reasonix share the same knowledge base (extensible adapter architecture) — kimi via TOML hook marker blocks, pi via a TypeScript extension, zcode via the Claude JSON protocol, reasonix via an Extension Protocol sidecar
-- **One-step setup**: `ok setup` configures hooks, installs skills, and sets up embeddings
-- **Switch anytime**: `ok off` disables globally, `ok on` re-enables
-- **Web GUI & resident daemon**: double-click the exe or run `ok gui` to open the admin UI; a single resident `ok.exe daemon` process (auto-starts at login) serves both the GUI and every agent's hook requests — hooks are forwarded in milliseconds, no more process-per-session
+## Contents
+
+- [Features](#features)
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [Web GUI](#web-gui)
+- [Knowledge entries](#knowledge-entries)
+- [Common commands](#common-commands)
+- [Configuration](#configuration)
+- [Retrieval algorithm](#retrieval-algorithm)
+- [How it works](#how-it-works)
+- [Development](#development)
+
+## Features
+
+| Feature | Description |
+|---------|-------------|
+| **Base injection** | On the first question of each session, the project's mandatory entries (full text) plus the knowledge index are sent to the AI |
+| **Retrieval injection** | Every question is matched by hybrid keyword + vector-semantic retrieval, injecting the most relevant entries (e.g. "git commit conventions") |
+| **Enforcement** | Tracks files the AI modified; if code changed but no changelog was written by the end of the turn, the turn is blocked until it's fixed (at most once per rule per session) |
+| **Multi-agent support** | Kimi Code, Pi, ZCode and Reasonix share the same knowledge base (extensible adapter architecture) — kimi via TOML hook marker blocks, pi via a TypeScript extension, zcode via the Claude JSON protocol, reasonix via an Extension Protocol sidecar |
+| **One-step setup** | `ok setup` configures hooks, installs skills, and sets up embeddings |
+| **Switch anytime** | `ok off` disables globally, `ok on` re-enables |
+| **Web GUI & resident daemon** | Double-click the exe or run `ok gui` to open the admin UI; a single resident `ok.exe daemon` process (auto-starts at login) serves both the GUI and every agent's hook requests — millisecond forwarding, no more process-per-session |
 
 ## Installation
 
-**Option A: Installer (Windows, Chinese UI, recommended for end users)**
+### Option A: Windows installer (recommended for end users)
 
-Just run the released `OpenKnowledgeSetup-<version>.exe` — no Go toolchain, no build steps: installs to `%LOCALAPPDATA%\Programs\OpenKnowledge` by default (no admin rights needed), with optional desktop shortcut / PATH entry / first-run wizard. Uninstall keeps knowledge-base data by default (interactive uninstall offers deletion; silent uninstall always keeps it).
+Just run the released `OpenKnowledgeSetup-<version>.exe` — no Go toolchain, no build steps. Installs to `%LOCALAPPDATA%\Programs\OpenKnowledge` by default (no admin rights needed), with optional desktop shortcut / PATH entry / first-run wizard. Uninstall keeps knowledge-base data by default (interactive uninstall offers deletion; silent uninstall always keeps it).
 
-> Maintainers can build the installer themselves: `bash scripts/build-installer.sh` (produces `installer/output/OpenKnowledgeSetup-<version>.exe`).
+<details>
+<summary>Maintainers: build the installer yourself</summary>
 
-**Option C: Linux (amd64)**
+```bash
+bash scripts/build-installer.sh   # produces installer/output/OpenKnowledgeSetup-<version>.exe
+```
+
+</details>
+
+### Option B: Linux (amd64)
 
 Two formats (both dependency-free, statically compiled):
 
-- `openknowledge_<version>_linux_amd64.tar.gz`: extract, then `cd openknowledge_* && ./ok setup` (hooks/skills + login autostart) (the autostart Exec points at the extracted directory — uninstall or re-run setup before deleting it)
-- `openknowledge_<version>_amd64.deb`: `sudo dpkg -i` installs to `/usr/lib/openknowledge/` (`ok` lands in PATH), then run `ok setup`
+| Format | How to install |
+|--------|----------------|
+| `openknowledge_<version>_linux_amd64.tar.gz` | Extract, then `cd openknowledge_* && ./ok setup` (hooks/skills + login autostart; the autostart Exec points at the extracted directory — uninstall or re-run setup before deleting it) |
+| `openknowledge_<version>_amd64.deb` | `sudo dpkg -i` installs to `/usr/lib/openknowledge/` (`ok` lands in PATH), then run `ok setup` |
 
-> Build (maintainers): `bash scripts/build-linux.sh` (.deb requires `go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest` first).
+<details>
+<summary>Maintainers: build the Linux packages</summary>
 
-**Option B: Manual build**
+```bash
+bash scripts/build-linux.sh   # .deb requires: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+```
+
+</details>
+
+### Option C: Manual build
 
 ```bash
 # 1. Build (Go ≥ 1.25)
@@ -56,11 +90,11 @@ go build -o ok ./cmd/ok            # Linux/macOS
 ./ok.exe setup
 ```
 
-`ok setup` performs, in order:
+`ok setup` performs three steps, in order:
 
-1. Writes hook configurations for **every detected AI assistant** — for kimi that's 3 hook marker blocks in `~/.kimi-code/config.toml` (idempotent, backs up the original; existing ok hooks are detected and overwritten with the current exe path, never duplicated); pi gets a TypeScript extension; zcode gets a merged `config.json` write. Use `ok setup --agent <id>` to target one agent only
-2. Installs the six skills `openknowledge-init / on / off / propose / capture / wiki` into each agent's skills directory (kimi/pi share `~/.agents/skills/`; zcode uses `~/.zcode/skills`)
-3. Prompts for embedding configuration (base_url / model / API key, paste directly; press Enter to skip and use keyword-only retrieval), writes the global config and verifies connectivity on the spot
+1. **Writes hook configurations** for every detected AI assistant — for kimi that's 3 hook marker blocks in `~/.kimi-code/config.toml` (idempotent, backs up the original; existing ok hooks are detected and overwritten with the current exe path, never duplicated); pi gets a TypeScript extension; zcode gets a merged `config.json` write. Use `ok setup --agent <id>` to target one agent only
+2. **Installs the six skills** `openknowledge-init / on / off / propose / capture / wiki` into each agent's skills directory (kimi/pi share `~/.agents/skills/`; zcode uses `~/.zcode/skills`)
+3. **Configures embeddings** — prompts for base_url / model / API key (paste directly; press Enter to skip and use keyword-only retrieval), writes the global config and verifies connectivity on the spot
 
 ## Quick start
 
@@ -84,11 +118,26 @@ You can also say "initialize the knowledge base" or "disable knowledge-base hook
 
 **Double-click `ok.exe` (no arguments) or run `ok gui`** to launch the web admin UI: the browser opens `http://127.0.0.1:17888` (the fixed port doubles as the single-instance lock; the access token is injected into the served page and never appears in the URL). The GUI is hosted by the daemon — closing the page or window does not stop the process; use `ok daemon stop` to stop the resident service.
 
-Three tabs:
+<p align="center">
+  <img src="docs/assets/gui-manage.png" alt="Manage tab" width="860"><br>
+  <sub>Manage tab: project / entry list, search preview and the global switch</sub>
+</p>
 
-- **Manage**: project/entry list — create, edit, delete entries, search preview, global switch. The project dropdown is sorted by most recent knowledge update (latest writer first); entry rows carry ⎇born-branch / ⇢scope-branch dual badges plus a branch filter; 12 entries per page; the summary column clamps to two lines with a hover tooltip showing the full text; the "Refresh" button re-fetches everything (projects + entries). The tab is hidden automatically on first use (hooks not installed).
-- **Guide**: one-click hooks/skills/embedding setup (the graphical equivalent of `ok setup`), a configurable hook timeout, the three-mode "enforcement" card (reasonix only), and an "Uninstall" card that removes all integrations (knowledge data is kept). Leads into the Manage tab when done.
-- **Misc**: data export/import (knowledge-base zip backup & restore, with same-name overwrite and index rebuild), changelog and user-guide entries, **Delete project knowledge base** (triple confirmation: impact summary + pre-delete zip backup checked by default + ticking "I understand" and typing the full project name to unlock), version and project count.
+<p align="center">
+  <img src="docs/assets/gui-guide.png" alt="Guide tab" width="860"><br>
+  <sub>Guide tab: one-click hooks, skills and embedding setup</sub>
+</p>
+
+<p align="center">
+  <img src="docs/assets/gui-misc.png" alt="Misc tab" width="860"><br>
+  <sub>Misc tab: data export / import, changelogs and project deletion</sub>
+</p>
+
+| Tab | What it offers |
+|-----|----------------|
+| **Manage** | Project/entry list — create, edit, delete entries, search preview, global switch. The project dropdown is sorted by most recent knowledge update; entry rows carry ⎇born-branch / ⇢scope-branch dual badges plus a branch filter; 12 entries per page; the summary column clamps to two lines with a hover tooltip showing the full text; the "Refresh" button re-fetches everything (projects + entries). The tab is hidden automatically on first use (hooks not installed) |
+| **Guide** | One-click hooks/skills/embedding setup (the graphical equivalent of `ok setup`), a configurable hook timeout, the three-mode "enforcement" card (reasonix only), and an "Uninstall" card that removes all integrations (knowledge data is kept). Leads into the Manage tab when done |
+| **Misc** | Data export/import (knowledge-base zip backup & restore, with same-name overwrite and index rebuild), changelog and user-guide entries, **Delete project knowledge base** (triple confirmation: impact summary + pre-delete zip backup checked by default + ticking "I understand" and typing the full project name to unlock), version and project count |
 
 The GUI needs the `web/` directory next to `ok.exe` (or in the current directory). The release build script produces both:
 
@@ -114,12 +163,19 @@ Body (free-form Markdown)
 
 Data lives in `~/.openknowledge/` (centralized storage — project repositories stay clean).
 
-**Draft flow (AI proposes, human approves)**: the AI can record session learnings as **draft entries** via `ok propose` (frontmatter `draft: true`) — drafts are excluded from retrieval and injection, and only appear in `ok list` and the GUI Manage tab (with a "draft" badge). A human promotes them with `ok approve <file>` or the GUI's "Approve" button. `ok capture propose|auto` switches the capture mode: `propose` means the AI volunteers drafts (default, no turn limit); `auto` makes the Stop hook force self-reflection every N turns; the interval is configured with `ok capture interval <n>` (only effective in auto mode).
+**Draft flow (AI proposes, human approves)**: the AI can record session learnings as **draft entries** via `ok propose` (frontmatter `draft: true`) — drafts are excluded from retrieval and injection, and only appear in `ok list` and the GUI Manage tab (with a "draft" badge). A human promotes them with `ok approve <file>` or the GUI's "Approve" button.
+
+The capture mode is switched with `ok capture propose|auto`: `propose` means the AI volunteers drafts (default, no turn limit); `auto` makes the Stop hook force self-reflection every N turns, with the interval configured via `ok capture interval <n>` (only effective in auto mode).
+
+<p align="center">
+  <img src="docs/assets/ai-session.png" alt="Knowledge capture in a real AI session" width="860"><br>
+  <sub>In a real session: after finishing a release, the AI captures wiki entries on its own and asks whether to record the pitfall separately (propose mode)</sub>
+</p>
 
 ## Common commands
 
 | Command | Purpose |
-|------|------|
+|---------|---------|
 | `ok setup` | First-run wizard: hooks + skills + embedding configuration |
 | `ok gui` | Launch the web admin UI (same as double-clicking the exe) |
 | `ok daemon [stop]` | Resident process hosting the GUI and hook forwarding (auto-starts at login; rarely needs manual action) |
@@ -138,7 +194,7 @@ Data lives in `~/.openknowledge/` (centralized storage — project repositories 
 
 ## Configuration
 
-Effective config = built-in defaults ← global `~/.openknowledge/config.toml` ← per-project `~/.openknowledge/projects/<name>/config.toml`.
+Effective config = built-in defaults ← global `~/.openknowledge/config.toml` ← per-project `~/.openknowledge/projects/<name>/config.toml` (each layer overrides the previous).
 
 ```toml
 # Global config (ok setup can write this interactively)
@@ -168,12 +224,12 @@ message = "Code was changed this session without a changelog update; please add 
 
 **What you get**: ~30ms per query over 10k entries (~36ms on the hot path including index sync); when the embedding service is down it degrades to keyword-only retrieval and injection never goes missing. See [ARCHITECTURE §17](docs/ARCHITECTURE.md#17-检索算法实现深度) (Chinese).
 
-## How it works (short version)
+## How it works
 
 Using Kimi Code as the example, the assistant calls `ok` at three moments (other agents trigger the equivalents through their own adapters):
 
-| hook | When it runs | ok's internal preconditions | Effect |
-|------|----------|----------------|------|
+| Hook | When it runs | ok's internal preconditions | Effect |
+|------|--------------|------------------------------|--------|
 | `UserPromptSubmit` | Every user message, before the model call | global switch on + directory registered | First question: mandatory entries + index; every question: retrieval injection |
 | `PostToolUse` (matcher `Write\|Edit`) | After the AI successfully writes/edits a file (not on failure) | switch + registered + project-relative path parseable | Records the touched file into session state |
 | `Stop` | When the AI's turn is about to end (not on Esc interruption) | switch + registered + `[[enforce]]` configured + rule conditions met | Code changed without changelog → exit 2 block (at most once per rule per session) |
@@ -187,6 +243,9 @@ go test ./...    # all 25 packages (no network; includes end-to-end)
 go vet ./...
 ```
 
-- Design doc: `docs/superpowers/specs/2026-07-22-openknowledge-design.md` (Chinese)
-- Implementation plan: `docs/superpowers/plans/2026-07-22-openknowledge.md` (Chinese)
-- Changelogs: `docs/changelogs/` (Chinese)
+| Document | Location |
+|----------|----------|
+| Architecture | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (Chinese) |
+| Design doc | `docs/superpowers/specs/2026-07-22-openknowledge-design.md` (Chinese) |
+| Implementation plan | `docs/superpowers/plans/2026-07-22-openknowledge.md` (Chinese) |
+| Changelogs | [docs/changelogs/](docs/changelogs/) (Chinese) |
