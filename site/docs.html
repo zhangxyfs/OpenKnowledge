@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title data-i18n="meta.title.d">文档 — OpenKnowledge</title>
+<meta name="description" content="OpenKnowledge 使用文档：安装引导、快速开始、知识条目、草稿流程、常用命令、配置、检索算法与工作原理。">
+<script>(function(){try{var t=new URLSearchParams(location.search).get('theme')||localStorage.getItem('ok-theme');if(!t)t=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';document.documentElement.dataset.theme=t;}catch(e){}})();</script>
+<link rel="icon" type="image/svg+xml" href="assets/logo.svg">
+<link rel="stylesheet" href="assets/site.css">
+<style>
+  /* ── 文档页布局：左侧栏 + 主内容 ── */
+  .layout {
+    display: grid; grid-template-columns: 230px 1fr;
+    gap: 48px; max-width: 1080px; margin: 0 auto;
+    padding: 44px 24px 80px;
+  }
+
+  /* 侧边栏 */
+  .side { position: sticky; top: 84px; align-self: start; }
+  .side .group { margin-bottom: 26px; }
+  .side .group-title {
+    font-size: 12.5px; font-weight: 700; color: var(--text-3);
+    text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;
+  }
+  .side a {
+    display: block; padding: 5px 12px; margin: 1px 0;
+    color: var(--text-2); text-decoration: none; font-size: 14.5px;
+    border-left: 2px solid transparent; border-radius: 0 8px 8px 0;
+    transition: color .15s, border-color .15s, background .15s;
+  }
+  .side a:hover { color: var(--primary); background: #eff6ff; }
+  .side a.active { color: var(--primary); border-left-color: var(--primary); background: #eff6ff; font-weight: 600; }
+
+  /* 主内容 */
+  .doc h1 { font-size: 32px; letter-spacing: .5px; }
+  .doc .lede { margin-top: 12px; color: var(--text-2); font-size: 16px; }
+  .doc h2 {
+    font-size: 23px; margin-top: 56px; padding-top: 14px;
+    border-top: 1px solid var(--border);
+  }
+  .doc h2:first-of-type { border-top: none; }
+  .doc h3 { font-size: 17px; margin-top: 26px; }
+  .doc p, .doc li { font-size: 15px; color: var(--text); margin-top: 10px; }
+  .doc ul, .doc ol { padding-left: 22px; }
+  .doc li { margin-top: 6px; }
+  .doc a { color: var(--primary); text-decoration: none; }
+  .doc a:hover { text-decoration: underline; }
+
+  /* 入口卡片 */
+  .entry-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 28px; }
+  .entry-card {
+    background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 20px; text-decoration: none; transition: box-shadow .2s, transform .2s;
+  }
+  .entry-card:hover { box-shadow: 0 8px 24px rgba(15,23,42,.08); transform: translateY(-2px); }
+  .entry-card b { color: var(--text); font-size: 15.5px; }
+  .entry-card p { margin-top: 6px; font-size: 13.5px; color: var(--text-2); }
+
+  /* 提示框 */
+  .note, .warn {
+    margin-top: 14px; border-radius: 10px; padding: 12px 16px; font-size: 14px;
+  }
+  .note { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; }
+  .warn { background: #fffbeb; border: 1px solid #fde68a; color: #92400e; }
+  .note b, .warn b { margin-right: 4px; }
+
+  /* 主内容列允许收缩，防止 pre/表格撑出页面级横向滚动 */
+  .doc { min-width: 0; }
+
+  @media (max-width: 860px) {
+    .layout { grid-template-columns: 1fr; gap: 20px; }
+    .side { position: static; border-bottom: 1px solid var(--border); padding-bottom: 18px; }
+    .side .group { margin-bottom: 14px; }
+    .entry-cards { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 560px) {
+    .doc h1 { font-size: 26px; }
+    .doc h2 { font-size: 20px; margin-top: 44px; }
+    .doc .lede { font-size: 15px; }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="index.html"><img class="logo-light" src="assets/logo.svg" alt="OpenKnowledge"><img class="logo-dark" src="assets/logo-dark.svg" alt="OpenKnowledge"></a>
+    <div class="links">
+      <a href="index.html" data-i18n="nav.home">首页</a>
+      <a href="docs.html" class="active" data-i18n="nav.docs">文档</a>
+      <a href="changelog.html" data-i18n="nav.changelog">更新日志</a>
+    </div>
+    <div class="actions">
+      <button class="icon-btn lang-toggle" id="langToggle" aria-label="语言 / Language">
+        <span data-lang="zh" class="on">中</span><span class="sep">/</span><span data-lang="en">EN</span>
+      </button>
+      <button class="icon-btn" id="themeToggle" aria-label="切换主题 / Toggle theme">
+        <svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z"/></svg>
+        <svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M19.1 4.9l-1.8 1.8M6.7 17.3l-1.8 1.8"/></svg>
+      </button>
+      <a class="icon-btn repo-btn" href="https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge" target="_blank" rel="noopener" aria-label="源码仓库 / Repository" title="源码仓库">
+        <img class="gitea-logo" src="assets/gitea.svg" alt="Gitea"><span>Gitea</span>
+      </a>
+    </div>
+  </div>
+</nav>
+
+<div class="layout">
+  <aside class="side">
+    <div class="group">
+      <div class="group-title" data-i18n="d.g1">开始使用</div>
+      <a href="#install" data-i18n="d.g1a">安装与首次引导</a>
+      <a href="#quickstart" data-i18n="d.g1b">快速开始</a>
+    </div>
+    <div class="group">
+      <div class="group-title" data-i18n="d.g2">日常使用</div>
+      <a href="#entries" data-i18n="d.g2a">知识条目</a>
+      <a href="#drafts" data-i18n="d.g2b">草稿流程</a>
+      <a href="#commands" data-i18n="d.g2c">常用命令</a>
+      <a href="#gui">Web GUI</a>
+    </div>
+    <div class="group">
+      <div class="group-title" data-i18n="d.g3">深入理解</div>
+      <a href="#config" data-i18n="d.g3a">配置</a>
+      <a href="#retrieval" data-i18n="d.g3b">检索算法</a>
+      <a href="#hooks" data-i18n="d.g3c">工作原理</a>
+    </div>
+    <div class="group">
+      <div class="group-title" data-i18n="d.g4">更多</div>
+      <a href="changelog.html" data-i18n="nav.changelog">更新日志</a>
+      <a href="https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge/src/branch/master/docs/ARCHITECTURE.md" target="_blank" rel="noopener" data-i18n="d.g4a">架构文档（仓库）</a>
+    </div>
+  </aside>
+
+  <main class="doc">
+    <h1 data-i18n="d.h1">文档</h1>
+    <p class="lede" data-i18n="d.lede">OpenKnowledge 是为 AI 编程助手提供的项目知识库：知识按项目隔离，通过 hooks/扩展自动注入 AI 上下文，并可强制执行工作流规则。</p>
+
+    <div class="entry-cards">
+      <a class="entry-card" href="#quickstart"><b data-i18n="d.e1b">五分钟上手</b><p data-i18n="d.e1p">从安装到第一次检索注入</p></a>
+      <a class="entry-card" href="#drafts"><b data-i18n="d.e2b">经验沉淀</b><p data-i18n="d.e2p">AI 提议、人批准的草稿流程</p></a>
+      <a class="entry-card" href="#retrieval"><b data-i18n="d.e3b">实现原理</b><p data-i18n="d.e3p">混合检索与 hook 时序</p></a>
+    </div>
+
+    <h2 id="install" data-i18n="d.s1h">安装与首次引导</h2>
+    <p data-i18n="d.s1p">三种安装方式任选其一，详见<a href="index.html#install">首页安装区</a>。安装完成后运行首次引导（幂等，可重复执行）：</p>
+    <pre data-i18n="d.s1pre"><code>ok setup            <span class="c"># 或只装某个 agent：ok setup --agent zcode</span></code></pre>
+    <p><code>ok setup</code> <span data-i18n="d.s1lead">依次完成三件事：</span></p>
+    <ol>
+      <li data-i18n="d.s1l1"><b>写入 hooks 配置</b>——覆盖全部已检测的 AI 助手：Kimi Code 写 <code>~/.kimi-code/config.toml</code> 的 3 条 hook 标记块（自动备份、幂等覆盖），Pi 写 TypeScript 扩展，ZCode 合并写 <code>config.json</code>，Reasonix 安装 Extension Protocol 插件包</li>
+      <li data-i18n="d.s1l2"><b>安装六个技能</b>——<code>openknowledge-init / on / off / propose / capture / wiki</code>，写入各 agent 的技能目录</li>
+      <li data-i18n="d.s1l3"><b>配置 embedding</b>——交互询问 base_url / model / API key，写入全局配置并当场验证连通性；回车跳过则只用关键词检索</li>
+    </ol>
+    <div class="note" data-i18n="d.s1note"><b>注意</b>hooks 在会话启动时加载：安装或变更配置后，需要<b>新开一个 AI 助手会话</b>才会生效。</div>
+
+    <h2 id="quickstart" data-i18n="d.s2h">快速开始</h2>
+    <pre data-i18n="d.s2pre"><code><span class="c"># 在需要使用知识库的项目目录里</span>
+cd /your/project
+ok init                      <span class="c"># 注册项目（自动取目录名）</span>
+ok add --title "变更日志强制规则" --type rule --mandatory --file rule.md
+ok add --title "Git 提交规范" --type note --tags git --file git.md
+ok index                     <span class="c"># 配好 embedding 后同步索引与向量</span></code></pre>
+    <p data-i18n="d.s2p">然后新开 AI 助手会话即可生效：</p>
+    <ul>
+      <li data-i18n="d.s2l1">问「git 提交规范是什么」→ AI 直接引用知识库内容回答</li>
+      <li data-i18n="d.s2l2">AI 改了代码没写变更日志 → 回合结束时被阻断提醒</li>
+    </ul>
+    <p data-i18n="d.s2tail">也可以在会话里直接说「初始化知识库」「关闭知识库 hooks」——对应技能会自动调用。</p>
+
+    <h2 id="entries" data-i18n="d.s3h">知识条目</h2>
+    <p data-i18n="d.s3p">每条知识是一个带 frontmatter 的 Markdown 文件（<code>ok add</code> 创建，也可手写）：</p>
+    <pre data-i18n="d.s3pre"><code>---
+title: 变更日志强制规则
+type: rule              <span class="c"># rule | pitfall | note | reference</span>
+tags: [changelog, workflow]
+mandatory: true         <span class="c"># true = 每会话首次提问全文注入</span>
+summary: 每次代码修改必须立即记录变更日志
+---
+
+正文（Markdown 自由格式）</code></pre>
+    <p data-i18n="d.s3tail">数据集中存放在 <code>~/.openknowledge/</code>，不污染项目仓库。条目类型四种：<code>rule</code>（规则）、<code>pitfall</code>（踩坑）、<code>note</code>（笔记）、<code>reference</code>（参考）。</p>
+
+    <h2 id="drafts" data-i18n="d.s4h">草稿流程（AI 提议，人批准）</h2>
+    <p data-i18n="d.s4p">AI 可通过 <code>ok propose</code> 把会话中沉淀的经验记为<b>草稿条目</b>（frontmatter <code>draft: true</code>）——草稿不参与检索与注入，只出现在 <code>ok list</code> 和 GUI 管理页（带「草稿」徽标）。人确认后用 <code>ok approve &lt;文件&gt;</code> 或 GUI 的「采纳」按钮转正。</p>
+    <p data-i18n="d.s4lead">沉淀模式用 <code>ok capture propose|auto</code> 切换：</p>
+    <ul>
+      <li data-i18n="d.s4l1"><code>propose</code>（默认）：AI 自主判断、主动提议，无轮次限制</li>
+      <li data-i18n="d.s4l2"><code>auto</code>：Stop hook 每隔指定轮次强制 AI 自省提取经验；轮次间隔用 <code>ok capture interval &lt;n&gt;</code> 配置</li>
+    </ul>
+
+    <h2 id="commands" data-i18n="d.s5h">常用命令</h2>
+    <div class="table-scroll" data-i18n="d.s5tbl">
+    <table class="doc">
+      <tr><th>命令</th><th>作用</th></tr>
+      <tr><td><code>ok setup</code></td><td>首次引导：hooks 配置 + 技能安装 + embedding 配置</td></tr>
+      <tr><td><code>ok gui</code></td><td>启动 Web 管理界面（双击 exe 无参数运行同效）</td></tr>
+      <tr><td><code>ok init [名字]</code></td><td>注册当前项目，并幂等写入/更新 hooks 配置</td></tr>
+      <tr><td><code>ok add</code></td><td>新建知识条目（自动重建索引与向量）</td></tr>
+      <tr><td><code>ok propose</code> / <code>ok approve</code></td><td>AI 提议草稿 / 批准转正</td></tr>
+      <tr><td><code>ok capture [...]</code></td><td>查看/切换沉淀模式，配置轮次间隔</td></tr>
+      <tr><td><code>ok wiki status|mark|base|diff</code></td><td>wiki 状态 / 记游标 / 基准分支 / 分支差异素材</td></tr>
+      <tr><td><code>ok search &lt;词&gt;</code></td><td>命令行预览检索效果</td></tr>
+      <tr><td><code>ok index</code></td><td>同步索引与向量（删除 kb.db 后执行 = 全量重建）</td></tr>
+      <tr><td><code>ok doctor</code></td><td>体检：配置、embedding 连通性、hooks 状态</td></tr>
+      <tr><td><code>ok on</code> / <code>ok off</code></td><td>全局开关（默认开启）</td></tr>
+    </table>
+    </div>
+
+    <h2 id="gui">Web GUI</h2>
+    <p data-i18n="d.s6p"><b>双击 <code>ok.exe</code>（无参数运行）或执行 <code>ok gui</code></b> 启动 Web 管理界面，浏览器自动打开 <code>http://127.0.0.1:17888</code>。GUI 由常驻 daemon 托管，关闭页面不会退出进程；<code>ok daemon stop</code> 停止常驻服务。三个标签页：</p>
+    <ul>
+      <li data-i18n="d.s6l1"><b>管理</b>：项目/条目列表、新建/编辑/删除、检索预览、全局开关、分支过滤</li>
+      <li data-i18n="d.s6l2"><b>引导</b>：图形版 <code>ok setup</code>，另有 hook 超时、强制检查方式（reasonix）与卸载卡片</li>
+      <li data-i18n="d.s6l3"><b>其他</b>：数据导出/导入、更新日志、使用帮助、删除项目知识库（三重确认）</li>
+    </ul>
+
+    <h2 id="config" data-i18n="d.s7h">配置</h2>
+    <p data-i18n="d.s7p">生效配置 = 内置默认 ← 全局 <code>~/.openknowledge/config.toml</code> ← 项目 <code>~/.openknowledge/projects/&lt;名&gt;/config.toml</code>（逐层覆盖）。</p>
+    <pre data-i18n="d.s7pre"><code><span class="c"># 全局配置（ok setup 可交互写入）</span>
+[embedding]
+base_url = "https://api.openai.com/v1"   <span class="c"># 任何 OpenAI 兼容服务</span>
+api_key = "sk-..."                        <span class="c"># 或用 api_key_env 指向环境变量</span>
+model = "text-embedding-3-small"
+
+<span class="c"># 项目配置：强制规则示例</span>
+[[enforce]]
+type = "changelog_required"
+code_globs = ["**/*.go"]                  <span class="c"># 改了这些 = 改了代码</span>
+changelog_glob = "docs/changelogs/**"     <span class="c"># 碰了这些 = 写了日志</span>
+message = "本次会话修改了代码但未更新变更日志，请先按规范补齐。"</code></pre>
+
+    <h2 id="retrieval" data-i18n="d.s8h">检索算法</h2>
+    <p data-i18n="d.s8p">SQLite + FTS5 的混合检索，两路分数归一化后加权混合（α/β 可调），取 top-2 注入：</p>
+    <ul>
+      <li data-i18n="d.s8l1"><b>关键词通道</b>：FTS5 全文索引 + BM25 打分，按 标题/标签/摘要/正文 分权重；中文用二元组分词，零依赖</li>
+      <li data-i18n="d.s8l2"><b>语义通道</b>：OpenAI 兼容 embedding + 余弦相似度，召回「问法不同但意思相近」的条目</li>
+      <li data-i18n="d.s8l3"><b>草稿条目不进检索通道</b>：FTS 与向量都排除，批准后自动参与</li>
+    </ul>
+    <p data-i18n="d.s8tail">1 万条条目下单次查询约 30ms；embedding 服务不可用时自动降级为纯关键词检索，注入永不缺席。实现细节见<a href="https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge/src/branch/master/docs/ARCHITECTURE.md" target="_blank" rel="noopener">架构文档第 17 章</a>。</p>
+
+    <h2 id="hooks" data-i18n="d.s9h">工作原理</h2>
+    <p data-i18n="d.s9p">以 Kimi Code 为例，AI 助手在三个时机调用 <code>ok</code>（其他 agent 经各自适配器等价触发）：</p>
+    <div class="table-scroll" data-i18n="d.s9tbl">
+    <table class="doc">
+      <tr><th>Hook</th><th>何时执行</th><th>作用</th></tr>
+      <tr><td><code>UserPromptSubmit</code></td><td>每条用户消息、模型调用之前</td><td>首次提问注入 mandatory + 索引；每次提问检索注入</td></tr>
+      <tr><td><code>PostToolUse</code></td><td>AI 用 Write/Edit 成功改完文件后</td><td>把改动文件记入会话状态</td></tr>
+      <tr><td><code>Stop</code></td><td>AI 每个回合即将结束时</td><td>改了代码没写日志 → exit 2 阻断（同会话同规则只阻断一次）</td></tr>
+    </table>
+    </div>
+    <div class="note" data-i18n="d.s9note"><b>说明</b>所有 hook 路径 fail-open：任何内部错误只记日志（<code>~/.openknowledge/ok.log</code>），绝不影响正常会话。</div>
+  </main>
+</div>
+
+<footer>
+  <div class="wrap">
+    <div data-i18n="d.foot">
+      <a href="index.html">首页</a>·
+      <a href="changelog.html">更新日志</a>·
+      <a href="https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge" target="_blank" rel="noopener">源码仓库</a>
+    </div>
+    <div class="copy">© 2026 ZXY · MIT License</div>
+  </div>
+</footer>
+
+<script src="assets/site.js"></script>
+
+</body>
+</html>

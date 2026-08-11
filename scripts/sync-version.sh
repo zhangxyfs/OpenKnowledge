@@ -21,20 +21,25 @@ for f in README.md README_EN.md; do
 done
 [ "$changed" = 0 ] && echo "README 徽标已是 $VERSION，无需变更"
 
-# 官网单页：VER 变量、Release 直链、安装卡片里的示例文件名
-f=site/index.html
-if [ -f "$f" ]; then
-  before=$(sed -n "s/.*var VER = 'v\([0-9.]*\)'.*/\1/p" "$f" | head -1)
+# 官网：VER 变量、Release 直链、安装/下载文案里的版本号
+# 覆盖 site/index.html（VER + 直链）、site/changelog.html（下载按钮文案）、
+# site/assets/site.js（英文字典里的直链与文案）
+for f in site/index.html site/changelog.html site/assets/site.js; do
+  [ -f "$f" ] || continue
+  before_md=$(md5sum "$f" | cut -d' ' -f1)
   sed -i \
     -e "s|var VER = 'v[0-9.]*'|var VER = 'v${VERSION}'|" \
     -e "s|releases/download/v[0-9.]*/|releases/download/v${VERSION}/|g" \
     -e "s|OpenKnowledgeSetup-[0-9.]*\.exe|OpenKnowledgeSetup-${VERSION}.exe|g" \
     -e "s|openknowledge_[0-9.]*_amd64\.deb|openknowledge_${VERSION}_amd64.deb|g" \
     -e "s|openknowledge_[0-9.]*_linux_amd64\.tar\.gz|openknowledge_${VERSION}_linux_amd64.tar.gz|g" \
+    -e "s|下载最新版 v[0-9.]*|下载最新版 v${VERSION}|g" \
+    -e "s|Download latest v[0-9.]*|Download latest v${VERSION}|g" \
     "$f"
-  if [ "$before" != "$VERSION" ]; then
-    echo "$f: 官网版本 $before → $VERSION"
+  after_md=$(md5sum "$f" | cut -d' ' -f1)
+  if [ "$before_md" != "$after_md" ]; then
+    echo "$f: 版本引用已更新 → $VERSION"
   else
     echo "$f: 已是 $VERSION，无需变更"
   fi
-fi
+done

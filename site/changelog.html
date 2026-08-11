@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title data-i18n="meta.title.c">更新日志 — OpenKnowledge</title>
+<meta name="description" content="OpenKnowledge 版本发布记录：新功能、改进与修复。">
+<script>(function(){try{var t=new URLSearchParams(location.search).get('theme')||localStorage.getItem('ok-theme');if(!t)t=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';document.documentElement.dataset.theme=t;}catch(e){}})();</script>
+<link rel="icon" type="image/svg+xml" href="assets/logo.svg">
+<link rel="stylesheet" href="assets/site.css">
+<style>
+  .layout {
+    display: grid; grid-template-columns: 230px 1fr;
+    gap: 48px; max-width: 1080px; margin: 0 auto;
+    padding: 44px 24px 80px;
+  }
+
+  /* 侧边栏：版本档案 */
+  .side { position: sticky; top: 84px; align-self: start; max-height: calc(100vh - 104px); overflow-y: auto; }
+  .side .group { margin-bottom: 18px; }
+  .side .group-title {
+    font-size: 12.5px; font-weight: 700; color: var(--text-3);
+    letter-spacing: 1px; margin-bottom: 6px;
+  }
+  .side a {
+    display: flex; justify-content: space-between; align-items: baseline;
+    padding: 4px 12px; margin: 1px 0;
+    color: var(--text-2); text-decoration: none; font-size: 14px;
+    border-left: 2px solid transparent; border-radius: 0 8px 8px 0;
+    transition: color .15s, border-color .15s, background .15s;
+  }
+  .side a:hover { color: var(--primary); background: #eff6ff; }
+  .side a .d { font-size: 12px; color: var(--text-3); }
+  .side .latest-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #16a34a; margin-right: 6px; }
+
+  /* 页头 */
+  .page-head h1 { font-size: 32px; }
+  .page-head .lede { margin-top: 10px; color: var(--text-2); }
+  .page-head .cta { margin-top: 18px; }
+  .page-head .btn { padding: 10px 24px; font-size: 15px; }
+
+  /* 版本块 */
+  .ver { margin-top: 44px; padding-top: 30px; border-top: 1px solid var(--border); }
+  .ver:first-of-type { border-top: none; margin-top: 36px; }
+  .ver-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .ver-head h2 { font-size: 22px; }
+  .ver-head time { color: var(--text-3); font-size: 13.5px; }
+  .badge-latest {
+    font-size: 12px; font-weight: 600; color: #fff; background: #16a34a;
+    border-radius: 999px; padding: 2px 10px;
+  }
+
+  .chg { margin-top: 16px; }
+  .tag {
+    display: inline-block; font-size: 12.5px; font-weight: 700;
+    border-radius: 6px; padding: 2px 10px; margin-bottom: 6px;
+  }
+  .tag-new     { background: #dcfce7; color: #15803d; }
+  .tag-fix     { background: #fee2e2; color: #b91c1c; }
+  .tag-improve { background: #dbeafe; color: #1d4ed8; }
+  .tag-note    { background: #f1f5f9; color: #475569; }
+  .chg ul { padding-left: 22px; }
+  .chg li { font-size: 14.5px; margin-top: 6px; color: var(--text); }
+
+  /* 主内容列允许收缩，防止长内容撑出页面级横向滚动 */
+  main { min-width: 0; }
+
+  /* 桌面端 details 常开、隐藏 summary 条；手机端由媒体查询接管 */
+  #verNav > summary { display: none; }
+
+  @media (max-width: 860px) {
+    .layout { grid-template-columns: 1fr; gap: 20px; }
+    .side { position: static; max-height: none; }
+    /* 手机上版本档案折叠成可展开卡片，避免把正文顶出首屏 */
+    #verNav > summary {
+      display: block; cursor: pointer; user-select: none;
+      background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+      padding: 10px 16px; font-weight: 600; font-size: 14.5px;
+    }
+    #verNav[open] > summary { margin-bottom: 12px; }
+  }
+  @media (max-width: 560px) {
+    .page-head h1 { font-size: 26px; }
+    .ver-head h2 { font-size: 19px; }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="index.html"><img class="logo-light" src="assets/logo.svg" alt="OpenKnowledge"><img class="logo-dark" src="assets/logo-dark.svg" alt="OpenKnowledge"></a>
+    <div class="links">
+      <a href="index.html" data-i18n="nav.home">首页</a>
+      <a href="docs.html" data-i18n="nav.docs">文档</a>
+      <a href="changelog.html" class="active" data-i18n="nav.changelog">更新日志</a>
+    </div>
+    <div class="actions">
+      <button class="icon-btn lang-toggle" id="langToggle" aria-label="语言 / Language">
+        <span data-lang="zh" class="on">中</span><span class="sep">/</span><span data-lang="en">EN</span>
+      </button>
+      <button class="icon-btn" id="themeToggle" aria-label="切换主题 / Toggle theme">
+        <svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z"/></svg>
+        <svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M19.1 4.9l-1.8 1.8M6.7 17.3l-1.8 1.8"/></svg>
+      </button>
+      <a class="icon-btn repo-btn" href="https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge" target="_blank" rel="noopener" aria-label="源码仓库 / Repository" title="源码仓库">
+        <img class="gitea-logo" src="assets/gitea.svg" alt="Gitea"><span>Gitea</span>
+      </a>
+    </div>
+  </div>
+</nav>
+
+<div class="layout">
+  <aside class="side">
+   <details id="verNav" open>
+    <summary data-i18n="c.ledger">版本档案</summary>
+    <div class="group">
+      <div class="group-title">2.10.x</div>
+      <a href="#v2-10-1"><span><span class="latest-dot"></span>v2.10.1</span><span class="d">08-10</span></a>
+      <a href="#v2-10-0"><span>v2.10.0</span><span class="d">08-09</span></a>
+    </div>
+    <div class="group">
+      <div class="group-title">2.9.x</div>
+      <a href="#v2-9-0"><span>v2.9.0</span><span class="d">08-09</span></a>
+    </div>
+    <div class="group">
+      <div class="group-title">2.8.x</div>
+      <a href="#v2-8-2"><span>v2.8.2</span><span class="d">08-09</span></a>
+      <a href="#v2-8-1"><span>v2.8.1</span><span class="d">08-09</span></a>
+      <a href="#v2-8-0"><span>v2.8.0</span><span class="d">08-09</span></a>
+    </div>
+    <div class="group">
+      <div class="group-title">2.7.x</div>
+      <a href="#v2-7-1"><span>v2.7.1</span><span class="d">08-08</span></a>
+      <a href="#v2-7-0"><span>v2.7.0</span><span class="d">08-08</span></a>
+    </div>
+    <div class="group">
+      <div class="group-title">2.6.x</div>
+      <a href="#v2-6-0"><span>v2.6.0</span><span class="d">08-08</span></a>
+    </div>
+    <div class="group">
+      <div class="group-title">2.5.x</div>
+      <a href="#v2-5-0"><span>v2.5.0</span><span class="d">08-08</span></a>
+    </div>
+    <div class="group">
+      <div class="group-title">2.4.x</div>
+      <a href="#v2-4-0"><span>v2.4.0</span><span class="d">08-07</span></a>
+    </div>
+    <div class="group">
+      <div class="group-title">2.3.x</div>
+      <a href="#v2-3-3"><span>v2.3.3</span><span class="d">08-04</span></a>
+      <a href="#v2-3-2"><span>v2.3.2</span><span class="d">08-04</span></a>
+      <a href="#v2-3-0"><span>v2.3.0</span><span class="d">08-02</span></a>
+    </div>
+    <div class="group">
+      <div class="group-title">2.2.x</div>
+      <a href="#v2-2-4"><span>v2.2.4</span><span class="d">07-28</span></a>
+      <a href="#v2-2-3"><span>v2.2.3</span><span class="d">07-28</span></a>
+    </div>
+   </details>
+  </aside>
+
+  <main>
+    <div class="page-head">
+      <h1 data-i18n="c.h1">更新日志</h1>
+      <p class="lede" data-i18n="c.lede">OpenKnowledge 的版本发布记录。日期为 2026 年。</p>
+      <div class="cta">
+        <a class="btn btn-primary" href="https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge/releases" target="_blank" rel="noopener" data-i18n="c.cta">下载最新版 v2.10.1</a>
+      </div>
+    </div>
+
+    <section class="ver" id="v2-10-1">
+      <div class="ver-head"><h2>v2.10.1</h2><span class="badge-latest" data-i18n="c.latest">最新</span><time>2026-08-10</time></div>
+      <div class="chg">
+        <span class="tag tag-fix" data-i18n="t.fix">修复</span>
+        <ul>
+          <li data-i18n="c.2101.f1">导出/导入纳入 wiki 状态：<code>state/wiki.json</code>（基准分支 + 按分支游标 + 合并谱系）随 zip 包备份，导入时原样还原。此前导出范围只有条目与 config——删除项目知识库的「导出 zip 备份」不含谱系，重导入后 GUI 谱系行归零、wiki 游标丢失导致全量重扫</li>
+        </ul>
+      </div>
+      <div class="chg">
+        <span class="tag tag-note" data-i18n="t.note">说明</span>
+        <ul>
+          <li data-i18n="c.2101.n1">旧备份包无 wiki.json 时跳过还原，向后兼容；条目索引仍在导入时自动重建</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="ver" id="v2-10-0">
+      <div class="ver-head"><h2>v2.10.0</h2><time>2026-08-09</time></div>
+      <div class="chg">
+        <span class="tag tag-new" data-i18n="t.new">新功能</span>
+        <ul>
+          <li data-i18n="c.2100.n1">新增 Linux 发布线（amd64）：<code>.tar.gz</code>（解压即用）与 <code>.deb</code>（装到 /usr/lib/openknowledge/，ok 进 PATH）</li>
+          <li data-i18n="c.2100.n2">Linux 桌面体验补齐：<code>ok gui</code> 经 xdg-open 打开默认浏览器；<code>ok setup</code> 自动写入 XDG 登录自启，卸载时移除</li>
+        </ul>
+      </div>
+      <div class="chg">
+        <span class="tag tag-note" data-i18n="t.note">说明</span>
+        <ul>
+          <li data-i18n="c.2100.s1">Windows 行为零变化；Linux 二进制纯静态编译（无 CGO），发行版通吃</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="ver" id="v2-9-0">
+      <div class="ver-head"><h2>v2.9.0</h2><time>2026-08-09</time></div>
+      <div class="chg">
+        <span class="tag tag-new" data-i18n="t.new">新功能</span>
+        <ul>
+          <li data-i18n="c.290.n1">其他页新增「删除项目知识库」：永久删除所选项目的全部知识、索引与配置，并注销注册表（hooks 不再注入该项目）；项目源码目录不受影响</li>
+          <li data-i18n="c.290.n2">多重确认防误删：影响面明示 → 删除前导出 zip 备份（默认勾选）→「我已了解后果」勾选 + 输入完整项目名双重解锁</li>
+          <li data-i18n="c.290.n3">后端先注销注册表再删目录：任一步失败都偏向「保留数据」</li>
+        </ul>
+      </div>
+      <div class="chg">
+        <span class="tag tag-fix" data-i18n="t.fix">修复</span>
+        <ul>
+          <li data-i18n="c.290.f1">删除当前选中项目后不再误弹「项目未注册」错误横幅</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="ver" id="v2-8-2">
+      <div class="ver-head"><h2>v2.8.2</h2><time>2026-08-09</time></div>
+      <div class="chg">
+        <span class="tag tag-improve" data-i18n="t.improve">改进</span>
+        <ul>
+          <li data-i18n="c.282.i1">项目下拉按最近知识更新排序：最近有写入的项目排最前，打开 GUI 默认即选中</li>
+          <li data-i18n="c.282.i2">刷新按钮改全量刷新：项目列表、状态、条目一次拉齐；带「刷新中… → 已刷新 ✓」反馈，防重复点击</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="ver" id="v2-8-1">
+      <div class="ver-head"><h2>v2.8.1</h2><time>2026-08-09</time></div>
+      <div class="chg">
+        <span class="tag tag-improve" data-i18n="t.improve">改进</span>
+        <ul>
+          <li data-i18n="c.281.i1">GUI 管理页表头中文化：tags → 标签，mandatory → 必注入（悬停保留原字段说明）</li>
+          <li data-i18n="c.281.i2">摘要列最多显示 2 行、超出省略号；悬停浮窗显示完整内容（跟随鼠标、溢出自动翻转、滚动即收起）</li>
+          <li data-i18n="c.281.i3">管理页每页条数 20 → 12，信息密度更适中</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="ver" id="v2-8-0">
+      <div class="ver-head"><h2>v2.8.0</h2><time>2026-08-09</time></div>
+      <div class="chg">
+        <span class="tag tag-new" data-i18n="t.new">新功能</span>
+        <ul>
+          <li data-i18n="c.280.n1">条目级分支溯源（provenance）：每条新知识自动记录出生分支（born 标签），GUI 分支列展示「⎇ 出生分支」徽标；<code>ok backfill-born</code> 可回填存量</li>
+          <li data-i18n="c.280.n2">合并谱系落盘：分支并入基准自动记录，GUI 显示「dev → master」</li>
+          <li data-i18n="c.280.n3">GUI 分支上下文：工具条显示「基准分支 · 当前分支」，不一致时警示</li>
+        </ul>
+      </div>
+      <div class="chg">
+        <span class="tag tag-note" data-i18n="t.note">说明</span>
+        <ul>
+          <li data-i18n="c.280.s1">born 与 branch 标签正交：branch 管「在哪生效」（注入过滤），born 管「在哪出生」（展示）；零迁移，旧知识库开箱即用</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="ver" id="v2-7-1">
+      <div class="ver-head"><h2>v2.7.1</h2><time>2026-08-08</time></div>
+      <div class="chg">
+        <span class="tag tag-new" data-i18n="t.new">新功能</span>
+        <ul>
+          <li data-i18n="c.271.n1">GUI「其他」页新增「使用帮助」卡：怎么调用、怎么配置、常见问题——随安装包分发，离线可查</li>
+          <li data-i18n="c.271.n2">GUI 条目类型显示中文化（规则/踩坑/笔记/参考；存储值仍为英文）</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="ver" id="v2-7-0">
+      <div class="ver-head"><h2>v2.7.0</h2><time>2026-08-08</time></div>
+      <div class="chg">
+        <span class="tag tag-new" data-i18n="t.new">新功能</span>
+        <ul>
+          <li data-i18n="c.270.n1">wiki 分支差异条目：长期并行分支只维护与基准分支的结构差异，注入按当前分支过滤，他分支差异不再误导 agent</li>
+          <li data-i18n="c.270.n2">分支合并感知：dev 并入 master 后提示清理失效差异条目（每会话一次）</li>
+          <li data-i18n="c.270.n3">GUI 管理页：分支列 + 分支过滤器 + 操作列固定</li>
+        </ul>
+      </div>
+      <div class="chg">
+        <span class="tag tag-fix" data-i18n="t.fix">修复</span>
+        <ul>
+          <li data-i18n="c.270.f1">非基准分支跑 wiki 更新不再污染全量条目（技能流程改为只写差异条目）</li>
+          <li data-i18n="c.270.f2">prompt 热路径 git 调用收敛，每次提问少 1-2 次 git 子进程</li>
+          <li data-i18n="c.270.f3"><code>ok wiki mark</code> 对用户传入 rev 先 rev-parse 归一化，修短 hash 游标误判 diverged</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="ver" id="v2-6-0">
+      <div class="ver-head"><h2>v2.6.0</h2><time>2026-08-08</time></div>
+      <div class="chg">
+        <span class="tag tag-new" data-i18n="t.new">新功能</span>
+        <ul>
+          <li data-i18n="c.260.n1">wiki 分支感知：游标按分支记录（<code>state/wiki.json</code> 新格式），旧单游标格式按 merge-base 可达性惰性迁移；切到分叉分支时注入附 wiki 出处提示</li>
+          <li data-i18n="c.260.n2">游标被 rebase/squash 改写后显式提示「游标失效」</li>
+          <li data-i18n="c.260.n3"><code>ok wiki base</code> 查看/设置基准分支；<code>ok wiki status</code> 输出 branch/base_branch/branch_state</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="ver" id="v2-5-0">
+      <div class="ver-head"><h2>v2.5.0</h2><time>2026-08-08</time></div>
+      <div class="chg">
+        <span class="tag tag-new" data-i18n="t.new">新功能</span>
+        <ul>
+          <li data-i18n="c.250.n1">多 Agent 支持新增 Reasonix 集成：第四个适配器，走 Extension Protocol 插件包 + sidecar（<code>ok extension-serve</code>），sidecar 崩溃宿主降级不阻断</li>
+          <li data-i18n="c.250.n2">强制检查三档开关（仅 Reasonix）：<code>mixed</code> / <code>soft</code> / <code>hard</code>，GUI 引导页可配，保存即时生效</li>
+        </ul>
+      </div>
+      <div class="chg">
+        <span class="tag tag-note" data-i18n="t.note">说明</span>
+        <ul>
+          <li data-i18n="c.250.s1">sidecar 全面 fail-open：拦截器异常一律放行不阻断输入；<code>ok off</code> 对 reasonix sidecar 同样生效</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="ver" id="v2-4-0">
+      <div class="ver-head"><h2>v2.4.0</h2><time>2026-08-07</time></div>
+      <div class="chg">
+        <span class="tag tag-new" data-i18n="t.new">新功能</span>
+        <ul>
+          <li data-i18n="c.240.n1">多 Agent 支持新增 ZCode 集成：hook 配置合并写 <code>~/.zcode/cli/config.json</code>，保留用户未知字段与自有 hook，写前备份</li>
+          <li data-i18n="c.240.n2">hook 输出新增 Claude/ZCode JSON 协议格式：prompt 注入包成 additionalContext，Stop 阻断走 decision:block</li>
+          <li data-i18n="c.240.n3">技能分发启用每 agent 独立目录（ZCode 装到 <code>~/.zcode/skills</code>）；<code>ok doctor</code> 逐 agent 报告 hooks 状态</li>
+        </ul>
+      </div>
+      <div class="chg">
+        <span class="tag tag-note" data-i18n="t.note">说明</span>
+        <ul>
+          <li data-i18n="c.240.s1">ZCode 侧生效方式：<code>ok setup --agent zcode</code> 后<b>新建会话</b>（ZCode 在会话启动时快照 hook 配置）</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="ver" id="v2-3-3">
+      <div class="ver-head"><h2>v2.3.3</h2><time>2026-08-04</time></div>
+      <div class="chg">
+        <span class="tag tag-new" data-i18n="t.new">新功能</span>
+        <ul>
+          <li data-i18n="c.233.n1">升级后打开 GUI 自动弹出更新日志：跳级升级累计展示所有新版本；「其他」页新增常驻入口，随时回看全部历史</li>
+          <li data-i18n="c.233.n2">新 API：<code>GET /api/changelog</code>、<code>POST /api/changelog/seen</code>（首次运行、dev 构建、降级安装均不弹窗）</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="ver" id="v2-3-2">
+      <div class="ver-head"><h2>v2.3.2</h2><time>2026-08-04</time></div>
+      <div class="chg">
+        <span class="tag tag-new" data-i18n="t.new">新功能</span>
+        <ul>
+          <li data-i18n="c.232.n1">hooks 超时可配置：三条 hook 统一取全局配置 <code>[hooks] timeout_sec</code>；GUI 引导页新增「hook 超时」卡</li>
+          <li data-i18n="c.232.n2">经验沉淀分流「新需求」到 wiki：propose 技能新增「先分类」指引（经验型 → 草稿 / 结构型 → wiki）</li>
+        </ul>
+      </div>
+      <div class="chg">
+        <span class="tag tag-fix" data-i18n="t.fix">修复</span>
+        <ul>
+          <li data-i18n="c.232.f1">PostToolUse 三个静默返回分支补 ok.log 日志——此前高负载下 touched 记录可能整会话丢失且无任何痕迹</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="ver" id="v2-3-0">
+      <div class="ver-head"><h2>v2.3.0</h2><time>2026-08-02</time></div>
+      <div class="chg">
+        <span class="tag tag-new" data-i18n="t.new">新功能</span>
+        <ul>
+          <li data-i18n="c.230.n1">多 Agent 支持新增 Pi 集成（TypeScript 扩展注入 hook），与 Kimi Code 并列；<code>internal/agentx</code> 适配器注册表，后续 agent 一个文件即可接入</li>
+          <li data-i18n="c.230.n2">GUI 引导页新增 agents 下拉：hooks 配置卡随选中 agent 联动；<code>ok setup --agent &lt;id&gt;</code> 只装指定 agent</li>
+        </ul>
+      </div>
+      <div class="chg">
+        <span class="tag tag-fix" data-i18n="t.fix">修复</span>
+        <ul>
+          <li data-i18n="c.230.f1">hook 安装/卸载改为收集式错误聚合：单个 agent 失败不影响其他 agent</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="ver" id="v2-2-4">
+      <div class="ver-head"><h2>v2.2.4</h2><time>2026-07-28</time></div>
+      <div class="chg">
+        <span class="tag tag-improve" data-i18n="t.improve">优化</span>
+        <ul>
+          <li data-i18n="c.224.i1">托盘菜单从左键单击改为右键单击触发（左键单击与双击冲突）；左键双击打开/聚焦 GUI 不变</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="ver" id="v2-2-3">
+      <div class="ver-head"><h2>v2.2.3</h2><time>2026-07-28</time></div>
+      <div class="chg">
+        <span class="tag tag-new" data-i18n="t.new">新功能</span>
+        <ul>
+          <li data-i18n="c.223.n1">系统托盘：daemon 运行时显示图标；右键弹菜单（版本号 + 退出），双击打开/聚焦唯一 GUI 窗口</li>
+        </ul>
+      </div>
+      <div class="chg">
+        <span class="tag tag-fix" data-i18n="t.fix">修复</span>
+        <ul>
+          <li data-i18n="c.223.f1">hook 调用不再闪 cmd 黑窗口（子进程静默化）</li>
+          <li data-i18n="c.223.f2">安装器在文件拷贝前自动 daemon stop，避免 ok.exe 被锁导致升级失败</li>
+        </ul>
+      </div>
+      <div class="chg">
+        <span class="tag tag-improve" data-i18n="t.improve">优化</span>
+        <ul>
+          <li data-i18n="c.223.i1">hook 注入瘦身：默认预算 1500→800、top_n 3→2；检索命中注摘要+文件路径而非全文（mandatory 条目仍全文）</li>
+        </ul>
+      </div>
+    </section>
+
+    <div class="chg" style="margin-top:40px;">
+      <span class="tag tag-note" data-i18n="c.older.t">更早</span>
+      <ul>
+        <li data-i18n="c.older.l">v1.x 早期开发记录散见于仓库 <a href="https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge/src/branch/master/docs/changelogs/" target="_blank" rel="noopener">docs/changelogs/</a> 的按日期文件</li>
+      </ul>
+    </div>
+  </main>
+</div>
+
+<footer>
+  <div class="wrap">
+    <div data-i18n="c.foot">
+      <a href="index.html">首页</a>·
+      <a href="docs.html">文档</a>·
+      <a href="https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge" target="_blank" rel="noopener">源码仓库</a>
+    </div>
+    <div class="copy">© 2026 ZXY · MIT License</div>
+  </div>
+</footer>
+
+<script>
+// 手机访问时默认折叠版本档案侧栏（桌面端保持常开）
+if (matchMedia('(max-width: 860px)').matches) {
+  document.getElementById('verNav').removeAttribute('open');
+}
+</script>
+<script src="assets/site.js"></script>
+
+</body>
+</html>
