@@ -115,8 +115,12 @@
    <details id="verNav" open>
     <summary data-i18n="c.ledger">版本档案</summary>
     <div class="group">
+      <div class="group-title">2.11.x</div>
+      <a href="#v2-11-1"><span><span class="latest-dot"></span>v2.11.1</span><span class="d">08-12</span></a>
+      <a href="#v2-11-0"><span>v2.11.0</span><span class="d">08-12</span></a>
+    </div>
+    <div class="group">
       <div class="group-title">2.10.x</div>
-      <a href="#v2-11-0"><span><span class="latest-dot"></span>v2.11.0</span><span class="d">08-12</span></a>
       <a href="#v2-10-1"><span>v2.10.1</span><span class="d">08-10</span></a>
       <a href="#v2-10-0"><span>v2.10.0</span><span class="d">08-09</span></a>
     </div>
@@ -166,24 +170,38 @@
       <h1 data-i18n="c.h1">更新日志</h1>
       <p class="lede" data-i18n="c.lede">OpenKnowledge 的版本发布记录。日期为 2026 年。</p>
       <div class="cta">
-        <a class="btn btn-primary" href="https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge/releases" target="_blank" rel="noopener" data-i18n="c.cta">下载最新版 v2.11.0</a>
+        <a class="btn btn-primary" href="https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge/releases" target="_blank" rel="noopener" data-i18n="c.cta">下载最新版 v2.11.1</a>
       </div>
     </div>
 
+    <section class="ver" id="v2-11-1">
+      <div class="ver-head"><h2>v2.11.1</h2><span class="badge-latest" data-i18n="c.latest">最新</span><time>2026-08-12</time></div>
+      <div class="chg">
+        <span class="tag tag-new" data-i18n="t.new">新功能</span>
+        <ul>
+          <li data-i18n="c.2111.n1">新增 claude 生态适配器（第六个 AI 助手集成）：合并写 <code>~/.claude/settings.json</code> 的 hooks（备份 + 幂等 + 第三方条目保留），Claude Code 与 CodePilot 等 claude-agent-sdk 兼容宿主共享此文件，装一次多宿主生效；CodePilot 实测 UserPromptSubmit/Stop 均原生执行（agent 内核 settingSources 含 user 层，shadow HOME 只剥 ANTHROPIC_* env 键）；技能目录 <code>~/.claude/skills</code></li>
+        </ul>
+      </div>
+      <div class="chg">
+        <span class="tag tag-improve" data-i18n="t.improve">改进</span>
+        <ul>
+          <li data-i18n="c.2111.i1">修复：<code>registry.Home()</code> 对环境变量重定向免疫（Windows 走 <code>SHGetKnownFolderPath</code> 真实配置目录，其他平台 <code>os/user</code> 解析）——CodePilot 等宿主以 DB provider 运行时把子进程 <code>HOME</code>/<code>USERPROFILE</code> 重定向到 shadow 临时目录做隔离，旧实现跟随重定向会看到空数据根，hook 注入静默失效且无任何日志痕迹（显式覆盖口不变：<code>OK_HOME</code> 环境变量仍第一优先）</li>
+        </ul>
+      </div>
+    </section>
+
     <section class="ver" id="v2-11-0">
-      <div class="ver-head"><h2>v2.11.0</h2><span class="badge-latest" data-i18n="c.latest">最新</span><time>2026-08-12</time></div>
+      <div class="ver-head"><h2>v2.11.0</h2><time>2026-08-12</time></div>
       <div class="chg">
         <span class="tag tag-new" data-i18n="t.new">新功能</span>
         <ul>
           <li data-i18n="c.2110.n1">新增 opencode 适配器（第五个 AI 助手集成）：<code>ok setup</code> / GUI 引导页一键安装全局 TypeScript 插件（<code>~/.config/opencode/plugins/openknowledge.ts</code>）——提问时检索注入（synthetic part，不占用界面消息位）、写盘追踪覆盖 write/edit 与 apply_patch（gpt 系模型）、回合空闲时经 SDK 补发沉淀提醒（stop 闭环）；幂等安装、过期自愈、卸载干净</li>
-          <li data-i18n="c.2110.n2">新增 claude 生态适配器（第六个 AI 助手集成）：合并写 <code>~/.claude/settings.json</code> 的 hooks（备份 + 幂等 + 第三方条目保留），Claude Code 与 CodePilot 等 claude-agent-sdk 兼容宿主共享此文件，装一次多宿主生效；CodePilot 实测 UserPromptSubmit/Stop 均原生执行（agent 内核 settingSources 含 user 层，shadow HOME 只剥 ANTHROPIC_* env 键）；技能目录 <code>~/.claude/skills</code></li>
         </ul>
       </div>
       <div class="chg">
         <span class="tag tag-improve" data-i18n="t.improve">改进</span>
         <ul>
           <li data-i18n="c.2110.i1">「未检测到支持的 agent」提示与 <code>ok doctor</code> 名单改为动态列举；setup 与引导页「下一步」文案不再写死 kimi</li>
-          <li data-i18n="c.2110.i2">修复：<code>registry.Home()</code> 对环境变量重定向免疫（Windows 走 <code>SHGetKnownFolderPath</code> 真实配置目录，其他平台 <code>os/user</code> 解析）——CodePilot 等宿主以 DB provider 运行时把子进程 <code>HOME</code>/<code>USERPROFILE</code> 重定向到 shadow 临时目录做隔离，旧实现跟随重定向会看到空数据根，hook 注入静默失效且无任何日志痕迹</li>
         </ul>
       </div>
       <div class="chg">
