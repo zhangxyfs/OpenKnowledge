@@ -2,10 +2,12 @@ package hook
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -804,5 +806,27 @@ func TestPromptWikiGoneNudge(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "游标失效") {
 		t.Errorf("失效态应提示: %q", out.String())
+	}
+}
+
+func TestEventPatchPaths(t *testing.T) {
+	patchJSON := `"*** Begin Patch\n*** Add File: internal/foo.go\n*** Update File: docs/bar.md\n@@\n+added line\n*** Delete File: old.txt\n*** Update File: moved.go\n*** Move to: newdir/moved.go\n*** End Patch\n"`
+	want := []string{"internal/foo.go", "docs/bar.md", "old.txt", "moved.go", "newdir/moved.go"}
+	cases := []struct {
+		name  string
+		input string
+		want  []string
+	}{
+		{"字符串 command", `{"command":` + patchJSON + `}`, want},
+		{"数组 command", `{"command":["apply_patch",` + patchJSON + `]}`, want},
+		{"非补丁输入", `{"command":"ls -la"}`, nil},
+		{"无 command 字段", `{"path":"D:/x/y.go"}`, nil},
+		{"空 tool_input", ``, nil},
+	}
+	for _, c := range cases {
+		e := &Event{ToolInput: json.RawMessage(c.input)}
+		if got := e.PatchPaths(); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%s: PatchPaths() = %v, want %v", c.name, got, c.want)
+		}
 	}
 }

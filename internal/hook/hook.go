@@ -77,6 +77,42 @@ func (e *Event) FilePath() string {
 	return ti.FilePath
 }
 
+// PatchPaths 从 Codex apply_patch 的 tool_input.command 提取补丁触碰的相对路径：
+// 按行扫描 *** Add File: / *** Update File: / *** Delete File: / *** Move to:
+// 头标记（move 语义下 Update 与 Move to 两个路径都算触碰）。command 兼容字符串
+// 与数组两种 JSON 形态；非补丁输入返回 nil。路径相对会话 cwd。
+func (e *Event) PatchPaths() []string {
+	if len(e.ToolInput) == 0 {
+		return nil
+	}
+	var ti struct {
+		Command json.RawMessage `json:"command"`
+	}
+	if err := json.Unmarshal(e.ToolInput, &ti); err != nil || len(ti.Command) == 0 {
+		return nil
+	}
+	var text string
+	if err := json.Unmarshal(ti.Command, &text); err != nil {
+		var parts []string
+		if err := json.Unmarshal(ti.Command, &parts); err != nil {
+			return nil
+		}
+		text = strings.Join(parts, "\n")
+	}
+	var paths []string
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		for _, prefix := range []string{"*** Add File: ", "*** Update File: ", "*** Delete File: ", "*** Move to: "} {
+			if p, ok := strings.CutPrefix(line, prefix); ok {
+				if p = strings.TrimSpace(p); p != "" {
+					paths = append(paths, p)
+				}
+			}
+		}
+	}
+	return paths
+}
+
 // FormatClaude 是 hook 输出的 Claude/ZCode JSON 协议格式（空串 = 纯文本，kimi/pi 用）。
 // ZCode 只把以 { 开头的合法 JSON stdout 解析为协议结果，纯文本 stdout 不进模型上下文。
 const FormatClaude = "claude"
