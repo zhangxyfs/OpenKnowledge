@@ -41,7 +41,7 @@
 | **Base injection** | On the first question of each session, the project's mandatory entries (full text) plus the knowledge index are sent to the AI |
 | **Retrieval injection** | Every question is matched by hybrid keyword + vector-semantic retrieval, injecting the most relevant entries (e.g. "git commit conventions") |
 | **Enforcement** | Tracks files the AI modified; if code changed but no changelog was written by the end of the turn, the turn is blocked until it's fixed (at most once per rule per session) |
-| **Multi-agent support** | Kimi Code, Pi, ZCode, Reasonix, opencode and Claude Code/CodePilot share the same knowledge base (extensible adapter architecture) — kimi via TOML hook marker blocks, pi via a TypeScript extension, zcode via the Claude JSON protocol, reasonix via an Extension Protocol sidecar, opencode via a TypeScript plugin, claude via a merged hooks write to ~/.claude/settings.json (shared by Claude Code, CodePilot and other compatible hosts) |
+| **Multi-agent support** | Kimi Code, Pi, ZCode, Reasonix, opencode, Claude Code/CodePilot and Codex share the same knowledge base (extensible adapter architecture) — kimi via TOML hook marker blocks, pi via a TypeScript extension, zcode via the Claude JSON protocol, reasonix via an Extension Protocol sidecar, opencode via a TypeScript plugin, claude via a merged hooks write to ~/.claude/settings.json (shared by Claude Code, CodePilot and other compatible hosts), codex via a merged hooks write to ~/.codex/hooks.json (Claude-compatible hook contract; zero skill adaptation via the shared ~/.agents/skills) |
 | **One-step setup** | `ok setup` configures hooks, installs skills, and sets up embeddings |
 | **Switch anytime** | `ok off` disables globally, `ok on` re-enables |
 | **Web GUI & resident daemon** | Double-click the exe or run `ok gui` to open the admin UI; a single resident `ok.exe daemon` process (auto-starts at login) serves both the GUI and every agent's hook requests — millisecond forwarding, no more process-per-session |
@@ -92,8 +92,8 @@ go build -o ok ./cmd/ok            # Linux/macOS
 
 `ok setup` performs three steps, in order:
 
-1. **Writes hook configurations** for every detected AI assistant — for kimi that's 3 hook marker blocks in `~/.kimi-code/config.toml` (idempotent, backs up the original; existing ok hooks are detected and overwritten with the current exe path, never duplicated); pi gets a TypeScript extension; zcode gets a merged `config.json` write; opencode gets a TypeScript plugin in `~/.config/opencode/plugins/`; claude gets a merged hooks write to `~/.claude/settings.json`. Use `ok setup --agent <id>` to target one agent only
-2. **Installs the six skills** `openknowledge-init / on / off / propose / capture / wiki` into each agent's skills directory (kimi/pi/opencode share `~/.agents/skills/`; zcode uses `~/.zcode/skills`; claude uses `~/.claude/skills`)
+1. **Writes hook configurations** for every detected AI assistant — for kimi that's 3 hook marker blocks in `~/.kimi-code/config.toml` (idempotent, backs up the original; existing ok hooks are detected and overwritten with the current exe path, never duplicated); pi gets a TypeScript extension; zcode gets a merged `config.json` write; opencode gets a TypeScript plugin in `~/.config/opencode/plugins/`; claude gets a merged hooks write to `~/.claude/settings.json`; codex gets a merged hooks write to `~/.codex/hooks.json`. Use `ok setup --agent <id>` to target one agent only
+2. **Installs the six skills** `openknowledge-init / on / off / propose / capture / wiki` into each agent's skills directory (kimi/pi/opencode/codex share `~/.agents/skills/`; zcode uses `~/.zcode/skills`; claude uses `~/.claude/skills`)
 3. **Configures embeddings** — prompts for base_url / model / API key (paste directly; press Enter to skip and use keyword-only retrieval), writes the global config and verifies connectivity on the spot
 
 ## Quick start
