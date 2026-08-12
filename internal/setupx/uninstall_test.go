@@ -24,6 +24,8 @@ func setupUninstallEnv(t *testing.T) (kimiHome, okHome string) {
 	t.Setenv("PI_CODING_AGENT_DIR", t.TempDir())
 	t.Setenv("OK_ZCODE_HOME", filepath.Join(t.TempDir(), "nonexistent-zcode"))
 	t.Setenv("OK_OPENCODE_HOME", filepath.Join(t.TempDir(), "nonexistent-opencode"))
+	t.Setenv("OK_CLAUDE_HOME", filepath.Join(t.TempDir(), "nonexistent-claude"))
+	t.Setenv("OK_CODEPILOT_HOME", filepath.Join(t.TempDir(), "nonexistent-codepilot"))
 	t.Setenv("OK_REASONIX_HOME", filepath.Join(t.TempDir(), "nonexistent-reasonix"))
 
 	// kimi config：用户内容 + 标记块 + 用户内容

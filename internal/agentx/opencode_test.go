@@ -50,6 +50,8 @@ func setupOpencode(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("OK_OPENCODE_HOME", home)
+	t.Setenv("OK_CLAUDE_HOME", filepath.Join(t.TempDir(), "nonexistent-claude"))
+	t.Setenv("OK_CODEPILOT_HOME", filepath.Join(t.TempDir(), "nonexistent-codepilot"))
 	t.Setenv("OK_HOME", t.TempDir())
 	return home
 }

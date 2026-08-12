@@ -47,6 +47,18 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	os.Setenv("OK_OPENCODE_HOME", opencodeDir)
+	claudeDir, err := os.MkdirTemp("", "hook-test-claude-home")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	os.Setenv("OK_CLAUDE_HOME", claudeDir)
+	codepilotDir, err := os.MkdirTemp("", "hook-test-codepilot-home")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	os.Setenv("OK_CODEPILOT_HOME", codepilotDir)
 	os.Exit(m.Run())
 }
 
