@@ -17,7 +17,7 @@ type Agent interface {
 	RemoveHooks() (bool, error)   // 返回是否真的移除了内容
 	EnsureHooks(exe string) error // hook 入口自愈；错误由调用方 fail-open 处理
 	HooksTarget() string          // hook 写入目标的展示路径
-	SkillsDir() string            // 技能目录（当前均返回共享 SkillsHome）
+	SkillsDir() string            // 技能目录（kimi/pi/reasonix/opencode 共享 SkillsHome；zcode 独立 ~/.zcode/skills）
 }
 
 var agents []Agent
