@@ -130,9 +130,11 @@ func TestClaudeInstallIdempotent(t *testing.T) {
 	var cfg map[string]any
 	_ = json.Unmarshal(data, &cfg)
 	events, _ := cfg["hooks"].(map[string]any)
-	groups, _ := events["UserPromptSubmit"].([]any)
-	if len(groups) != 1 {
-		t.Fatalf("重复安装产生堆积: UserPromptSubmit 组数 = %d, want 1", len(groups))
+	for _, ev := range []string{"UserPromptSubmit", "PostToolUse", "Stop"} {
+		groups, _ := events[ev].([]any)
+		if len(groups) != 1 {
+			t.Fatalf("重复安装产生堆积: %s 组数 = %d, want 1", ev, len(groups))
+		}
 	}
 }
 
@@ -258,5 +260,16 @@ func TestClaudeHooksInstalled(t *testing.T) {
 	}
 	if claudeHooksCurrent(claudeEventsOf(cfg), `D:\other\ok.exe`) {
 		t.Error("换 exe 后 claudeHooksCurrent 应为 false")
+	}
+}
+
+func TestClaudeDetectCodepilotOnly(t *testing.T) {
+	isolateClaude(t) // OK_CLAUDE_HOME 指向不存在目录
+	cp := os.Getenv("OK_CODEPILOT_HOME")
+	if err := os.MkdirAll(cp, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if !(claudeAgent{}).Detect() {
+		t.Error("仅 ~/.codepilot 存在时应 Detect（只装 CodePilot 的机器）")
 	}
 }
