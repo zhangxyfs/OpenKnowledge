@@ -116,7 +116,8 @@
     <summary data-i18n="c.ledger">版本档案</summary>
     <div class="group">
       <div class="group-title">2.10.x</div>
-      <a href="#v2-10-1"><span><span class="latest-dot"></span>v2.10.1</span><span class="d">08-10</span></a>
+      <a href="#v2-11-0"><span><span class="latest-dot"></span>v2.11.0</span><span class="d">08-12</span></a>
+      <a href="#v2-10-1"><span>v2.10.1</span><span class="d">08-10</span></a>
       <a href="#v2-10-0"><span>v2.10.0</span><span class="d">08-09</span></a>
     </div>
     <div class="group">
@@ -165,12 +166,34 @@
       <h1 data-i18n="c.h1">更新日志</h1>
       <p class="lede" data-i18n="c.lede">OpenKnowledge 的版本发布记录。日期为 2026 年。</p>
       <div class="cta">
-        <a class="btn btn-primary" href="https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge/releases" target="_blank" rel="noopener" data-i18n="c.cta">下载最新版 v2.10.1</a>
+        <a class="btn btn-primary" href="https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge/releases" target="_blank" rel="noopener" data-i18n="c.cta">下载最新版 v2.11.0</a>
       </div>
     </div>
 
+    <section class="ver" id="v2-11-0">
+      <div class="ver-head"><h2>v2.11.0</h2><span class="badge-latest" data-i18n="c.latest">最新</span><time>2026-08-12</time></div>
+      <div class="chg">
+        <span class="tag tag-new" data-i18n="t.new">新功能</span>
+        <ul>
+          <li data-i18n="c.2110.n1">新增 opencode 适配器（第五个 AI 助手集成）：<code>ok setup</code> / GUI 引导页一键安装全局 TypeScript 插件（<code>~/.config/opencode/plugins/openknowledge.ts</code>）——提问时检索注入（synthetic part，不占用界面消息位）、写盘追踪覆盖 write/edit 与 apply_patch（gpt 系模型）、回合空闲时经 SDK 补发沉淀提醒（stop 闭环）；幂等安装、过期自愈、卸载干净</li>
+        </ul>
+      </div>
+      <div class="chg">
+        <span class="tag tag-improve" data-i18n="t.improve">改进</span>
+        <ul>
+          <li data-i18n="c.2110.i1">「未检测到支持的 agent」提示与 <code>ok doctor</code> 名单改为动态列举；setup 与引导页「下一步」文案不再写死 kimi</li>
+        </ul>
+      </div>
+      <div class="chg">
+        <span class="tag tag-note" data-i18n="t.note">说明</span>
+        <ul>
+          <li data-i18n="c.2110.s1">技能零适配：opencode 原生扫描共享目录 <code>~/.agents/skills</code>；opencode 无 hooks 配置字段，集成形态为插件 hooks（与 pi 同构）</li>
+        </ul>
+      </div>
+    </section>
+
     <section class="ver" id="v2-10-1">
-      <div class="ver-head"><h2>v2.10.1</h2><span class="badge-latest" data-i18n="c.latest">最新</span><time>2026-08-10</time></div>
+      <div class="ver-head"><h2>v2.10.1</h2><time>2026-08-10</time></div>
       <div class="chg">
         <span class="tag tag-fix" data-i18n="t.fix">修复</span>
         <ul>
