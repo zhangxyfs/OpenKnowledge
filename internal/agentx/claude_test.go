@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -161,5 +162,101 @@ func TestClaudeDetect(t *testing.T) {
 	}
 	if !a.Detect() {
 		t.Error("~/.claude 存在应 Detect")
+	}
+}
+
+func TestClaudeRemoveHooks(t *testing.T) {
+	home := isolateClaude(t)
+	sp := filepath.Join(home, "settings.json")
+	_ = os.MkdirAll(home, 0o755)
+	preset := `{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"third-party"}]}]}}`
+	_ = os.WriteFile(sp, []byte(preset), 0o644)
+	a := claudeAgent{}
+	if err := a.InstallHooks(claudeTestExe()); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := a.RemoveHooks()
+	if err != nil || !removed {
+		t.Fatalf("RemoveHooks = (%v, %v), want (true, nil)", removed, err)
+	}
+	data, _ := os.ReadFile(sp)
+	var cfg map[string]any
+	_ = json.Unmarshal(data, &cfg)
+	events, _ := cfg["hooks"].(map[string]any)
+	if hasOKClaudeHook(events) {
+		t.Error("ok hooks 未移除干净")
+	}
+	if pre, _ := events["PreToolUse"].([]any); len(pre) != 1 {
+		t.Error("第三方 PreToolUse 被误删")
+	}
+	// 二次移除 = no-op
+	removed, err = a.RemoveHooks()
+	if err != nil || removed {
+		t.Fatalf("二次 RemoveHooks = (%v, %v), want (false, nil)", removed, err)
+	}
+}
+
+func TestClaudeEnsureHooks(t *testing.T) {
+	home := isolateClaude(t)
+	sp := filepath.Join(home, "settings.json")
+	a := claudeAgent{}
+	// 从未安装（文件不存在）→ no-op，不创建文件
+	if err := a.EnsureHooks(claudeTestExe()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(sp); !os.IsNotExist(err) {
+		t.Error("从未安装时 EnsureHooks 不应创建文件")
+	}
+	// 安装后把 exe 改旧 → EnsureHooks 重写为新 exe。
+	// 注意：HooksInstalled 以 os.Executable() 为判定基准（见 TestClaudeHooksInstalled），
+	// 故此处用 currentExe(t) 作为"新 exe"（zcode_test.go 同款模式），claudeTestExe()
+	// 这种非测试二进制路径会被 HooksInstalled 判为未安装。
+	if err := a.InstallHooks(`D:\old\ok.exe`); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.EnsureHooks(currentExe(t)); err != nil {
+		t.Fatal(err)
+	}
+	if !a.HooksInstalled() {
+		t.Error("自愈后 HooksInstalled 应为 true")
+	}
+	data, _ := os.ReadFile(sp)
+	if strings.Contains(string(data), `D:\old`) || strings.Contains(string(data), `D:/old`) {
+		t.Error("旧 exe 路径残留")
+	}
+	// 用户显式移除 → 不复活
+	if _, err := a.RemoveHooks(); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.EnsureHooks(claudeTestExe()); err != nil {
+		t.Fatal(err)
+	}
+	data, _ = os.ReadFile(sp)
+	var cfg map[string]any
+	_ = json.Unmarshal(data, &cfg)
+	if hasOKClaudeHook(claudeEventsOf(cfg)) {
+		t.Error("用户显式移除的集成被复活")
+	}
+}
+
+func TestClaudeHooksInstalled(t *testing.T) {
+	isolateClaude(t)
+	a := claudeAgent{}
+	if a.HooksInstalled() {
+		t.Error("未安装时不应为 true")
+	}
+	if err := a.InstallHooks(claudeTestExe()); err != nil {
+		t.Fatal(err)
+	}
+	// HooksInstalled 用 os.Executable() 比对——测试二进制路径与安装路径不同，应为 false；
+	// 用安装时的同一路径判定逻辑直接测 claudeHooksCurrent。
+	data, _ := os.ReadFile(claudeSettingsPath())
+	var cfg map[string]any
+	_ = json.Unmarshal(data, &cfg)
+	if !claudeHooksCurrent(claudeEventsOf(cfg), claudeTestExe()) {
+		t.Error("安装后 claudeHooksCurrent(安装 exe) 应为 true")
+	}
+	if claudeHooksCurrent(claudeEventsOf(cfg), `D:\other\ok.exe`) {
+		t.Error("换 exe 后 claudeHooksCurrent 应为 false")
 	}
 }

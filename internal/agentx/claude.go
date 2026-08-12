@@ -93,13 +93,65 @@ func (claudeAgent) Detect() bool {
 	return false
 }
 
-// 接口占位（Task 2 补全真实行为）：骨架阶段零值实现——不注册则编译不过，
-// 零值语义（未安装/无需自愈/无可移除）对未安装链路安全。
-func (claudeAgent) RemoveHooks() (bool, error) { return false, nil }
-func (claudeAgent) EnsureHooks(exe string) error {
-	return nil
+func (claudeAgent) RemoveHooks() (bool, error) {
+	if _, err := os.Stat(claudeSettingsPath()); os.IsNotExist(err) {
+		return false, nil
+	}
+	cfg, err := loadClaudeSettings()
+	if err != nil {
+		return false, err
+	}
+	events := claudeEventsOf(cfg)
+	if events == nil || !stripOKClaudeHooks(events) {
+		return false, nil
+	}
+	if err := writeClaudeSettings(cfg); err != nil {
+		return false, fmt.Errorf("移除 claude hooks: %w", err)
+	}
+	return true, nil
 }
-func (claudeAgent) HooksInstalled() bool { return false }
+
+// EnsureHooks 自愈：settings 存在、曾安装过 ok hooks 且内容过期（exe 迁移、超时
+// 变更）时重写；从未安装（无任何 ok 条目）则 no-op——用户显式移除的集成不复活。
+func (claudeAgent) EnsureHooks(exe string) error {
+	if _, err := os.Stat(claudeSettingsPath()); err != nil {
+		return nil
+	}
+	cfg, err := loadClaudeSettings()
+	if err != nil {
+		return err
+	}
+	events := claudeEventsOf(cfg)
+	if events == nil || !hasOKClaudeHook(events) || claudeHooksCurrent(events, exe) {
+		return nil
+	}
+	events = claudeEventsEdit(cfg)
+	stripOKClaudeHooks(events)
+	for _, e := range claudeHookEvents {
+		groups, _ := events[e.event].([]any)
+		events[e.event] = append(groups, claudeOKGroup(exe, e.matcher, e.okHook))
+	}
+	return writeClaudeSettings(cfg)
+}
+
+func (claudeAgent) HooksInstalled() bool {
+	cfg, err := loadClaudeSettings()
+	if err != nil {
+		return false
+	}
+	events := claudeEventsOf(cfg)
+	if events == nil {
+		return false
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+	return claudeHooksCurrent(events, exe)
+}
 
 // claudeOKGroup 生成一个事件的 ok hook 组：type=command shell 串，
 // timeout 秒级 = 全局 [hooks] timeout_sec。
