@@ -1,6 +1,8 @@
 package agentx
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -80,8 +82,231 @@ func (codexAgent) Detect() bool {
 	return err == nil && info.IsDir()
 }
 
-// 以下四个方法为 Task 3 行走骨架（walking skeleton），Task 4 填充真实合并写实现。
-func (codexAgent) InstallHooks(exe string) error { return nil }
-func (codexAgent) RemoveHooks() (bool, error)    { return false, nil }
-func (codexAgent) EnsureHooks(exe string) error  { return nil }
-func (codexAgent) HooksInstalled() bool          { return false }
+// codexOKGroup 生成一个事件的 ok hook 组：type=command shell 串，
+// timeout 秒级 = 全局 HookTimeoutSec()。
+func codexOKGroup(exe, matcher, okHook string) map[string]any {
+	hook := map[string]any{
+		"type":    "command",
+		"command": codexCommand(exe, okHook),
+		"timeout": HookTimeoutSec(),
+	}
+	return map[string]any{"matcher": matcher, "hooks": []any{hook}}
+}
+
+// loadCodexHooks 读 hooks.json；文件不存在返回空对象，解析失败报错
+// （不覆盖损坏文件）。map 合并写会重排 key 顺序——未知字段内容保留，代价可接受。
+func loadCodexHooks() (map[string]any, error) {
+	data, err := os.ReadFile(codexHooksPath())
+	if os.IsNotExist(err) {
+		return map[string]any{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	cfg := map[string]any{}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("codex hooks.json 解析失败: %w", err)
+	}
+	return cfg, nil
+}
+
+// codexEventsOf 取 hooks 事件表（只读视图），不做任何创建。
+func codexEventsOf(cfg map[string]any) map[string]any {
+	events, _ := cfg["hooks"].(map[string]any)
+	return events
+}
+
+// codexEventsEdit 取 hooks 事件表供写入：缺失时创建。
+func codexEventsEdit(cfg map[string]any) map[string]any {
+	events, _ := cfg["hooks"].(map[string]any)
+	if events == nil {
+		events = map[string]any{}
+		cfg["hooks"] = events
+	}
+	return events
+}
+
+// stripOKCodexHooks 移除事件表里所有 ok 自有 hook（组内 hooks 被删空时整组移除，
+// 事件数组空了删事件键），返回是否有改动。第三方条目原样保留。
+func stripOKCodexHooks(events map[string]any) bool {
+	changed := false
+	for name, v := range events {
+		groups, _ := v.([]any)
+		if groups == nil {
+			continue
+		}
+		kept := groups[:0]
+		for _, g := range groups {
+			gm, _ := g.(map[string]any)
+			hooks, _ := gm["hooks"].([]any)
+			if gm == nil || hooks == nil {
+				kept = append(kept, g)
+				continue
+			}
+			var keptHooks []any
+			for _, h := range hooks {
+				if hm, _ := h.(map[string]any); hm != nil && isOKCodexHook(hm) {
+					changed = true
+					continue
+				}
+				keptHooks = append(keptHooks, h)
+			}
+			if len(keptHooks) == 0 {
+				changed = true // 整组都是 ok 的，连组移除
+				continue
+			}
+			gm["hooks"] = keptHooks
+			kept = append(kept, g)
+		}
+		if len(kept) == 0 {
+			delete(events, name)
+		} else {
+			events[name] = kept
+		}
+	}
+	return changed
+}
+
+// hasOKCodexHook 报告事件表里是否存在任何 ok 自有 hook。
+func hasOKCodexHook(events map[string]any) bool {
+	for _, v := range events {
+		groups, _ := v.([]any)
+		for _, g := range groups {
+			gm, _ := g.(map[string]any)
+			hooks, _ := gm["hooks"].([]any)
+			for _, h := range hooks {
+				if hm, _ := h.(map[string]any); hm != nil && isOKCodexHook(hm) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// codexHooksCurrent 报告三事件的 ok hook 是否均为当前期望形态
+// （command=exe、matcher 与 timeout 正确）。
+func codexHooksCurrent(events map[string]any, exe string) bool {
+	wantTimeout := float64(HookTimeoutSec())
+	for _, e := range codexHookEvents {
+		groups, _ := events[e.event].([]any)
+		found := false
+		for _, g := range groups {
+			gm, _ := g.(map[string]any)
+			if gm == nil {
+				continue
+			}
+			matcher, _ := gm["matcher"].(string)
+			if matcher != e.matcher {
+				continue
+			}
+			hooks, _ := gm["hooks"].([]any)
+			for _, h := range hooks {
+				hm, _ := h.(map[string]any)
+				if hm == nil || !isOKCodexHook(hm) {
+					continue
+				}
+				cmd, _ := hm["command"].(string)
+				timeout, _ := hm["timeout"].(float64)
+				if cmd == codexCommand(exe, e.okHook) && timeout == wantTimeout {
+					found = true
+				}
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+// writeCodexHooks 备份后写回 hooks.json（MarshalIndent，未知字段保留）。
+func writeCodexHooks(cfg map[string]any) error {
+	path := codexHooksPath()
+	if data, err := os.ReadFile(path); err == nil {
+		_ = os.WriteFile(path+".bak-openknowledge", data, 0o644)
+	}
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(data, '\n'), 0o644)
+}
+
+func (codexAgent) InstallHooks(exe string) error {
+	cfg, err := loadCodexHooks()
+	if err != nil {
+		return err
+	}
+	events := codexEventsEdit(cfg)
+	stripOKCodexHooks(events)
+	for _, e := range codexHookEvents {
+		groups, _ := events[e.event].([]any)
+		events[e.event] = append(groups, codexOKGroup(exe, e.matcher, e.okHook))
+	}
+	return writeCodexHooks(cfg)
+}
+
+func (codexAgent) RemoveHooks() (bool, error) {
+	if _, err := os.Stat(codexHooksPath()); os.IsNotExist(err) {
+		return false, nil
+	}
+	cfg, err := loadCodexHooks()
+	if err != nil {
+		return false, err
+	}
+	events := codexEventsOf(cfg)
+	if events == nil || !stripOKCodexHooks(events) {
+		return false, nil
+	}
+	if err := writeCodexHooks(cfg); err != nil {
+		return false, fmt.Errorf("移除 codex hooks: %w", err)
+	}
+	return true, nil
+}
+
+// EnsureHooks 自愈：hooks.json 存在、曾安装过 ok hooks 且内容过期（exe 迁移、
+// 超时变更）时重写；从未安装（无任何 ok 条目）则 no-op——用户显式移除的集成
+// 不复活。
+func (codexAgent) EnsureHooks(exe string) error {
+	if _, err := os.Stat(codexHooksPath()); err != nil {
+		return nil
+	}
+	cfg, err := loadCodexHooks()
+	if err != nil {
+		return err
+	}
+	events := codexEventsOf(cfg)
+	if events == nil || !hasOKCodexHook(events) || codexHooksCurrent(events, exe) {
+		return nil
+	}
+	events = codexEventsEdit(cfg)
+	stripOKCodexHooks(events)
+	for _, e := range codexHookEvents {
+		groups, _ := events[e.event].([]any)
+		events[e.event] = append(groups, codexOKGroup(exe, e.matcher, e.okHook))
+	}
+	return writeCodexHooks(cfg)
+}
+
+func (codexAgent) HooksInstalled() bool {
+	cfg, err := loadCodexHooks()
+	if err != nil {
+		return false
+	}
+	events := codexEventsOf(cfg)
+	if events == nil {
+		return false
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+	return codexHooksCurrent(events, exe)
+}
