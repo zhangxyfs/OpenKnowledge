@@ -934,6 +934,10 @@ Git Bash 执行：
 ```bash
 go build -o /d/tmp/ok-e2e/ok.exe ./cmd/ok
 export OK_HOME=/d/tmp/ok-e2e/home OK_OPENCODE_HOME=/d/tmp/ok-e2e/opencode OK_SKILLS_HOME=/d/tmp/ok-e2e/skills
+# 关键隔离：`InstallSkills`/`WriteAutostart` 遍历全部已检测 agent，漏掉任何一个
+# home 变量就会把技能/配置写进真实用户目录（2026-08-12 实操踩中：漏 OK_ZCODE_HOME
+# 导致真实 ~/.zcode/skills 被临时 exe 路径覆写）：
+export OK_ZCODE_HOME=/d/tmp/ok-e2e/zcode KIMI_CODE_HOME=/d/tmp/ok-e2e/kimi PI_CODING_AGENT_DIR=/d/tmp/ok-e2e/pi OK_REASONIX_HOME=/d/tmp/ok-e2e/reasonix
 /d/tmp/ok-e2e/ok.exe setup --agent opencode   # embedding 交互直接回车跳过
 ```
 
