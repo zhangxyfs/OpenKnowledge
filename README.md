@@ -91,7 +91,7 @@ go build -o ok ./cmd/ok            # Linux/macOS
 
 `ok setup` 会依次完成三件事：
 
-1. **写入 hooks 配置**——覆盖全部已检测的 AI 助手：kimi 是 `~/.kimi-code/config.toml` 的 3 条 hook 标记块（幂等，自动备份；已存在的 ok hooks 会被检测并覆盖更新 exe 路径，不重复堆积），pi 是 TypeScript 扩展，zcode 是 `config.json` 合并写，opencode 是 `~/.config/opencode/plugins/` 的 TypeScript 插件，claude 是 `~/.claude/settings.json` 的 hooks 合并写，codex 是 `~/.codex/hooks.json` 的 hooks 合并写；`ok setup --agent <id>` 可只装指定 agent
+1. **写入 hooks 配置**——覆盖全部已检测的 AI 助手：kimi 是 `~/.kimi-code/config.toml` 的 3 条 hook 标记块（幂等，自动备份；已存在的 ok hooks 会被检测并覆盖更新 exe 路径，不重复堆积），pi 是 TypeScript 扩展，zcode 是 `config.json` 合并写，opencode 是 `~/.config/opencode/plugins/` 的 TypeScript 插件，claude 是 `~/.claude/settings.json` 的 hooks 合并写，codex 是 `~/.codex/hooks.json` 的 hooks 合并写（安装后首次运行需在 Codex 中确认信任 hooks）；`ok setup --agent <id>` 可只装指定 agent
 2. **安装六个技能**——`openknowledge-init / on / off / propose / capture / wiki`，写入各 agent 的技能目录（kimi/pi/opencode/codex 共享 `~/.agents/skills/`，zcode 为 `~/.zcode/skills`，claude 为 `~/.claude/skills`）
 3. **配置 embedding**——交互询问 base_url / model / API key（可直接粘贴；回车跳过则只用关键词检索），写入全局配置并当场验证连通性
 

@@ -17,7 +17,7 @@ import (
 	"openknowledge/internal/state"
 )
 
-// TestMain 隔离七个 agent home：selfHealHooks 会遍历 detected agents 写 hook 集成，
+// TestMain 隔离八个 agent home：selfHealHooks 会遍历 detected agents 写 hook 集成，
 // 测试绝不可触碰真实配置（与 hook 包 TestMain 同款，另加 OK_REASONIX_HOME 预留）。
 func TestMain(m *testing.M) {
 	for i, env := range []string{"OK_REASONIX_HOME", "KIMI_CODE_HOME", "PI_CODING_AGENT_DIR", "OK_ZCODE_HOME", "OK_OPENCODE_HOME", "OK_CLAUDE_HOME", "OK_CODEPILOT_HOME", "OK_CODEX_HOME"} {
