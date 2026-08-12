@@ -84,7 +84,7 @@ func writeHooks(targets []agentx.Agent, exe string, stdout, stderr io.Writer) in
 		targets = agentx.Detected()
 	}
 	if len(targets) == 0 {
-		fmt.Fprintln(stdout, "未检测到支持的 agent（kimi / pi），跳过 hooks 写入")
+		fmt.Fprintf(stdout, "未检测到支持的 agent（%s），跳过 hooks 写入\n", agentIDs())
 		return 0
 	}
 	var failed []string
@@ -141,9 +141,9 @@ func setupEmbedding(nonInteractive bool, baseURL, model, apiKey string, in io.Re
 
 const guideText = `
 下一步：
-  1. 在需要知识库的项目目录运行 ok init（自动取当前目录名，或在 kimi 中说"初始化知识库"）
+  1. 在需要知识库的项目目录运行 ok init（自动取当前目录名，或在 agent 会话中说"初始化知识库"）
   2. 用 ok add 添加知识条目
-  3. 新开 kimi 会话即可生效；ok off / ok on 可随时全局开关
+  3. 新开 agent 会话即可生效；ok off / ok on 可随时全局开关
 `
 
 // agentIDs 返回已注册 agent 的 id 列表（用于报错提示）。

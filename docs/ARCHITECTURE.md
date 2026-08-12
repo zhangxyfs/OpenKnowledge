@@ -513,13 +513,13 @@ type Agent interface {
     RemoveHooks() (bool, error)   // 返回是否真的移除了内容
     EnsureHooks(exe string) error // hook 入口自愈；错误由调用方 fail-open 处理
     HooksTarget() string          // hook 写入目标的展示路径
-    SkillsDir() string            // 技能目录（kimi/pi 共享 SkillsHome；zcode 为 ~/.zcode/skills）
+    SkillsDir() string            // 技能目录（kimi/pi/reasonix/opencode 共享 SkillsHome；zcode 为 ~/.zcode/skills）
 }
 ```
 
 注册表：`Register` / `All` / `Find(id)` / `Detected()`（本机已安装的 agent）。技能安装目标为**已检测 agent 的 SkillsDir 并集**（`setupx.SkillDirs()`，kimi/pi 共享 `SkillsHome()`（`OK_SKILLS_HOME` 优先，默认 `~/.agents/skills`），zcode 独立目录）；卸载按全部注册 agent 的并集清理（`setupx.AllSkillDirs()`）。
 
-四种注入形态：
+五种注入形态：
 
 | agent | 注入形态 | 写入目标 | "已安装且为当前版本"判定 |
 |-------|----------|----------|--------------------------|
@@ -527,6 +527,7 @@ type Agent interface {
 | pi | TypeScript 扩展（三事件回调） | `~/.pi/agent/extensions/openknowledge.ts`（`PI_CODING_AGENT_DIR` 优先） | 头标记 + `// fingerprint:` 行与当前模板指纹一致 |
 | zcode | 合并写 JSON 配置（`hooks.events` 三事件，`type:"process"`） | `~/.zcode/cli/config.json`（`OK_ZCODE_HOME` 优先，ok 自留测试口） | 三事件的 ok hook 均为当前 exe + `claude` 参数 + 当前 timeoutMs |
 | reasonix | Extension Protocol 插件包（manifest v1 + 信任门登记） | `<reasonix home>/plugins/openknowledge/reasonix-plugin.json` + `<reasonix home>/plugin-packages.json`（`OK_REASONIX_HOME`/`REASONIX_HOME` 优先） | 登记条目 enabled/root 正确且 manifest command/args 为当前 exe |
+| opencode | TypeScript 插件（三钩子：`chat.message` / `tool.execute.after` / `event: session.idle`） | `~/.config/opencode/plugins/openknowledge.ts`（`OK_OPENCODE_HOME` 优先，ok 自留测试口；`OPENCODE_CONFIG_DIR` / `XDG_CONFIG_HOME` 次之） | 头标记 + `// fingerprint:` 行与当前模板指纹一致 |
 
 zcode 适配器（`zcode.go`）：ZCode 的 hook 输入契约是 Claude 风格 snake_case，与 `hook.ParseEvent` 天然兼容；但**输出侧要求 stdout 为协议 JSON**（纯文本只当诊断不进上下文），故 hook 命令带第三参数 `claude`——`HandlePrompt` 把注入包成 `{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":...}}`，`HandleStop` 阻断改写 stdout `{"decision":"block","reason":...}` + exit 0（kimi/pi 的 stderr + exit 2 语义不变）；daemon 转发经 `?format=` query 透传。配置合并写保留未知字段与用户自有 hook（ok 条目按 `args:["hook",<事件>,...]` 识别，与 exe 路径无关），写前备份 `.bak-openknowledge`；`hooks.enabled` 置 true（ZCode 要求显式开启）。自愈语义：曾装过且内容过期才重写，从未安装不复活。技能进 `~/.zcode/skills`（ZCode 不自动读 `~/.agents/skills`）。
 
@@ -541,6 +542,8 @@ pi 事件 → ok hook 映射：
 | `agent_settled` | `ok hook stop` | `Stop` | pi 无法阻断已结束的回合：ok 以 exit 2 + stderr 表达"阻断"时，扩展改为 `sendMessage({content: stderr}, {triggerTurn: true})` 把提示注入会话，驱动 agent 当场完成自省/补日志 |
 
 reasonix 适配器（`reasonix.go`）：不写 settings.json hook（其 UserPromptSubmit 不注入 stdout），改为安装 Extension Protocol 插件包——`plugins/openknowledge/reasonix-plugin.json`（runtime.command 直指 ok.exe，`args=["extension-serve"]`，`required=false`，sidecar 崩溃宿主降级不阻断）+ `plugin-packages.json` 信任门登记（备份 + temp+rename 原子写）。sidecar（`ok extension-serve`，`internal/rxext`）拦截 input.receive（检索注入 + enforce 三档：mixed 默认 = auto 自省软提醒/规则硬阻断，soft = 全软提示，hard = 全硬阻断；软路径把提醒与注入合并为一个 `<ok-context>` 块，block 优先于注入）与 tool.after（写工具成功执行才记 touched）；注入/检查核心与 hook 子命令共用 `internal/hook/core.go`（`InjectForPrompt`/`TrackTouched`/`CheckStop`），四 agent 语义一致。拦截器 fail-open：panic/错误一律 Continue。技能目录共享 SkillsHome（机制零改动）。SDK 为 `internal/rxext/sdk` vendor 快照。自愈语义同 zcode：曾登记且内容过期才重写，从未登记不复活；卸载清理插件目录与信任门登记两点位。
+
+opencode 适配器（`opencode.go` + 内嵌模板 `opencode_plugin.ts`）：opencode 无 hooks 配置字段，其 hooks 形态是"插件文件返回 hooks 对象"——对每个配置目录 glob `{plugin,plugins}/*.{ts,js}` 单文件直接 import（Bun 原生跑 TS，免 package.json）。安装/幂等/自愈机制与 pi 同款（头标记 + 模板 sha256 前 12 位指纹 + 外部文件先备份 `.bak-openknowledge`；曾安装且过期才重写，显式移除不复活）。插件三钩子：`chat.message` ≈ UserPromptSubmit（`ok hook prompt` 纯文本 stdout 以 `synthetic:true` text part push 进 `output.parts` 注入——parts 按引用传入且 hook 后继续使用并持久化）；`tool.execute.after` ≈ PostToolUse（`write`/`edit` 取 `args.filePath`，`apply_patch` 从 `patchText` 解析 `*** Add/Update/Delete File:` 行——gpt 系新模型 apply_patch 与 write/edit 互斥，必须覆盖；相对路径按 directory 绝对化后逐路径调 `ok hook post-tool`）；`event: session.idle` ≈ Stop（exit 2 + stderr 时经 SDK `client.session.promptAsync` 把 reason 作为用户消息补发回该会话，驱动当场自省——idle 无法拒绝停止，与 pi 的 `sendMessage(triggerTurn)` 同构；防重靠 ok 侧 `CheckStop` 的 LastExtractReminder/MarkBlocked 语义，插件侧与 pi 一致不计数）。子进程走 `Bun.spawn` stdin pipe + 手动超时 kill（10s/5s/5s，Bun.spawn 无内建 timeout），全程 fail-open。技能共享 SkillsHome（opencode 原生扫描 `~/.agents/skills`，机制零改动）。
 
 ### 9.3 OpenAI 兼容 embedding API
 

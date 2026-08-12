@@ -83,7 +83,7 @@
     'd.s1p': 'Pick any of the three install options on the <a href="index.html#install">home page</a>, then run the first-run wizard (idempotent, safe to re-run):',
     'd.s1pre': '<code>ok setup            <span class="c"># or one agent only: ok setup --agent zcode</span></code>',
     'd.s1lead': 'performs three steps, in order:',
-    'd.s1l1': '<b>Writes hook configurations</b> — covering every detected AI assistant: Kimi Code gets 3 hook marker blocks in <code>~/.kimi-code/config.toml</code> (backup + idempotent overwrite), Pi gets a TypeScript extension, ZCode gets a merged <code>config.json</code> write, Reasonix gets an Extension Protocol plugin package',
+    'd.s1l1': '<b>Writes hook configurations</b> — covering every detected AI assistant: Kimi Code gets 3 hook marker blocks in <code>~/.kimi-code/config.toml</code> (backup + idempotent overwrite), Pi gets a TypeScript extension, ZCode gets a merged <code>config.json</code> write, Reasonix gets an Extension Protocol plugin package, opencode gets a TypeScript plugin in <code>~/.config/opencode/plugins/</code>',
     'd.s1l2': '<b>Installs six skills</b> — <code>openknowledge-init / on / off / propose / capture / wiki</code>, written into each agent&#39;s skills directory',
     'd.s1l3': '<b>Configures embeddings</b> — prompts for base_url / model / API key, writes the global config and verifies connectivity; press Enter to skip and use keyword-only retrieval',
     'd.s1note': '<b>Note</b>Hooks load at session start: after installing or changing configuration, <b>start a new AI assistant session</b> for them to take effect.',

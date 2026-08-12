@@ -438,7 +438,7 @@ func Doctor(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	if !detectedAny {
-		fmt.Fprintln(stdout, "未检测到支持的 agent（kimi / pi / zcode）")
+		fmt.Fprintf(stdout, "未检测到支持的 agent（%s）\n", agentIDs())
 		healthy = false
 	}
 	if registry.HooksDisabled() {
