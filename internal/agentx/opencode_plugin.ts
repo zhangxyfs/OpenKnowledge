@@ -62,7 +62,8 @@ export const OpenKnowledgePlugin = async ({ directory, client }: any) => {
         const out = (r.stdout || "").trim();
         if (!out) return;
         output.parts.push({
-          id: `part_ok_${Date.now()}_${partSeq++}`,
+          // PartID schema 强制 prt 前缀（isStartsWith("prt")），否则 prompt_async 校验 Die
+          id: `prt_ok_${Date.now()}_${partSeq++}`,
           messageID: output.message.id,
           sessionID: input.sessionID,
           type: "text",

@@ -262,3 +262,15 @@ func TestOpencodePluginRuntimePortable(t *testing.T) {
 		}
 	}
 }
+
+// TestOpencodePluginPartIDPrefix 注入 part 的 id 必须以 prt 开头——opencode 的
+// PartID schema 强制 isStartsWith("prt")（packages/schema/src/v1/session.ts:23），
+// 否则 prompt_async 在校验阶段 SchemaError Die、会话卡死（2026-08-12 桌面端实报）。
+func TestOpencodePluginPartIDPrefix(t *testing.T) {
+	if strings.Contains(opencodePluginTemplate, "`part_") {
+		t.Fatal("part id 不得使用 part_ 前缀（opencode 强制 prt 前缀）")
+	}
+	if !strings.Contains(opencodePluginTemplate, "`prt_") {
+		t.Fatal("插件模板应以 prt_ 前缀生成注入 part id")
+	}
+}
