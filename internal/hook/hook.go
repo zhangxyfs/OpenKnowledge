@@ -208,6 +208,9 @@ func HandlePrompt(r io.Reader, w io.Writer, format string) int {
 }
 
 // HandlePostTool 解析 hook 事件并记录触碰文件；核心逻辑见 TrackTouched。
+// 路径来源：FilePath()（path/file_path——kimi/claude/zcode 写工具）+
+// PatchPaths()（Codex apply_patch 补丁头）。补丁头路径相对会话 cwd，
+// 先 join 再 relativize，否则项目前缀匹配不上全部 skip。
 func HandlePostTool(r io.Reader) int {
 	if registry.HooksDisabled() {
 		return 0
@@ -222,7 +225,22 @@ func HandlePostTool(r io.Reader) int {
 		logErr("post-tool project (cwd=%q): %v", ev.Cwd, err)
 		return 0
 	}
-	TrackTouched(pc, ev.SessionID, ev.ToolName, ev.FilePath())
+	paths := make([]string, 0, 4)
+	if fp := ev.FilePath(); fp != "" {
+		paths = append(paths, fp)
+	}
+	paths = append(paths, ev.PatchPaths()...)
+	seen := map[string]bool{}
+	for _, p := range paths {
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(ev.Cwd, p)
+		}
+		if seen[p] {
+			continue
+		}
+		seen[p] = true
+		TrackTouched(pc, ev.SessionID, ev.ToolName, p)
+	}
 	return 0
 }
 

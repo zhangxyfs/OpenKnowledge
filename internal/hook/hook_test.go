@@ -809,6 +809,28 @@ func TestPromptWikiGoneNudge(t *testing.T) {
 	}
 }
 
+func TestHandlePostToolApplyPatch(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	post := fmt.Sprintf(`{"hook_event_name":"PostToolUse","session_id":"sp1","cwd":%q,"tool_name":"apply_patch","tool_input":{"command":"*** Begin Patch\n*** Add File: internal/a.go\n*** Update File: README.md\n*** End Patch\n"}}`, projDir)
+	if code := HandlePostTool(strings.NewReader(post)); code != 0 {
+		t.Fatalf("post-tool exit %d", code)
+	}
+	st := state.Load(filepath.Join(kbRoot, "state"), "sp1")
+	// 补丁头路径相对 cwd：join 后 relativize 得项目相对路径（NormalizePath 规范化，
+	// 大小写行为随平台，故 EqualFold 断言）
+	for _, want := range []string{"internal/a.go", "readme.md"} {
+		found := false
+		for _, p := range st.Touched {
+			if strings.EqualFold(p, want) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("touched 缺 %q: %+v", want, st.Touched)
+		}
+	}
+}
+
 func TestEventPatchPaths(t *testing.T) {
 	patchJSON := `"*** Begin Patch\n*** Add File: internal/foo.go\n*** Update File: docs/bar.md\n@@\n+added line\n*** Delete File: old.txt\n*** Update File: moved.go\n*** Move to: newdir/moved.go\n*** End Patch\n"`
 	want := []string{"internal/foo.go", "docs/bar.md", "old.txt", "moved.go", "newdir/moved.go"}
