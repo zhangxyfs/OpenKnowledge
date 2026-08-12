@@ -648,6 +648,7 @@
     $("btn-hooks").textContent = cur ? ("写入 " + cur.name + " hooks 配置") : "写入 hooks 配置";
     $("hooks-timeout").value = s.hooksTimeout || 10;
     renderRxEnforce();
+    renderCodexHelp();
     setBadge("badge-skills", s.skillsInstalled, "已安装", "未配置");
     setBadge("badge-embedding", s.embeddingConfigured, "已配置", "未配置");
     setBadge("badge-toggle", !s.disabled, "已开启", "已关闭");
@@ -673,6 +674,19 @@
       for (var i = 0; i < radios.length; i++) {
         radios[i].checked = radios[i].value === mode;
       }
+    }
+  }
+
+  // renderCodexHelp 信任门说明按钮仅 agent=codex 时显示；切走隐藏说明卡。
+  // 由 renderGuide 调用（状态刷新与 agent 下拉切换都会经过 renderGuide）。
+  function renderCodexHelp() {
+    var btn = $("btn-codex-help");
+    if (!btn) return;
+    var isCodex = state.agent === "codex";
+    btn.classList.toggle("hidden", !isCodex);
+    if (!isCodex) {
+      var card = $("codex-help-card");
+      if (card) card.classList.add("hidden");
     }
   }
 
@@ -762,6 +776,12 @@
     api("/api/setup/hooks", { method: "POST", body: { agent: state.agent } })
       .then(function () { refreshStatus(); })
       .catch(function (err) { showError(err.message); });
+  });
+
+  // 信任门说明按钮：点击切换说明卡显隐（按钮本身仅 codex 时可见）。
+  $("btn-codex-help").addEventListener("click", function () {
+    var card = $("codex-help-card");
+    if (card) card.classList.toggle("hidden");
   });
 
   // hook 超时为全局统一设置：保存后对所有已检测 agent 重写 hooks（不传 agent）。

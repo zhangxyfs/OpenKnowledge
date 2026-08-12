@@ -87,7 +87,16 @@
         <div class="card">
           <div class="card-head"><h3>hooks 配置</h3><span id="badge-hooks" class="badge badge-off">未配置</span></div>
           <p class="card-desc muted">把 3 条 hook 写入 <span id="hooks-agent-name">agent</span> 配置，知识注入与强制检查的入口。超时为全局统一设置，见下方"hook 超时"卡。</p>
-          <div class="card-actions"><button id="btn-hooks" type="button" class="btn">写入 hooks 配置</button></div>
+          <div class="card-actions"><button id="btn-hooks" type="button" class="btn">写入 hooks 配置</button> <button id="btn-codex-help" type="button" class="btn hidden">信任门说明</button></div>
+        </div>
+        <div class="card hidden" id="codex-help-card">
+          <div class="card-head"><h3>Codex 信任门与特性开关</h3></div>
+          <div class="card-desc muted">
+            ① Codex 的 hooks 目前是 under-development 特性：ok 安装时已自动在 <code>~/.codex/config.toml</code> 写入 <code>[features] codex_hooks = true</code>，无需手动。<br>
+            ② Codex 按内容哈希信任 hooks：安装或更新后<strong>首次运行会提示审查信任</strong>；在 Codex 的 设置 → 编码 → 钩子 页面可查看并逐条开关。<br>
+            ③ ok 升级或 exe 迁移后会自愈重写 hooks.json，哈希变化会<strong>再次询问信任</strong>，属正常现象。<br>
+            ④ 手动修改 config.toml 后需重启 Codex 才能生效。
+          </div>
         </div>
         <div class="card">
           <div class="card-head"><h3>hook 超时</h3></div>
