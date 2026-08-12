@@ -46,7 +46,7 @@ OpenKnowledge 的 hooks 集成经 agentx 适配器注册表支持多 agent（kim
 | `Detect()` | 配置根目录存在（与 kimi/pi/zcode 探测配置根一致） |
 | `HooksTarget()` | `<root>/plugins/openknowledge.ts`（回显用） |
 | `InstallHooks(exe)` | 渲染模板（`{{EXE}}` 占位替换为 ok 绝对路径）→ 整写目标文件（自有新文件整写，无需备份/合并）；幂等 |
-| `HooksInstalled()` | 文件存在 + 头标记匹配 + 指纹匹配（指纹输入 = 渲染后模板全文，天然覆盖 exe 迁移与模板变更） |
+| `HooksInstalled()` | 文件存在 + 头标记匹配 + 指纹匹配（指纹 = 模板内容 sha256 前 12 位，pi 同款；exe 迁移由 `EnsureHooks` 渲染全文比对兜底重写） |
 | `RemoveHooks()` | 仅当头标记确认本工具生成才删除；返回是否实际删除 |
 | `EnsureHooks(exe)` | 曾安装且指纹过期才重写；显式移除不复活；fail-open（错误仅记日志） |
 | `SkillsDir()` | 返回共享 `SkillsHome()`（`agentx.go:53-59`，`OK_SKILLS_HOME` 优先，默认 `~/.agents/skills`） |
@@ -74,7 +74,7 @@ OpenKnowledge 的 hooks 集成经 agentx 适配器注册表支持多 agent（kim
 
 - 依据：event 钩子接线 `plugin/index.ts:253-260`（按 directory 过滤后转发 `{ id, type, properties }`）。
 - 行为：spawn `<exe> hook stop`（stdin：`hook_event_name=Stop`、`session_id`、`cwd`）→ **exit code 2 时取 stderr 原文**（纯文本协议阻断语义，`internal/hook/hook.go:109-116`；stderr 即 ok 的 stop reason）→ 用 `PluginInput.client`（opencode SDK client）给该 session 补发 reason 作为用户消息，驱动当场自省沉淀。
-- 防循环：per-session nudge 计数上限，达上限后本 session 不再补发（上限值与文案参照 `pi_extension.ts` 的 `sendMessage(triggerTurn)` 做法）；ok 侧 `CheckStop` 在沉淀完成后自然不再 exit 2，双保险。
+- 防循环（按 pi 定稿）：pi 扩展插件侧**不设计数器**——防重完全依赖 ok 侧 `CheckStop` 的幂等语义（auto 软提醒按 `LastExtractReminder`/轮次间隔节流，enforce 硬阻断 `MarkBlocked` 每会话每规则一次）；opencode 插件保持一致。
 
 ### 5.4 子进程调用约定
 
@@ -118,12 +118,12 @@ OpenKnowledge 的 hooks 集成经 agentx 适配器注册表支持多 agent（kim
 - opencode 专属 GUI 卡片（reasonix 式 per-agent 扩展 UI）
 - `experimental.chat.system.transform` / `messages.transform` 注入通道
 
-## 11. 实现时核实清单（以本地 `D:\develop\opencode` 源码为据）
+## 11. 实现事实核实结论（2026-08-12 计划编制时已全部核实，以本地 `D:\develop\opencode` 源码为据）
 
-1. Windows 下 opencode 全局配置目录实际路径（`packages/opencode/src/config/paths.ts:23-41`）。
-2. 写盘类工具确切名称清单（write/edit/...，对照工具注册表）。
-3. SDK client 给 session 发消息的确切 API 形态（`client.session.*` 的方法名与 path/body 参数）。
-4. `session.idle` 事件 properties 结构（sessionID 的获取路径）。
-5. `pi_extension.ts` 的 nudge 防循环上限值与触发文案。
-6. `chat.message` 的 `output.parts` 中提取用户文本的方式（text part 的判别字段）。
-7. Bun shell 调 exe 并传 stdin 的写法（`ctx.$` 管道/重定向形式）。
+1. **Windows 全局配置目录** = `~/.config/opencode`（xdg-basedir 拼法，无 win32 特判）；`XDG_CONFIG_HOME` 参与，`OPENCODE_CONFIG_DIR` 最高优先（`packages/core/src/global.ts:10-14,64`；`cli/cmd/uninstall.ts:238` 佐证）。适配器解析序定稿：`OK_OPENCODE_HOME`（测试口）> `OPENCODE_CONFIG_DIR` > `XDG_CONFIG_HOME/opencode` > `~/.config/opencode`。
+2. **写盘工具 id**：`write`（参数 `filePath`）、`edit`（参数 `filePath`）、`apply_patch`（参数 `patchText`）；gpt 系新模型（含 `gpt-` 且非 `oss`/`gpt-4`）只给 `apply_patch`，其余模型只给 `write`+`edit`（`tool/registry.ts:292-295` 互斥）——post-tool 追踪必须同时覆盖 apply_patch。patch 文件标记：`*** Add File:` / `*** Update File:` / `*** Delete File:`（`patch/index.ts:76-87,212`）。
+3. **SDK 发消息**：`client.session.promptAsync({ path: { id }, body: { parts: [{ type: "text", text }] } })`——"start if needed and return immediately"，不等回复（`sdk/js/src/gen/sdk.gen.ts:639-646`；body 结构 `types.gen.ts:2683-2705` 的 `SessionPromptAsyncData`）。同步版 `client.session.prompt` 会等完整回合，event 钩子里禁用。
+4. **`session.idle` properties** = `{ sessionID: string }`（`types.gen.ts:475-480`；桥接层把内部 `data` 映射为 `properties`，`event-v2-bridge.ts:43`）。
+5. **pi 防循环**：`pi_extension.ts` 插件侧无计数——防重靠 ok 侧 `CheckStop` 幂等语义；opencode 同样不设计数器（见 §5.3）。
+6. **text part 结构**：`part.type === "text"`、`part.text: string`；注入 part 需自带 `id`/`messageID`/`sessionID`/`type`/`text`，`synthetic: true` 不在 UI 当用户输入渲染（`types.gen.ts:160-175`）。`UserMessage` 上无用户输入文本字段，文本只能从 `output.parts` 提取。
+7. **子进程写法**：`Bun.spawn([exe, ...args], { stdin: "pipe", stdout: "pipe", stderr: "pipe" })` → `proc.stdin.write(json)` + `proc.stdin.end()` → `await Promise.all([proc.exited, new Response(proc.stdout).text(), new Response(proc.stderr).text()])`（仓内实例 `test/lib/cli-process.ts:397-404`）。**Bun.spawn 无内建 timeout**，须手动 `setTimeout` + `proc.kill()`。
