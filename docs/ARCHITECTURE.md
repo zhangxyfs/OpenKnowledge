@@ -188,9 +188,9 @@ OpenKnowledge/
 
 ## 5. 核心组件详解
 
-### 5.1 registry — 项目注册表与路由（102 行）
+### 5.1 registry — 项目注册表与路由（registry.go + home_windows.go + home_other.go）
 
-知识库的全局定位层。`Home()` 返回 KB 根目录（`OK_HOME` 环境变量优先，否则 `~/.openknowledge`）。`Registry` 持久化在 `registry.toml`，核心是 **最长前缀匹配** 的项目路由：
+知识库的全局定位层。`Home()` 返回 KB 根目录：`OK_HOME` 环境变量优先（全仓测试隔离依赖），否则真实用户目录下的 `~/.openknowledge`——真实目录解析对 `HOME`/`USERPROFILE` 重定向**免疫**（Windows 走 `windows.KnownFolderPath(FOLDERID_Profile)`，其他平台 `os/user.Current()` 解析，失败回退 `os.UserHomeDir()`）：CodePilot 等宿主以 DB provider 运行时会把子进程 HOME 重定向到 shadow 临时目录做 provider 隔离，跟随重定向会看到空数据根，hook 注入静默失效（v2.11.1 修复）。`Registry` 持久化在 `registry.toml`，核心是 **最长前缀匹配** 的项目路由：
 
 ```go
 func (r *Registry) FindByCwd(cwd string) *Project  // 规范化后最长前缀匹配
@@ -513,13 +513,13 @@ type Agent interface {
     RemoveHooks() (bool, error)   // 返回是否真的移除了内容
     EnsureHooks(exe string) error // hook 入口自愈；错误由调用方 fail-open 处理
     HooksTarget() string          // hook 写入目标的展示路径
-    SkillsDir() string            // 技能目录（kimi/pi/reasonix/opencode 共享 SkillsHome；zcode 为 ~/.zcode/skills）
+    SkillsDir() string            // 技能目录（kimi/pi/reasonix/opencode 共享 SkillsHome；zcode 为 ~/.zcode/skills；claude 为 ~/.claude/skills）
 }
 ```
 
-注册表：`Register` / `All` / `Find(id)` / `Detected()`（本机已安装的 agent）。技能安装目标为**已检测 agent 的 SkillsDir 并集**（`setupx.SkillDirs()`，kimi/pi/reasonix/opencode 共享 `SkillsHome()`（`OK_SKILLS_HOME` 优先，默认 `~/.agents/skills`），zcode 独立目录）；卸载按全部注册 agent 的并集清理（`setupx.AllSkillDirs()`）。
+注册表：`Register` / `All` / `Find(id)` / `Detected()`（本机已安装的 agent）。技能安装目标为**已检测 agent 的 SkillsDir 并集**（`setupx.SkillDirs()`，kimi/pi/reasonix/opencode 共享 `SkillsHome()`（`OK_SKILLS_HOME` 优先，默认 `~/.agents/skills`），zcode 独立目录（`~/.zcode/skills`），claude 独立目录（`~/.claude/skills`））；卸载按全部注册 agent 的并集清理（`setupx.AllSkillDirs()`）。
 
-五种注入形态：
+六种注入形态：
 
 | agent | 注入形态 | 写入目标 | "已安装且为当前版本"判定 |
 |-------|----------|----------|--------------------------|
@@ -528,10 +528,13 @@ type Agent interface {
 | zcode | 合并写 JSON 配置（`hooks.events` 三事件，`type:"process"`） | `~/.zcode/cli/config.json`（`OK_ZCODE_HOME` 优先，ok 自留测试口） | 三事件的 ok hook 均为当前 exe + `claude` 参数 + 当前 timeoutMs |
 | reasonix | Extension Protocol 插件包（manifest v1 + 信任门登记） | `<reasonix home>/plugins/openknowledge/reasonix-plugin.json` + `<reasonix home>/plugin-packages.json`（`OK_REASONIX_HOME`/`REASONIX_HOME` 优先） | 登记条目 enabled/root 正确且 manifest command/args 为当前 exe |
 | opencode | TypeScript 插件（三钩子：`chat.message` / `tool.execute.after` / `event: session.idle`） | `~/.config/opencode/plugins/openknowledge.ts`（`OK_OPENCODE_HOME` 优先，ok 自留测试口；`OPENCODE_CONFIG_DIR` / `XDG_CONFIG_HOME` 次之） | 头标记 + `// fingerprint:` 行与当前模板指纹一致 |
+| claude | 合并写 JSON 配置（`hooks` 三事件组，`type:"command"` shell 串） | `~/.claude/settings.json`（`OK_CLAUDE_HOME` 优先，ok 自留测试口） | 三事件的 ok hook 均为当前 exe + `claude` 参数 + 当前 timeout（秒） |
 
 zcode 适配器（`zcode.go`）：ZCode 的 hook 输入契约是 Claude 风格 snake_case，与 `hook.ParseEvent` 天然兼容；但**输出侧要求 stdout 为协议 JSON**（纯文本只当诊断不进上下文），故 hook 命令带第三参数 `claude`——`HandlePrompt` 把注入包成 `{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":...}}`，`HandleStop` 阻断改写 stdout `{"decision":"block","reason":...}` + exit 0（kimi/pi 的 stderr + exit 2 语义不变）；daemon 转发经 `?format=` query 透传。配置合并写保留未知字段与用户自有 hook（ok 条目按 `args:["hook",<事件>,...]` 识别，与 exe 路径无关），写前备份 `.bak-openknowledge`；`hooks.enabled` 置 true（ZCode 要求显式开启）。自愈语义：曾装过且内容过期才重写，从未安装不复活。技能进 `~/.zcode/skills`（ZCode 不自动读 `~/.agents/skills`）。
 
 pi 扩展由内嵌模板 `pi_extension.ts`（`go:embed`）渲染：`{{EXE}}` 占位替换为 ok 绝对路径，文件头写头标记（`// openknowledge hooks (managed by ok.exe; do not edit)`）与指纹行（指纹 = 模板内容 sha256 前 12 位十六进制，随模板升级变化）。安装时若目标已存在**非本工具生成**的同名文件，先备份为 `.bak-openknowledge`（备份失败则中止安装）；`RemoveHooks` 只删本工具生成的文件，非本工具文件不动。扩展对 ok 的调用全部 fail-open（超时/异常静默），不拖累 pi 会话。
+
+claude 适配器（`claude.go`）：覆盖 Claude Code 本体与 CodePilot 等 claude-agent-sdk 兼容宿主——它们经 `settingSources` user 层加载 `~/.claude/settings.json`（CodePilot 实测 UserPromptSubmit/Stop 原生执行；其 provider 隔离的 shadow HOME 只剥 `ANTHROPIC_*` env 键，hooks 原样继承）。配置为 Claude Code 原生结构（`hooks.<事件>` 组数组，无 enabled 开关），hook 命令是 **shell 字符串**（正斜杠 exe + 双引号包裹，cmd.exe 与 bash 均可执行）而非 zcode 的 process+args；输出协议与 zcode 相同（args 末尾 `claude`，hook.go 零改动）。ok 条目按**命令串后缀**（` hook <prompt|post-tool|stop> claude`）识别，不看 exe basename；合并写纪律同 zcode（写前 `.bak-openknowledge` 备份、第三方条目保留、损坏文件不覆盖、map 合并写 key 重排代价可接受）。`Detect()` 看 `~/.claude` 或 `~/.codepilot`（`OK_CODEPILOT_HOME` 测试口，`CLAUDE_GUI_DATA_DIR` 次之）——后者覆盖只装 CodePilot 的机器。自愈语义不变：曾装过且过期才重写，从未安装不复活。注意 hook 子进程在 shadow HOME 下运行时 `ClaudeHome()` 跟随重定向（自愈最坏只写 shadow 副本，被宿主清理，真实配置无风险），而数据根解析是免疫的（见 §5.1 `registry.Home()`）。
 
 pi 事件 → ok hook 映射：
 
