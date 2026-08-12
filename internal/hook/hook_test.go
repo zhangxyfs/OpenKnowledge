@@ -41,6 +41,12 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	os.Setenv("OK_REASONIX_HOME", reasonixDir)
+	opencodeDir, err := os.MkdirTemp("", "hook-test-opencode-home")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	os.Setenv("OK_OPENCODE_HOME", opencodeDir)
 	os.Exit(m.Run())
 }
 
