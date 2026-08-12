@@ -22,7 +22,7 @@ done
 [ "$changed" = 0 ] && echo "README 徽标已是 $VERSION，无需变更"
 
 # 官网：VER 变量、Release 直链、安装/下载文案里的版本号
-# 覆盖 site/index.html（VER + 直链）、site/changelog.html（下载按钮文案）、
+# 覆盖 site/index.html（VER + 直链 + version 徽标）、site/changelog.html（下载按钮文案）、
 # site/assets/site.js（英文字典里的直链与文案）
 for f in site/index.html site/changelog.html site/assets/site.js; do
   [ -f "$f" ] || continue
@@ -35,6 +35,7 @@ for f in site/index.html site/changelog.html site/assets/site.js; do
     -e "s|openknowledge_[0-9.]*_linux_amd64\.tar\.gz|openknowledge_${VERSION}_linux_amd64.tar.gz|g" \
     -e "s|下载最新版 v[0-9.]*|下载最新版 v${VERSION}|g" \
     -e "s|Download latest v[0-9.]*|Download latest v${VERSION}|g" \
+    -e "s|\(badge/version-\)[0-9.]*\(-[0-9a-fA-F]\{6\}\)|\1${VERSION}\2|g" \
     "$f"
   after_md=$(md5sum "$f" | cut -d' ' -f1)
   if [ "$before_md" != "$after_md" ]; then
