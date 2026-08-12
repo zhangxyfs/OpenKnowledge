@@ -739,9 +739,176 @@ git commit -m "test(agentx): 全注册表遍历测试补 OK_CLAUDE_HOME/OK_CODEP
 
 ---
 
+### Task 3B: bugfix——registry.Home 对 shadow HOME 免疫（实测发现的计划外根因）
+
+**背景**（systematic-debugging 实证）：CodePilot 以 DB provider 运行时把 SDK 子进程的
+`HOME`/`USERPROFILE` 重定向到 shadow 临时目录（provider 隔离），hook 子进程继承后
+`registry.Home()` 解析到 shadow 里的空 `.openknowledge` → `registry.Load` 返回空注册表
+→ `FromCwd` 报未注册 → `HandlePrompt` 静默 return 0；日志/状态写进 shadow 后被 rmSync，
+真实目录零痕迹。2×2 实验确认这是唯一根因（反斜杠 cwd 嫌疑系实验 JSON 转义错误，
+`FindByCwd` 本就有归一化——`registry.go:71`）。
+
+**Files:**
+- Create: `internal/registry/home_windows.go`、`internal/registry/home_other.go`
+- Modify: `internal/registry/registry.go`（`Home()` 一处）
+- Test: `internal/registry/home_test.go`
+
+**Interfaces:**
+- Produces: `realProfileDir() (string, error)`（平台文件内私有）；`Home()` 签名不变
+- 约束：`OK_HOME` 覆盖保持第一优先级（全仓测试隔离依赖它）；`golang.org/x/sys/windows`
+  已是现有依赖，零新增；x/sys 的确切 API 名以 `go doc golang.org/x/sys/windows.
+  SHGetKnownFolderPath` / `FOLDERID_Profile` 现场核验为准
+
+- [ ] **Step 1: 写失败测试** `internal/registry/home_test.go`
+
+```go
+package registry
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// shadow HOME 免疫：HOME/USERPROFILE 被重定向到临时目录时（CodePilot shadow 模式），
+// Home() 仍解析真实用户目录。
+func TestHomeImmuneToShadowEnv(t *testing.T) {
+	realHome, err := os.UserHomeDir() // 重定向前先取基准
+	if err != nil {
+		t.Skip("无法获取用户目录")
+	}
+	shadow := t.TempDir()
+	t.Setenv("HOME", shadow)
+	t.Setenv("USERPROFILE", shadow)
+	t.Setenv("OK_HOME", "") // 确保不生效
+	got := Home()
+	want := filepath.Join(realHome, ".openknowledge")
+	if got != want {
+		t.Fatalf("Home() = %q, want %q（跟随了 shadow HOME 重定向）", got, want)
+	}
+}
+
+// OK_HOME 覆盖仍第一优先（全仓测试隔离依赖）。
+func TestHomeOKHomeOverrideStillWins(t *testing.T) {
+	okHome := filepath.Join(t.TempDir(), "okhome")
+	t.Setenv("OK_HOME", okHome)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", t.TempDir())
+	if got := Home(); got != okHome {
+		t.Fatalf("Home() = %q, want OK_HOME %q", got, okHome)
+	}
+}
+```
+
+- [ ] **Step 2: 跑测试确认失败**
+
+Run: `cd D:/develop/OpenKnowledge && go test ./internal/registry/ -run TestHome -v`
+Expected: `TestHomeImmuneToShadowEnv` FAIL（当前实现跟随 USERPROFILE）
+
+- [ ] **Step 3: 实现**
+
+`internal/registry/home_windows.go`：
+
+```go
+//go:build windows
+
+package registry
+
+import (
+	"unsafe"
+
+	"golang.org/x/sys/windows"
+)
+
+// realProfileDir 返回真实用户配置目录，对 HOME/USERPROFILE 重定向免疫
+// （CodePilot 等宿主的 shadow HOME 会把它们指向临时目录做 provider 隔离）。
+func realProfileDir() (string, error) {
+	var p *uint16
+	if err := windows.SHGetKnownFolderPath(windows.FOLDERID_Profile, windows.KF_FLAG_DEFAULT, 0, &p); err != nil {
+		return "", err
+	}
+	defer windows.CoTaskMemFree(unsafe.Pointer(p))
+	return windows.UTF16PtrToString(p), nil
+}
+```
+
+`internal/registry/home_other.go`：
+
+```go
+//go:build !windows
+
+package registry
+
+import "os/user"
+
+// realProfileDir 返回真实用户主目录：os/user 在无 cgo 时解析 /etc/passwd，
+// 对 $HOME 重定向免疫；失败返回 error 由 Home() 回退 os.UserHomeDir()。
+func realProfileDir() (string, error) {
+	u, err := user.Current()
+	if err != nil {
+		return "", err
+	}
+	return u.HomeDir, nil
+}
+```
+
+`registry.go` 的 `Home()` 改为：
+
+```go
+// Home 返回知识库根目录：OK_HOME 环境变量优先，否则真实用户目录下的 ~/.openknowledge。
+// 真实目录解析对 HOME/USERPROFILE 重定向免疫——CodePilot 等宿主 spawn 子进程时会把
+// 它们重定向到 shadow 临时目录做 provider 隔离，跟随重定向会看到空数据根而静默失效。
+func Home() string {
+	if h := os.Getenv("OK_HOME"); h != "" {
+		return h
+	}
+	if home, err := realProfileDir(); err == nil && home != "" {
+		return filepath.Join(home, ".openknowledge")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ".openknowledge"
+	}
+	return filepath.Join(home, ".openknowledge")
+}
+```
+
+- [ ] **Step 4: 测试转绿 + 全量回归**
+
+Run: `cd D:/develop/OpenKnowledge && go test ./internal/registry/ -v -run TestHome && go test ./... 2>&1 | tail -8 && go vet ./internal/registry/`
+Expected: 两个新测试 PASS；全仓绿（OK_HOME 隔离的全部测试不受影响）；vet 干净
+
+- [ ] **Step 5: Commit**
+
+```bash
+cd D:/develop/OpenKnowledge
+git add internal/registry/home_windows.go internal/registry/home_other.go internal/registry/home_test.go internal/registry/registry.go
+git commit -m "fix(registry): Home 对 shadow HOME 重定向免疫——真实用户目录解析（CodePilot 注入静默失效根因）"
+```
+
+---
+
 ### Task 4: 真实环境手动验证（需用户配合）
 
 **Files:** 无代码改动
+
+- [ ] **Step 0（重验前提）: 还原诊断改动并重建**
+
+```bash
+cp ~/.claude/settings.json.bak-trace ~/.claude/settings.json   # 摘掉 node wrapper，恢复真实 ok hook 命令
+rm -f /d/develop/hook-trace.js /d/develop/hook-trace.ps1 /d/develop/codepilot-hook-trace.log /d/develop/codepilot-hook-err.log
+rm -rf /d/tmp/shadowtest
+cd D:/develop/OpenKnowledge && go build -o dist/ok.exe ./cmd/ok   # 含 Task 3B 修复
+```
+
+- [ ] **Step 0.5（修复的确定性本地验证）: shadow HOME 模拟**
+
+```bash
+mkdir -p /d/tmp/shadowfake/.claude   # 模拟 CodePilot shadow：有 .claude、无 .openknowledge
+echo '{"session_id":"shadow-verify","cwd":"D:\\develop\\OpenKnowledge","hook_event_name":"UserPromptSubmit","prompt":"wiki"}' | HOME=/d/tmp/shadowfake USERPROFILE='D:\tmp\shadowfake' ./dist/ok.exe hook prompt claude | head -c 60
+```
+Expected: 输出 `{"hookSpecificOutput":...` 注入 JSON（修复前为空）；`ls ~/.openknowledge/projects/OpenKnowledge/state/ | grep shadow-verify` 状态文件落在**真实**数据根
 
 - [ ] **Step 1: 构建并安装**
 
