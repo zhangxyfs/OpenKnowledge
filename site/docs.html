@@ -148,7 +148,7 @@
     <pre data-i18n="d.s1pre"><code>ok setup            <span class="c"># 或只装某个 agent：ok setup --agent zcode</span></code></pre>
     <p><code>ok setup</code> <span data-i18n="d.s1lead">依次完成三件事：</span></p>
     <ol>
-      <li data-i18n="d.s1l1"><b>写入 hooks 配置</b>——覆盖全部已检测的 AI 助手：Kimi Code 写 <code>~/.kimi-code/config.toml</code> 的 3 条 hook 标记块（自动备份、幂等覆盖），Pi 写 TypeScript 扩展，ZCode 合并写 <code>config.json</code>，Reasonix 安装 Extension Protocol 插件包，opencode 写 <code>~/.config/opencode/plugins/</code> 的 TypeScript 插件，claude 合并写 <code>~/.claude/settings.json</code> 的 hooks（Claude Code / CodePilot 等兼容宿主共用）</li>
+      <li data-i18n="d.s1l1"><b>写入 hooks 配置</b>——覆盖全部已检测的 AI 助手：Kimi Code 写 <code>~/.kimi-code/config.toml</code> 的 3 条 hook 标记块（自动备份、幂等覆盖），Pi 写 TypeScript 扩展，ZCode 合并写 <code>config.json</code>，Reasonix 安装 Extension Protocol 插件包，opencode 写 <code>~/.config/opencode/plugins/</code> 的 TypeScript 插件，claude 合并写 <code>~/.claude/settings.json</code> 的 hooks（Claude Code / CodePilot 等兼容宿主共用），codex 合并写 <code>~/.codex/hooks.json</code>（hook 契约兼容 Claude；技能零适配共享技能目录；安装后首次运行需在 Codex 中确认信任 hooks）</li>
       <li data-i18n="d.s1l2"><b>安装六个技能</b>——<code>openknowledge-init / on / off / propose / capture / wiki</code>，写入各 agent 的技能目录</li>
       <li data-i18n="d.s1l3"><b>配置 embedding</b>——交互询问 base_url / model / API key，写入全局配置并当场验证连通性；回车跳过则只用关键词检索</li>
     </ol>

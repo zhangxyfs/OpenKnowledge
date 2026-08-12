@@ -115,8 +115,12 @@
    <details id="verNav" open>
     <summary data-i18n="c.ledger">版本档案</summary>
     <div class="group">
+      <div class="group-title">2.12.x</div>
+      <a href="#v2-12-0"><span><span class="latest-dot"></span>v2.12.0</span><span class="d">08-12</span></a>
+    </div>
+    <div class="group">
       <div class="group-title">2.11.x</div>
-      <a href="#v2-11-1"><span><span class="latest-dot"></span>v2.11.1</span><span class="d">08-12</span></a>
+      <a href="#v2-11-1"><span>v2.11.1</span><span class="d">08-12</span></a>
       <a href="#v2-11-0"><span>v2.11.0</span><span class="d">08-12</span></a>
     </div>
     <div class="group">
@@ -174,8 +178,18 @@
       </div>
     </div>
 
+    <section class="ver" id="v2-12-0">
+      <div class="ver-head"><h2>v2.12.0</h2><span class="badge-latest" data-i18n="c.latest">最新</span><time>2026-08-12</time></div>
+      <div class="chg">
+        <span class="tag tag-new" data-i18n="t.new">新功能</span>
+        <ul>
+          <li data-i18n="c.2120.n1">新增 codex 适配器（第七个 AI 助手集成）：合并写 <code>~/.codex/hooks.json</code>（备份 + 幂等 + 第三方条目保留），hook 契约逐字兼容 Claude Code（注入 <code>hookSpecificOutput.additionalContext</code>、Stop <code>decision:block</code>），输出协议零改动复用；写盘追踪解析 apply_patch 补丁头（<code>*** Add File:</code> 等四标记），auto 自省与 enforce 规则与 Claude 同档；技能零适配——Codex 原生扫描共享 <code>~/.agents/skills</code>；注意 Codex 信任门：安装后首次运行会提示信任 hooks（<code>/hooks</code> 管理）</li>
+        </ul>
+      </div>
+    </section>
+
     <section class="ver" id="v2-11-1">
-      <div class="ver-head"><h2>v2.11.1</h2><span class="badge-latest" data-i18n="c.latest">最新</span><time>2026-08-12</time></div>
+      <div class="ver-head"><h2>v2.11.1</h2><time>2026-08-12</time></div>
       <div class="chg">
         <span class="tag tag-new" data-i18n="t.new">新功能</span>
         <ul>
