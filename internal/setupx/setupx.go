@@ -30,7 +30,7 @@ func SkillNames() []string {
 }
 
 // SkillDirs 返回技能安装目标目录并集：全部已检测 agent 的 SkillsDir() 去重
-// （kimi/pi 共享 SkillsHome，zcode 是独立的 ~/.zcode/skills）；无已检测 agent
+// （kimi/pi/reasonix/opencode 共享 SkillsHome，zcode 是独立的 ~/.zcode/skills）；无已检测 agent
 // 时回退共享 SkillsHome（保持原语义）。
 func SkillDirs() []string {
 	seen := map[string]bool{}

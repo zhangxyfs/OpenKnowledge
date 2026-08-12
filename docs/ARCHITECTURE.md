@@ -517,7 +517,7 @@ type Agent interface {
 }
 ```
 
-注册表：`Register` / `All` / `Find(id)` / `Detected()`（本机已安装的 agent）。技能安装目标为**已检测 agent 的 SkillsDir 并集**（`setupx.SkillDirs()`，kimi/pi 共享 `SkillsHome()`（`OK_SKILLS_HOME` 优先，默认 `~/.agents/skills`），zcode 独立目录）；卸载按全部注册 agent 的并集清理（`setupx.AllSkillDirs()`）。
+注册表：`Register` / `All` / `Find(id)` / `Detected()`（本机已安装的 agent）。技能安装目标为**已检测 agent 的 SkillsDir 并集**（`setupx.SkillDirs()`，kimi/pi/reasonix/opencode 共享 `SkillsHome()`（`OK_SKILLS_HOME` 优先，默认 `~/.agents/skills`），zcode 独立目录）；卸载按全部注册 agent 的并集清理（`setupx.AllSkillDirs()`）。
 
 五种注入形态：
 
