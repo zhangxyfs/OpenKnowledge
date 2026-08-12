@@ -61,6 +61,12 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	os.Setenv("OK_CODEPILOT_HOME", codepilotDir)
+	codexDir, err := os.MkdirTemp("", "hook-test-codex-home")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	os.Setenv("OK_CODEX_HOME", codexDir)
 	os.Exit(m.Run())
 }
 

@@ -20,6 +20,7 @@ func TestSetupWithEmbeddingFlags(t *testing.T) {
 	t.Setenv("OK_OPENCODE_HOME", filepath.Join(t.TempDir(), "nonexistent-opencode"))
 	t.Setenv("OK_CLAUDE_HOME", filepath.Join(t.TempDir(), "nonexistent-claude"))
 	t.Setenv("OK_CODEPILOT_HOME", filepath.Join(t.TempDir(), "nonexistent-codepilot"))
+	t.Setenv("OK_CODEX_HOME", filepath.Join(t.TempDir(), "nonexistent-codex"))
 	var out, errBuf bytes.Buffer
 	code := Setup([]string{"--embedding-base-url", "https://g.example.com/v1", "--embedding-model", "m1", "--embedding-key", "sk-test"}, strings.NewReader(""), &out, &errBuf)
 	if code != 0 {
@@ -46,6 +47,7 @@ func TestSetupInteractiveSkipKeepsGlobal(t *testing.T) {
 	t.Setenv("OK_OPENCODE_HOME", filepath.Join(t.TempDir(), "nonexistent-opencode"))
 	t.Setenv("OK_CLAUDE_HOME", filepath.Join(t.TempDir(), "nonexistent-claude"))
 	t.Setenv("OK_CODEPILOT_HOME", filepath.Join(t.TempDir(), "nonexistent-codepilot"))
+	t.Setenv("OK_CODEX_HOME", filepath.Join(t.TempDir(), "nonexistent-codex"))
 	var out, errBuf bytes.Buffer
 	// 三行全回车 → 跳过 embedding 配置，且不得创建/破坏全局配置
 	code := Setup(nil, strings.NewReader("\n\n\n"), &out, &errBuf)
@@ -67,6 +69,7 @@ func TestInitTemplateHasNoActiveEmbedding(t *testing.T) {
 	t.Setenv("OK_OPENCODE_HOME", filepath.Join(t.TempDir(), "nonexistent-opencode"))
 	t.Setenv("OK_CLAUDE_HOME", filepath.Join(t.TempDir(), "nonexistent-claude"))
 	t.Setenv("OK_CODEPILOT_HOME", filepath.Join(t.TempDir(), "nonexistent-codepilot"))
+	t.Setenv("OK_CODEX_HOME", filepath.Join(t.TempDir(), "nonexistent-codex"))
 	proj := filepath.Join(home, "demo")
 	if err := os.MkdirAll(proj, 0o755); err != nil {
 		t.Fatal(err)
@@ -95,6 +98,7 @@ func TestSetupUnknownAgent(t *testing.T) {
 	t.Setenv("OK_OPENCODE_HOME", filepath.Join(t.TempDir(), "nonexistent-opencode"))
 	t.Setenv("OK_CLAUDE_HOME", filepath.Join(t.TempDir(), "nonexistent-claude"))
 	t.Setenv("OK_CODEPILOT_HOME", filepath.Join(t.TempDir(), "nonexistent-codepilot"))
+	t.Setenv("OK_CODEX_HOME", filepath.Join(t.TempDir(), "nonexistent-codex"))
 	var out, errBuf bytes.Buffer
 	code := Setup([]string{"--agent", "nope"}, strings.NewReader(""), &out, &errBuf)
 	if code != 1 {
@@ -117,6 +121,7 @@ func TestSetupAgentKimiOnly(t *testing.T) {
 	t.Setenv("OK_OPENCODE_HOME", filepath.Join(t.TempDir(), "nonexistent-opencode"))
 	t.Setenv("OK_CLAUDE_HOME", filepath.Join(t.TempDir(), "nonexistent-claude"))
 	t.Setenv("OK_CODEPILOT_HOME", filepath.Join(t.TempDir(), "nonexistent-codepilot"))
+	t.Setenv("OK_CODEX_HOME", filepath.Join(t.TempDir(), "nonexistent-codex"))
 	var out, errBuf bytes.Buffer
 	code := Setup([]string{"--agent", "kimi"}, strings.NewReader("\n\n\n"), &out, &errBuf)
 	if code != 0 {
@@ -142,6 +147,7 @@ func TestSetupAllDetectedAgents(t *testing.T) {
 	t.Setenv("OK_OPENCODE_HOME", filepath.Join(t.TempDir(), "nonexistent-opencode"))
 	t.Setenv("OK_CLAUDE_HOME", filepath.Join(t.TempDir(), "nonexistent-claude"))
 	t.Setenv("OK_CODEPILOT_HOME", filepath.Join(t.TempDir(), "nonexistent-codepilot"))
+	t.Setenv("OK_CODEX_HOME", filepath.Join(t.TempDir(), "nonexistent-codex"))
 	var out, errBuf bytes.Buffer
 	code := Setup(nil, strings.NewReader("\n\n\n"), &out, &errBuf)
 	if code != 0 {
@@ -166,6 +172,7 @@ func TestSetupAgentUndetectedStillWrites(t *testing.T) {
 	t.Setenv("OK_OPENCODE_HOME", filepath.Join(t.TempDir(), "nonexistent-opencode"))
 	t.Setenv("OK_CLAUDE_HOME", filepath.Join(t.TempDir(), "nonexistent-claude"))
 	t.Setenv("OK_CODEPILOT_HOME", filepath.Join(t.TempDir(), "nonexistent-codepilot"))
+	t.Setenv("OK_CODEX_HOME", filepath.Join(t.TempDir(), "nonexistent-codex"))
 	var out, errBuf bytes.Buffer
 	code := Setup([]string{"--agent", "pi"}, strings.NewReader("\n\n\n"), &out, &errBuf)
 	if code != 0 {

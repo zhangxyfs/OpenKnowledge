@@ -39,7 +39,7 @@ func runOK(t *testing.T, home, cwd, stdin string, args ...string) (string, strin
 	cmd := exec.Command(binPath, args...)
 	cmd.Stdin = strings.NewReader(stdin)
 	cmd.Dir = cwd
-	cmd.Env = append(os.Environ(), "OK_HOME="+home, "KIMI_CODE_HOME="+filepath.Join(home, "kimi"), "PI_CODING_AGENT_DIR="+filepath.Join(home, "pi"), "OK_ZCODE_HOME="+filepath.Join(home, "zcode-nonexistent"), "OK_REASONIX_HOME="+filepath.Join(home, "reasonix-nonexistent"), "OK_OPENCODE_HOME="+filepath.Join(home, "opencode-nonexistent"), "OK_CLAUDE_HOME="+filepath.Join(home, "claude-nonexistent"), "OK_CODEPILOT_HOME="+filepath.Join(home, "codepilot-nonexistent"), "OPENAI_API_KEY=") // 清空 key 保证测试离线；reasonix/opencode/claude/codepilot 指向不存在路径防污染真实用户配置
+	cmd.Env = append(os.Environ(), "OK_HOME="+home, "KIMI_CODE_HOME="+filepath.Join(home, "kimi"), "PI_CODING_AGENT_DIR="+filepath.Join(home, "pi"), "OK_ZCODE_HOME="+filepath.Join(home, "zcode-nonexistent"), "OK_REASONIX_HOME="+filepath.Join(home, "reasonix-nonexistent"), "OK_OPENCODE_HOME="+filepath.Join(home, "opencode-nonexistent"), "OK_CLAUDE_HOME="+filepath.Join(home, "claude-nonexistent"), "OK_CODEPILOT_HOME="+filepath.Join(home, "codepilot-nonexistent"), "OK_CODEX_HOME="+filepath.Join(home, "codex-nonexistent"), "OPENAI_API_KEY=") // 清空 key 保证测试离线；reasonix/opencode/claude/codepilot/codex 指向不存在路径防污染真实用户配置
 	var so, se bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &so, &se
 	err := cmd.Run()
