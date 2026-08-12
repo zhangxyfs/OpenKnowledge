@@ -19,10 +19,15 @@ type Registry struct {
 	Projects []Project `toml:"project"`
 }
 
-// Home 返回知识库根目录：OK_HOME 环境变量优先，否则 ~/.openknowledge。
+// Home 返回知识库根目录：OK_HOME 环境变量优先，否则真实用户目录下的 ~/.openknowledge。
+// 真实目录解析对 HOME/USERPROFILE 重定向免疫——CodePilot 等宿主 spawn 子进程时会把
+// 它们重定向到 shadow 临时目录做 provider 隔离，跟随重定向会看到空数据根而静默失效。
 func Home() string {
 	if h := os.Getenv("OK_HOME"); h != "" {
 		return h
+	}
+	if home, err := realProfileDir(); err == nil && home != "" {
+		return filepath.Join(home, ".openknowledge")
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
