@@ -26,6 +26,8 @@ func CodexHome() string {
 
 func codexHooksPath() string { return filepath.Join(CodexHome(), "hooks.json") }
 
+func codexConfigPath() string { return filepath.Join(CodexHome(), "config.toml") }
+
 // codexHookEvents 是 ok 接入的 Codex hook 事件（对应 ok 的三条 hook 链路）。
 // 命令形态与 claude 适配器相同：shell 字符串（正斜杠 exe + 双引号），输出协议
 // Claude JSON（args 末尾 "claude"）——Codex hook 契约逐字兼容 Claude Code
@@ -65,8 +67,9 @@ func isOKCodexHook(h map[string]any) bool {
 	return false
 }
 
-// codexAgent Codex 适配器：hook 集成 = 合并写用户层 ~/.codex/hooks.json
-// （官方建议每层一种机制，不动 config.toml）；技能目录共享 SkillsHome——
+// codexAgent Codex 适配器：hook 集成 = 合并写用户层 ~/.codex/hooks.json 并确保
+// config.toml [features] codex_hooks = true（0.118 起 hooks 是 under-development
+// 特性、默认关闭，不开则 hooks.json 装好也静默不派发）；技能目录共享 SkillsHome——
 // Codex 原生扫描 USER 作用域 ~/.agents/skills（opencode 同款零适配）。
 type codexAgent struct{}
 
@@ -236,6 +239,100 @@ func writeCodexHooks(cfg map[string]any) error {
 	return os.WriteFile(path, append(data, '\n'), 0o644)
 }
 
+// codexHooksFlagOn 报告 config.toml 文本的 [features] 段是否含 codex_hooks = true。
+// 行级解析（不做 TOML 全量往返——其余内容逐字节保留）；只认布尔值 true；
+// 注释行（# 开头）内的同名键不算。
+func codexHooksFlagOn(text string) bool {
+	inFeatures := false
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case trimmed == "[features]":
+			inFeatures = true
+		case strings.HasPrefix(trimmed, "["):
+			inFeatures = false // 下一个段标题——features 段结束
+		case inFeatures && !strings.HasPrefix(trimmed, "#") && strings.HasPrefix(trimmed, "codex_hooks"):
+			if idx := strings.Index(trimmed, "="); idx >= 0 {
+				return strings.TrimSpace(trimmed[idx+1:]) == "true"
+			}
+		}
+	}
+	return false
+}
+
+// codexEnableHooksFlag 返回开启后的文本与是否有改动：
+// [features] 段内已有 codex_hooks 键 → 整行替换为 "codex_hooks = true"（已 true 则不变动）；
+// 段存在但无此键 → 段标题行之后插入 "codex_hooks = true"；
+// 无 [features] 段 → 文末追加 "[features]\ncodex_hooks = true\n"（追加前确保原文末有换行）。
+func codexEnableHooksFlag(text string) (string, bool) {
+	lines := strings.Split(text, "\n")
+	inFeatures := false
+	featuresHeader := -1
+	keyLine := -1
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "[features]" {
+			if featuresHeader < 0 {
+				featuresHeader = i
+			}
+			inFeatures = true
+			continue
+		}
+		if strings.HasPrefix(trimmed, "[") {
+			inFeatures = false
+			continue
+		}
+		if inFeatures && !strings.HasPrefix(trimmed, "#") && strings.HasPrefix(trimmed, "codex_hooks") {
+			if idx := strings.Index(trimmed, "="); idx >= 0 {
+				if strings.TrimSpace(trimmed[idx+1:]) == "true" {
+					return text, false // 已开启——原文返回，逐字节不动
+				}
+				keyLine = i
+				break
+			}
+		}
+	}
+	if keyLine >= 0 {
+		lines[keyLine] = "codex_hooks = true"
+		return strings.Join(lines, "\n"), true
+	}
+	if featuresHeader >= 0 {
+		lines = append(lines, "")
+		copy(lines[featuresHeader+2:], lines[featuresHeader+1:])
+		lines[featuresHeader+1] = "codex_hooks = true"
+		return strings.Join(lines, "\n"), true
+	}
+	if text != "" && !strings.HasSuffix(text, "\n") {
+		text += "\n"
+	}
+	return text + "[features]\ncodex_hooks = true\n", true
+}
+
+// ensureCodexHooksFeature 确保 config.toml [features] 含 codex_hooks = true：
+// Codex hooks 是 under-development 特性、默认关闭——不开则全部 hooks 静默不派发。
+// 行级手术编辑，其余内容逐字节保留；写前 .bak-openknowledge 备份；返回是否改动。
+func ensureCodexHooksFeature() (bool, error) {
+	data, err := os.ReadFile(codexConfigPath())
+	if err != nil && !os.IsNotExist(err) {
+		return false, err
+	}
+	text, changed := codexEnableHooksFlag(string(data))
+	if !changed {
+		return false, nil
+	}
+	path := codexConfigPath()
+	if len(data) > 0 {
+		_ = os.WriteFile(path+".bak-openknowledge", data, 0o644)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return false, err
+	}
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		return false, fmt.Errorf("开启 codex_hooks 特性: %w", err)
+	}
+	return true, nil
+}
+
 func (codexAgent) InstallHooks(exe string) error {
 	cfg, err := loadCodexHooks()
 	if err != nil {
@@ -247,9 +344,19 @@ func (codexAgent) InstallHooks(exe string) error {
 		groups, _ := events[e.event].([]any)
 		events[e.event] = append(groups, codexOKGroup(exe, e.matcher, e.okHook))
 	}
-	return writeCodexHooks(cfg)
+	if err := writeCodexHooks(cfg); err != nil {
+		return err
+	}
+	// Codex 0.118 起 hooks 为 under-development 特性、默认关闭——必须同步开启
+	// config.toml [features] codex_hooks，否则 hooks.json 装好也静默不派发。
+	if _, err := ensureCodexHooksFeature(); err != nil {
+		return err
+	}
+	return nil
 }
 
+// RemoveHooks 只移除 hooks.json 里的 ok 条目；config.toml 的 codex_hooks
+// 特性开关单独存在无副作用（只是允许 Codex 派发 hooks），不随移除关闭。
 func (codexAgent) RemoveHooks() (bool, error) {
 	if _, err := os.Stat(codexHooksPath()); os.IsNotExist(err) {
 		return false, nil
@@ -270,7 +377,7 @@ func (codexAgent) RemoveHooks() (bool, error) {
 
 // EnsureHooks 自愈：hooks.json 存在、曾安装过 ok hooks 且内容过期（exe 迁移、
 // 超时变更）时重写；从未安装（无任何 ok 条目）则 no-op——用户显式移除的集成
-// 不复活。
+// 不复活。codex_hooks 特性开关被关/缺失同样视为过期（曾安装过才走到这）：补开。
 func (codexAgent) EnsureHooks(exe string) error {
 	if _, err := os.Stat(codexHooksPath()); err != nil {
 		return nil
@@ -280,16 +387,23 @@ func (codexAgent) EnsureHooks(exe string) error {
 		return err
 	}
 	events := codexEventsOf(cfg)
-	if events == nil || !hasOKCodexHook(events) || codexHooksCurrent(events, exe) {
-		return nil
+	if events == nil || !hasOKCodexHook(events) {
+		return nil // 从未安装（无任何 ok 条目）不复活——含用户显式移除
 	}
-	events = codexEventsEdit(cfg)
-	stripOKCodexHooks(events)
-	for _, e := range codexHookEvents {
-		groups, _ := events[e.event].([]any)
-		events[e.event] = append(groups, codexOKGroup(exe, e.matcher, e.okHook))
+	if !codexHooksCurrent(events, exe) {
+		events = codexEventsEdit(cfg)
+		stripOKCodexHooks(events)
+		for _, e := range codexHookEvents {
+			groups, _ := events[e.event].([]any)
+			events[e.event] = append(groups, codexOKGroup(exe, e.matcher, e.okHook))
+		}
+		if err := writeCodexHooks(cfg); err != nil {
+			return err
+		}
 	}
-	return writeCodexHooks(cfg)
+	// codex_hooks 特性开关被关/缺失视为过期（曾安装过才走到这）：补开。
+	_, err = ensureCodexHooksFeature()
+	return err
 }
 
 func (codexAgent) HooksInstalled() bool {
@@ -308,5 +422,13 @@ func (codexAgent) HooksInstalled() bool {
 	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
 		exe = resolved
 	}
-	return codexHooksCurrent(events, exe)
+	if !codexHooksCurrent(events, exe) {
+		return false
+	}
+	// 特性开关关闭/缺失 = 集成失效（hooks 静默不派发），视为未安装。
+	data, err := os.ReadFile(codexConfigPath())
+	if err != nil || !codexHooksFlagOn(string(data)) {
+		return false
+	}
+	return true
 }

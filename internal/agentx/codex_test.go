@@ -278,3 +278,195 @@ func TestCodexHooksInstalled(t *testing.T) {
 		t.Error("换 exe 后 codexHooksCurrent 应为 false")
 	}
 }
+
+func TestCodexHooksFlagOn(t *testing.T) {
+	cases := []struct {
+		name string
+		text string
+		want bool
+	}{
+		{"段内 true", "[features]\ncodex_hooks = true\n", true},
+		{"段内 false", "[features]\ncodex_hooks = false\n", false},
+		{"段内无此键", "[features]\nunified_exec = true\n", false},
+		{"无 features 段", "[projects.'x']\ntrust_level = \"trusted\"\n", false},
+		{"注释行不算", "[features]\n# codex_hooks = true\n", false},
+		{"键在别的段", "[hooks.state]\ncodex_hooks = true\n", false},
+		{"值带引号只认布尔", "[features]\ncodex_hooks = \"true\"\n", false},
+		{"空文本", "", false},
+	}
+	for _, c := range cases {
+		if got := codexHooksFlagOn(c.text); got != c.want {
+			t.Errorf("%s: codexHooksFlagOn(%q) = %v, want %v", c.name, c.text, got, c.want)
+		}
+	}
+}
+
+func TestCodexEnableHooksFlag(t *testing.T) {
+	cases := []struct {
+		name        string
+		text        string
+		want        string
+		wantChanged bool
+	}{
+		{"空文本追加段", "", "[features]\ncodex_hooks = true\n", true},
+		{
+			"无段文末追加且原文逐字节保留",
+			"[projects.'x']\ntrust_level = \"trusted\"\n",
+			"[projects.'x']\ntrust_level = \"trusted\"\n[features]\ncodex_hooks = true\n",
+			true,
+		},
+		{
+			"无段且原文末无换行先补换行",
+			"[projects.'x']\ntrust_level = \"trusted\"",
+			"[projects.'x']\ntrust_level = \"trusted\"\n[features]\ncodex_hooks = true\n",
+			true,
+		},
+		{
+			"段存在无键插在段标题行后",
+			"[features]\nunified_exec = true\n",
+			"[features]\ncodex_hooks = true\nunified_exec = true\n",
+			true,
+		},
+		{
+			"false 整行替换为 true",
+			"[features]\ncodex_hooks = false\n",
+			"[features]\ncodex_hooks = true\n",
+			true,
+		},
+		{
+			"已 true 原文返回无改动",
+			"[features]\ncodex_hooks = true\n",
+			"[features]\ncodex_hooks = true\n",
+			false,
+		},
+		{
+			"段内其他键保留不动",
+			"[features]\nunified_exec = true\ncodex_hooks = false\n",
+			"[features]\nunified_exec = true\ncodex_hooks = true\n",
+			true,
+		},
+	}
+	for _, c := range cases {
+		got, changed := codexEnableHooksFlag(c.text)
+		if changed != c.wantChanged || got != c.want {
+			t.Errorf("%s: codexEnableHooksFlag(%q) = (%q, %v), want (%q, %v)",
+				c.name, c.text, got, changed, c.want, c.wantChanged)
+		}
+	}
+}
+
+func TestCodexInstallEnablesFlag(t *testing.T) {
+	home := isolateCodex(t)
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cp := filepath.Join(home, "config.toml")
+	preset := "[projects.'d:\\x']\ntrust_level = \"trusted\"\n\n[features]\ncodex_hooks = false\n"
+	if err := os.WriteFile(cp, []byte(preset), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := codexAgent{}
+	if err := a.InstallHooks(codexTestExe()); err != nil {
+		t.Fatalf("InstallHooks: %v", err)
+	}
+	data, err := os.ReadFile(cp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if !codexHooksFlagOn(text) {
+		t.Errorf("InstallHooks 后 codex_hooks 特性未开启: %q", text)
+	}
+	if !strings.Contains(text, "[projects.'d:\\x']\ntrust_level = \"trusted\"") {
+		t.Errorf("projects 段被改动: %q", text)
+	}
+	bak, err := os.ReadFile(cp + ".bak-openknowledge")
+	if err != nil {
+		t.Fatal("未生成 config.toml.bak-openknowledge 备份")
+	}
+	if string(bak) != preset {
+		t.Error("备份内容不是改动前原文")
+	}
+}
+
+func TestCodexHooksInstalledFlagOff(t *testing.T) {
+	isolateCodex(t)
+	a := codexAgent{}
+	if err := a.InstallHooks(currentExe(t)); err != nil {
+		t.Fatal(err)
+	}
+	if !a.HooksInstalled() {
+		t.Fatal("安装后 HooksInstalled 应为 true")
+	}
+	// 把 config.toml 的 flag 行改回 false → HooksInstalled 应变 false。
+	cp := codexConfigPath()
+	data, err := os.ReadFile(cp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	off := strings.Replace(string(data), "codex_hooks = true", "codex_hooks = false", 1)
+	if off == string(data) {
+		t.Fatal("config.toml 中未找到 codex_hooks = true 行")
+	}
+	if err := os.WriteFile(cp, []byte(off), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if a.HooksInstalled() {
+		t.Error("特性开关关闭后 HooksInstalled 应为 false")
+	}
+}
+
+func TestCodexEnsureHooksReenablesFlag(t *testing.T) {
+	isolateCodex(t)
+	a := codexAgent{}
+	if err := a.InstallHooks(currentExe(t)); err != nil {
+		t.Fatal(err)
+	}
+	// 关掉 flag，记录 hooks.json 内容用于比对。
+	cp := codexConfigPath()
+	data, err := os.ReadFile(cp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	off := strings.Replace(string(data), "codex_hooks = true", "codex_hooks = false", 1)
+	if err := os.WriteFile(cp, []byte(off), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(codexHooksPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.EnsureHooks(currentExe(t)); err != nil {
+		t.Fatal(err)
+	}
+	data, err = os.ReadFile(cp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !codexHooksFlagOn(string(data)) {
+		t.Errorf("EnsureHooks 后 codex_hooks 特性未恢复开启: %q", string(data))
+	}
+	after, err := os.ReadFile(codexHooksPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Error("hooks.json 内容未过期却被无谓重写")
+	}
+}
+
+func TestCodexInstallCreatesConfig(t *testing.T) {
+	home := isolateCodex(t)
+	a := codexAgent{}
+	if err := a.InstallHooks(codexTestExe()); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(home, "config.toml"))
+	if err != nil {
+		t.Fatalf("config.toml 未创建: %v", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "[features]") || !codexHooksFlagOn(text) {
+		t.Errorf("config.toml 缺少 [features] codex_hooks = true: %q", text)
+	}
+}
