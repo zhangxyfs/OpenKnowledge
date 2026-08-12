@@ -1,4 +1,4 @@
-import { spawn } from "bun";
+import { execFile } from "node:child_process";
 import path from "node:path";
 
 const OK = "{{EXE}}";
@@ -10,43 +10,24 @@ const HOOK_TIMEOUT_MS = 5000;
 type OkResult = { code: number; stdout: string; stderr: string };
 
 // runOk 调 `ok hook <event>` 子进程：stdin 喂 Claude 风格 snake_case JSON，
-// 读 stdout/stderr/exit code。全程 fail-open——启动失败、超时、读写异常
-// 一律解析为空结果，绝不拖累 opencode 会话。Bun.spawn 无内建 timeout，
-// 超时手动 kill。
+// 读 stdout/stderr/exit code。用 node:child_process——Node 与 Bun 双运行时兼容
+// （opencode 桌面端服务器跑在 Electron/Node 里，"bun" 模块导入会让整个插件
+// 加载失败）；execFile 内建 timeout（超时自动 kill）与 windowsHide（Windows
+// 不弹控制台窗口）。全程 fail-open——启动失败、超时、读写异常一律解析为
+// 空结果，绝不拖累 opencode 会话。
 function runOk(args: string[], payload: unknown, timeoutMs: number): Promise<OkResult> {
   return new Promise((resolve) => {
-    let proc;
     try {
-      proc = spawn([OK, ...args], { stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+      const child = execFile(OK, args, { timeout: timeoutMs, windowsHide: true }, (error, stdout, stderr) => {
+        // error.code 为数字即进程退出码（exit 2 = ok 的阻断语义）；超时/启动失败
+        // 时 code 非数字，归为空结果
+        const code = error && typeof error.code === "number" ? (error.code as number) : 0;
+        resolve({ code, stdout: stdout ?? "", stderr: stderr ?? "" });
+      });
+      child.stdin?.end(JSON.stringify(payload));
     } catch {
       resolve({ code: 0, stdout: "", stderr: "" });
-      return;
     }
-    let settled = false;
-    const finish = (r: OkResult) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve(r);
-    };
-    const timer = setTimeout(() => {
-      try { proc.kill(); } catch { /* ignore */ }
-      finish({ code: 0, stdout: "", stderr: "" });
-    }, timeoutMs);
-    (async () => {
-      try {
-        proc.stdin.write(JSON.stringify(payload));
-        proc.stdin.end();
-        const [code, stdout, stderr] = await Promise.all([
-          proc.exited,
-          new Response(proc.stdout).text(),
-          new Response(proc.stderr).text(),
-        ]);
-        finish({ code, stdout, stderr });
-      } catch {
-        finish({ code: 0, stdout: "", stderr: "" });
-      }
-    })();
   });
 }
 

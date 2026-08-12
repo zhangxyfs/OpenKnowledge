@@ -247,3 +247,18 @@ func TestOpencodeEnsureHooks(t *testing.T) {
 		t.Fatal("内容当前时 EnsureHooks 应 no-op")
 	}
 }
+
+// TestOpencodePluginRuntimePortable 插件必须同时可加载于 Node（opencode 桌面端
+// 服务器跑在 Electron/Node 里）与 Bun（CLI/TUI）：禁止 "bun" 模块导入
+// （Node 下 Cannot find package 'bun' → 整个插件加载失败，2026-08-12 实报），
+// 子进程调用统一走 node:child_process（双运行时兼容）。
+func TestOpencodePluginRuntimePortable(t *testing.T) {
+	if strings.Contains(opencodePluginTemplate, `from "bun"`) {
+		t.Fatal("插件不得导入 bun 模块（桌面端 Node 运行时下不可解析）")
+	}
+	for _, want := range []string{`"node:child_process"`, "windowsHide"} {
+		if !strings.Contains(opencodePluginTemplate, want) {
+			t.Fatalf("插件模板应包含 %q", want)
+		}
+	}
+}
