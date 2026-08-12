@@ -239,6 +239,31 @@ func writeCodexHooks(cfg map[string]any) error {
 	return os.WriteFile(path, append(data, '\n'), 0o644)
 }
 
+// isFeaturesHeader 判定 trim 后的行是否 [features] 段头：以 "[features]" 开头，
+// 且 "]" 之后剩余为空或以 "#" 开头（允许尾注释——"[features] # 我的特性" 漏判会
+// 导致 enable 时文末追加重复 [features] 表，TOML 硬错误）；"[features.xxx]" 子表
+// 前缀是 "[features." 而非 "[features]"，前缀规则天然排除。
+func isFeaturesHeader(trimmed string) bool {
+	if !strings.HasPrefix(trimmed, "[features]") {
+		return false
+	}
+	rest := strings.TrimSpace(trimmed[len("[features]"):])
+	return rest == "" || strings.HasPrefix(rest, "#")
+}
+
+// codexHooksKeyValue 判定 trim 后的行是否 codex_hooks 键行：键名紧跟 [ \t]*=
+// （词边界——"codex_hooks_extra = ..." 不命中）。命中返回 "=" 后 trim 过的值文本。
+func codexHooksKeyValue(trimmed string) (string, bool) {
+	if !strings.HasPrefix(trimmed, "codex_hooks") {
+		return "", false
+	}
+	rest := strings.TrimLeft(trimmed[len("codex_hooks"):], " \t")
+	if !strings.HasPrefix(rest, "=") {
+		return "", false
+	}
+	return strings.TrimSpace(rest[1:]), true
+}
+
 // codexHooksFlagOn 报告 config.toml 文本的 [features] 段是否含 codex_hooks = true。
 // 行级解析（不做 TOML 全量往返——其余内容逐字节保留）；只认布尔值 true；
 // 注释行（# 开头）内的同名键不算。
@@ -247,13 +272,13 @@ func codexHooksFlagOn(text string) bool {
 	for _, line := range strings.Split(text, "\n") {
 		trimmed := strings.TrimSpace(line)
 		switch {
-		case trimmed == "[features]":
+		case isFeaturesHeader(trimmed):
 			inFeatures = true
 		case strings.HasPrefix(trimmed, "["):
 			inFeatures = false // 下一个段标题——features 段结束
-		case inFeatures && !strings.HasPrefix(trimmed, "#") && strings.HasPrefix(trimmed, "codex_hooks"):
-			if idx := strings.Index(trimmed, "="); idx >= 0 {
-				return strings.TrimSpace(trimmed[idx+1:]) == "true"
+		case inFeatures && !strings.HasPrefix(trimmed, "#"):
+			if val, ok := codexHooksKeyValue(trimmed); ok {
+				return val == "true"
 			}
 		}
 	}
@@ -271,7 +296,7 @@ func codexEnableHooksFlag(text string) (string, bool) {
 	keyLine := -1
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if trimmed == "[features]" {
+		if isFeaturesHeader(trimmed) {
 			if featuresHeader < 0 {
 				featuresHeader = i
 			}
@@ -282,9 +307,9 @@ func codexEnableHooksFlag(text string) (string, bool) {
 			inFeatures = false
 			continue
 		}
-		if inFeatures && !strings.HasPrefix(trimmed, "#") && strings.HasPrefix(trimmed, "codex_hooks") {
-			if idx := strings.Index(trimmed, "="); idx >= 0 {
-				if strings.TrimSpace(trimmed[idx+1:]) == "true" {
+		if inFeatures && !strings.HasPrefix(trimmed, "#") {
+			if val, ok := codexHooksKeyValue(trimmed); ok {
+				if val == "true" {
 					return text, false // 已开启——原文返回，逐字节不动
 				}
 				keyLine = i
@@ -314,7 +339,7 @@ func codexEnableHooksFlag(text string) (string, bool) {
 func ensureCodexHooksFeature() (bool, error) {
 	data, err := os.ReadFile(codexConfigPath())
 	if err != nil && !os.IsNotExist(err) {
-		return false, err
+		return false, fmt.Errorf("开启 codex_hooks 特性: %w", err)
 	}
 	text, changed := codexEnableHooksFlag(string(data))
 	if !changed {
@@ -325,7 +350,7 @@ func ensureCodexHooksFeature() (bool, error) {
 		_ = os.WriteFile(path+".bak-openknowledge", data, 0o644)
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return false, err
+		return false, fmt.Errorf("开启 codex_hooks 特性: %w", err)
 	}
 	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
 		return false, fmt.Errorf("开启 codex_hooks 特性: %w", err)

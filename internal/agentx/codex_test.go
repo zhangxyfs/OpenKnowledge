@@ -293,6 +293,9 @@ func TestCodexHooksFlagOn(t *testing.T) {
 		{"键在别的段", "[hooks.state]\ncodex_hooks = true\n", false},
 		{"值带引号只认布尔", "[features]\ncodex_hooks = \"true\"\n", false},
 		{"空文本", "", false},
+		{"段头带尾注释也算", "[features] # 我的特性\ncodex_hooks = true", true},
+		{"features 子表不算", "[features.local]\ncodex_hooks = true", false},
+		{"键名词边界 codex_hooks_extra 不命中", "[features]\ncodex_hooks_extra = true\n", false},
 	}
 	for _, c := range cases {
 		if got := codexHooksFlagOn(c.text); got != c.want {
@@ -343,6 +346,18 @@ func TestCodexEnableHooksFlag(t *testing.T) {
 			"段内其他键保留不动",
 			"[features]\nunified_exec = true\ncodex_hooks = false\n",
 			"[features]\nunified_exec = true\ncodex_hooks = true\n",
+			true,
+		},
+		{
+			"带尾注释段头无键插入其后不追加新段",
+			"[features] # note\nunified_exec = true\n",
+			"[features] # note\ncodex_hooks = true\nunified_exec = true\n",
+			true,
+		},
+		{
+			"codex_hooks_extra 原样保留真键正常插入",
+			"[features]\ncodex_hooks_extra = false\n",
+			"[features]\ncodex_hooks = true\ncodex_hooks_extra = false\n",
 			true,
 		},
 	}
