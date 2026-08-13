@@ -450,14 +450,21 @@ func Doctor(args []string, stdout, stderr io.Writer) int {
 		}
 		client := embeddingClient(pc)
 		if client == nil {
-			fmt.Fprintf(stdout, "[%s] 未配置 embedding（仅关键词检索可用）\n", p.Name)
+			switch prof := pc.Config.Embedding.ActiveProfile(); {
+			case prof == nil:
+				fmt.Fprintf(stdout, "[%s] 未配置 embedding（仅关键词检索可用）\n", p.Name)
+			case prof.Type == "builtin":
+				fmt.Fprintf(stdout, "[%s] 内置 embedding sidecar 未就绪（确认 daemon 运行中，或模型未下载）\n", p.Name)
+			default:
+				fmt.Fprintf(stdout, "[%s] embedding profile 不完整（重跑 ok setup 或在 GUI 配置）\n", p.Name)
+			}
 			continue
 		}
 		if _, err := client.EmbedQuery(context.Background(), "ping"); err != nil {
-			fmt.Fprintf(stdout, "[%s] embedding API 不可用: %v\n", p.Name, err)
+			fmt.Fprintf(stdout, "[%s] embedding 不可用: %v\n", p.Name, err)
 			healthy = false
 		} else {
-			fmt.Fprintf(stdout, "[%s] embedding API 正常\n", p.Name)
+			fmt.Fprintf(stdout, "[%s] embedding 正常（%s）\n", p.Name, client.ModelIdentity())
 		}
 	}
 	if !healthy {

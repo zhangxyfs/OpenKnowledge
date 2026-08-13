@@ -2,12 +2,19 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
 	"openknowledge/internal/config"
+	"openknowledge/internal/embed"
+	"openknowledge/internal/embedsidecar"
 )
 
 func TestSetupWithEmbeddingFlags(t *testing.T) {
@@ -201,5 +208,76 @@ func TestSetupAgentUndetectedStillWrites(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(os.Getenv("KIMI_CODE_HOME"), "config.toml")); !os.IsNotExist(err) {
 		t.Fatal("kimi config should NOT be written with --agent pi")
+	}
+}
+
+func TestSetupEmbeddingMenuSkip(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("OK_HOME", home)
+	var out strings.Builder
+	setupEmbedding(false, "", "", "", strings.NewReader("\n"), &out)
+	if !strings.Contains(out.String(), "跳过") {
+		t.Fatal(out.String())
+	}
+	if _, err := os.Stat(filepath.Join(home, "config.toml")); !os.IsNotExist(err) {
+		t.Fatal("跳过不应写配置")
+	}
+}
+
+func TestSetupEmbeddingMenuOpenAI(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("OK_HOME", home)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"data":[{"embedding":[0.1],"index":0}]}`)
+	}))
+	defer srv.Close()
+	in := "1\n" + srv.URL + "/v1\nm\nsk-x\n" // 选 1 → base_url → model → key
+	var out strings.Builder
+	setupEmbedding(false, "", "", "", strings.NewReader(in), &out)
+	cfg, err := config.LoadMerged("", filepath.Join(home, "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := cfg.Embedding.ActiveProfile()
+	if p == nil || p.Type != "openai" || p.Model != "m" || p.ResolvedAPIKey() != "sk-x" {
+		t.Fatalf("%+v", p)
+	}
+	if !strings.Contains(out.String(), "验证通过") {
+		t.Fatal(out.String())
+	}
+}
+
+func TestSetupEmbeddingMenuBuiltin(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("OK_HOME", home)
+	m := embed.BuiltinModel{ID: "fake-cli", File: "f.gguf", Size: 4, Pooling: "cls", Dim: 2}
+	embed.BuiltinModels = append(embed.BuiltinModels, m)
+	t.Cleanup(func() { embed.BuiltinModels = embed.BuiltinModels[:len(embed.BuiltinModels)-1] })
+	// 预置已下载模型（跳过真实下载）
+	modelsDir := filepath.Join(home, "models")
+	os.MkdirAll(modelsDir, 0o755)
+	os.WriteFile(m.InstalledPath(modelsDir), []byte("fake"), 0o644)
+	// 假 runtime：测试二进制所在目录建 runtime/llama-server[.exe]
+	exe, _ := os.Executable()
+	rtDir := filepath.Join(filepath.Dir(exe), "runtime")
+	os.MkdirAll(rtDir, 0o755)
+	serverName := "llama-server"
+	if runtime.GOOS == "windows" {
+		serverName = "llama-server.exe"
+	}
+	os.WriteFile(filepath.Join(rtDir, serverName), []byte("x"), 0o755)
+	t.Cleanup(func() { os.RemoveAll(rtDir) })
+
+	idx := len(embed.BuiltinModels)          // 假模型在清单末尾
+	in := "3\n" + strconv.Itoa(idx) + "\n\n" // 选 3 → 选模型 → 默认镜像
+	var out strings.Builder
+	setupEmbedding(false, "", "", "", strings.NewReader(in), &out)
+	cfg, _ := config.LoadMerged("", filepath.Join(home, "config.toml"))
+	p := cfg.Embedding.ActiveProfile()
+	if p == nil || p.Type != "builtin" || p.Model != "fake-cli" || p.Mirror != "hf-mirror" {
+		t.Fatalf("%+v", p)
+	}
+	if !embedsidecar.WantPending() {
+		t.Fatal("激活内置应写 want 标记")
 	}
 }

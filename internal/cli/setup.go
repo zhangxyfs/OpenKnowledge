@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -12,6 +13,8 @@ import (
 
 	"openknowledge/internal/agentx"
 	"openknowledge/internal/config"
+	"openknowledge/internal/embed"
+	"openknowledge/internal/embedsidecar"
 	"openknowledge/internal/registry"
 	"openknowledge/internal/setupx"
 )
@@ -104,42 +107,135 @@ func writeHooks(targets []agentx.Agent, exe string, stdout, stderr io.Writer) in
 	return 0
 }
 
-// setupEmbedding 交互或按 flags 写入全局 embedding 配置并验证连通性。
+// setupEmbedding 交互三选一（线上/Ollama/内置）或按 flags 写入（flags 向后兼容，
+// 固定写 openai "默认" profile）。
 func setupEmbedding(nonInteractive bool, baseURL, model, apiKey string, in io.Reader, stdout io.Writer) {
-	if !nonInteractive {
-		fmt.Fprintln(stdout, "\n配置 embedding 语义检索（可选，直接回车跳过）：")
-		r := bufio.NewReader(in)
+	if nonInteractive {
+		if apiKey == "" {
+			fmt.Fprintln(stdout, "跳过 embedding 配置（仅关键词检索；之后可重跑 ok setup 配置）")
+			return
+		}
+		if baseURL == "" {
+			baseURL = "https://api.openai.com/v1"
+		}
+		if model == "" {
+			model = "text-embedding-3-small"
+		}
+		saveAndTestProfile(config.EmbeddingProfile{Name: "默认", Type: "openai", BaseURL: baseURL, Model: model, APIKey: apiKey}, stdout)
+		return
+	}
+	fmt.Fprintln(stdout, "\n配置 embedding 语义检索（可选，直接回车跳过）：")
+	fmt.Fprintln(stdout, "  1) 线上 OpenAI 兼容服务")
+	fmt.Fprintln(stdout, "  2) Ollama（本机/局域网，免 key）")
+	fmt.Fprintln(stdout, "  3) 内置本地模型（ok 托管，完全离线）")
+	r := bufio.NewReader(in)
+	fmt.Fprint(stdout, "选择 [1/2/3]: ")
+	choice, _ := r.ReadString('\n')
+	switch strings.TrimSpace(choice) {
+	case "1":
 		fmt.Fprintf(stdout, "base_url [https://api.openai.com/v1]: ")
 		baseURL, _ = r.ReadString('\n')
 		baseURL = strings.TrimSpace(baseURL)
+		if baseURL == "" {
+			baseURL = "https://api.openai.com/v1"
+		}
 		fmt.Fprintf(stdout, "model [text-embedding-3-small]: ")
 		model, _ = r.ReadString('\n')
 		model = strings.TrimSpace(model)
+		if model == "" {
+			model = "text-embedding-3-small"
+		}
 		fmt.Fprintf(stdout, "API key（粘贴后回车；留空跳过）: ")
 		apiKey, _ = r.ReadString('\n')
 		apiKey = strings.TrimSpace(apiKey)
-	}
-	if apiKey == "" {
+		if apiKey == "" {
+			fmt.Fprintln(stdout, "跳过 embedding 配置（仅关键词检索）")
+			return
+		}
+		saveAndTestProfile(config.EmbeddingProfile{Name: "默认", Type: "openai", BaseURL: baseURL, Model: model, APIKey: apiKey}, stdout)
+	case "2":
+		fmt.Fprintf(stdout, "Ollama 地址 [http://localhost:11434]: ")
+		base, _ := r.ReadString('\n')
+		base = strings.TrimSpace(base)
+		if base == "" {
+			base = "http://localhost:11434"
+		}
+		if models, err := setupx.ListOllamaModels(base); err != nil {
+			fmt.Fprintf(stdout, "Ollama 探测失败（%v），按手动输入继续\n", err)
+		} else if len(models) > 0 {
+			fmt.Fprintln(stdout, "已安装模型："+strings.Join(models, "，"))
+		}
+		fmt.Fprintf(stdout, "模型 [bge-m3]: ")
+		m, _ := r.ReadString('\n')
+		m = strings.TrimSpace(m)
+		if m == "" {
+			m = "bge-m3"
+		}
+		saveAndTestProfile(config.EmbeddingProfile{Name: "Ollama 本机", Type: "ollama", BaseURL: base, Model: m}, stdout)
+	case "3":
+		setupEmbeddingBuiltin(r, stdout)
+	default:
 		fmt.Fprintln(stdout, "跳过 embedding 配置（仅关键词检索；之后可重跑 ok setup 配置）")
-		return
 	}
-	if baseURL == "" {
-		baseURL = "https://api.openai.com/v1"
-	}
-	if model == "" {
-		model = "text-embedding-3-small"
-	}
-	p := config.EmbeddingProfile{Name: "默认", Type: "openai", BaseURL: baseURL, Model: model, APIKey: apiKey}
+}
+
+// saveAndTestProfile 保存并激活 profile，然后连通性验证。
+func saveAndTestProfile(p config.EmbeddingProfile, stdout io.Writer) {
 	if err := setupx.SaveEmbeddingProfile(p, true); err != nil {
 		fmt.Fprintf(stdout, "%v\n", err)
 		return
 	}
 	fmt.Fprintf(stdout, "embedding 已写入全局配置 %s\n", filepath.Join(registry.Home(), "config.toml"))
 	if err := setupx.TestEmbeddingProfile(p, 10*time.Second); err != nil {
-		fmt.Fprintf(stdout, "embedding 连通性验证失败（不影响使用关键词检索）: %v\n", err)
+		fmt.Fprintf(stdout, "embedding 连通性验证：%v\n", err)
 	} else {
 		fmt.Fprintln(stdout, "embedding 连通性验证通过")
 	}
+}
+
+// setupEmbeddingBuiltin 内置模型：选档位 → 选镜像 → 按需下载（进度行）→ 激活 + 请求拉起。
+func setupEmbeddingBuiltin(r *bufio.Reader, stdout io.Writer) {
+	if _, err := embedsidecar.RuntimeServerPath(embedsidecar.DefaultRuntimeDir()); err != nil {
+		fmt.Fprintf(stdout, "%v\n", err)
+		return
+	}
+	fmt.Fprintln(stdout, "可选模型：")
+	for i, m := range embed.BuiltinModels {
+		fmt.Fprintf(stdout, "  %d) %s\n", i+1, m.Label)
+	}
+	fmt.Fprint(stdout, "选择 [1]: ")
+	sel, _ := r.ReadString('\n')
+	idx := 1
+	fmt.Sscanf(strings.TrimSpace(sel), "%d", &idx)
+	if idx < 1 || idx > len(embed.BuiltinModels) {
+		idx = 1
+	}
+	m := embed.BuiltinModels[idx-1]
+	fmt.Fprint(stdout, "下载源 [1=hf-mirror 国内镜像（默认） 2=huggingface 官方]: ")
+	ms, _ := r.ReadString('\n')
+	mirror := "hf-mirror"
+	if strings.TrimSpace(ms) == "2" {
+		mirror = "huggingface"
+	}
+	modelsDir := filepath.Join(registry.Home(), "models")
+	if !m.Installed(modelsDir) {
+		fmt.Fprintf(stdout, "开始下载 %s …\n", m.File)
+		err := embed.Download(context.Background(), nil, m, mirror, modelsDir, func(done, total int64) {
+			fmt.Fprintf(stdout, "\r  %d / %d MB", done>>20, total>>20)
+		})
+		fmt.Fprintln(stdout)
+		if err != nil {
+			fmt.Fprintf(stdout, "下载失败：%v（重跑 ok setup 可断点续传）\n", err)
+			return
+		}
+	}
+	p := config.EmbeddingProfile{Name: "内置 " + m.ID, Type: "builtin", Model: m.ID, Mirror: mirror}
+	if err := setupx.SaveEmbeddingProfile(p, true); err != nil {
+		fmt.Fprintf(stdout, "%v\n", err)
+		return
+	}
+	embedsidecar.RequestStart()
+	fmt.Fprintln(stdout, "已设为使用中；sidecar 由 daemon 自动拉起（首次数秒到一分钟），期间检索退化为关键词")
 }
 
 const guideText = `

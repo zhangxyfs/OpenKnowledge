@@ -1,10 +1,14 @@
 package setupx
 
 import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"openknowledge/internal/config"
 )
@@ -155,5 +159,33 @@ func TestEmbeddingProfileSaveActivateDelete(t *testing.T) {
 	}
 	if err := SetActiveEmbedding(""); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// ListOllamaModels 解析 {base}/api/tags 的模型名列表。
+func TestListOllamaModels(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/tags" {
+			t.Fatalf("意外路径: %s", r.URL.Path)
+		}
+		fmt.Fprint(w, `{"models":[{"name":"bge-m3:latest"}]}`)
+	}))
+	defer srv.Close()
+	names, err := ListOllamaModels(srv.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) != 1 || names[0] != "bge-m3:latest" {
+		t.Fatalf("%v", names)
+	}
+}
+
+// builtin profile 在 runtime 缺失（便携形态）时应报"仅安装版可用"。
+func TestTestEmbeddingProfileBuiltinNoRuntime(t *testing.T) {
+	t.Setenv("OK_HOME", t.TempDir())
+	p := config.EmbeddingProfile{Name: "内", Type: "builtin", Model: "qwen3-emb-0.6b-q8"}
+	err := TestEmbeddingProfile(p, time.Second)
+	if err == nil || !strings.Contains(err.Error(), "仅安装版可用") {
+		t.Fatalf("%v", err)
 	}
 }

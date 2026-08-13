@@ -4,7 +4,10 @@ package setupx
 import (
 	"context"
 	_ "embed"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -15,6 +18,8 @@ import (
 
 	"openknowledge/internal/agentx"
 	"openknowledge/internal/config"
+	"openknowledge/internal/embed"
+	"openknowledge/internal/embedsidecar"
 	"openknowledge/internal/embedx"
 	"openknowledge/internal/registry"
 )
@@ -164,14 +169,60 @@ func DeleteEmbeddingProfile(name string) error {
 	return saveGlobalConfig(cfg)
 }
 
-// TestEmbeddingProfile 以 timeout 做 profile 连通性检查（builtin 在 Task 7 扩展）。
+// TestEmbeddingProfile 以 timeout 做 profile 连通性检查。
+// builtin：检查 runtime/模型文件，sidecar 未就绪时写 want 并返回"启动中"提示性错误。
 func TestEmbeddingProfile(p config.EmbeddingProfile, timeout time.Duration) error {
+	if p.Type == "builtin" {
+		m := embed.FindBuiltinModel(p.Model)
+		if m == nil {
+			return fmt.Errorf("未知内置模型: %s", p.Model)
+		}
+		if _, err := embedsidecar.RuntimeServerPath(embedsidecar.DefaultRuntimeDir()); err != nil {
+			return err
+		}
+		if !m.Installed(filepath.Join(registry.Home(), "models")) {
+			return errors.New("模型未下载（先在配置弹窗或 ok setup 中下载）")
+		}
+		c := embedx.ClientForProfile(p, timeout)
+		if c == nil {
+			return errors.New("sidecar 未就绪——已请求 daemon 拉起，稍后自动生效（数秒到一分钟）")
+		}
+		_, err := c.EmbedQuery(context.Background(), "ping")
+		return err
+	}
 	c := embedx.ClientForProfile(p, timeout)
 	if c == nil {
 		return fmt.Errorf("profile 不可用（类型 %s，检查必填项）", p.Type)
 	}
 	_, err := c.EmbedQuery(context.Background(), "ping")
 	return err
+}
+
+// ListOllamaModels 探测 Ollama 已安装模型（GET {base}/api/tags，3s 超时）。
+func ListOllamaModels(baseURL string) ([]string, error) {
+	url := strings.TrimRight(baseURL, "/") + "/api/tags"
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("Ollama API %d", resp.StatusCode)
+	}
+	var tr struct {
+		Models []struct {
+			Name string `json:"name"`
+		} `json:"models"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&tr); err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(tr.Models))
+	for _, m := range tr.Models {
+		names = append(names, m.Name)
+	}
+	return names, nil
 }
 // SaveHooksTimeout 把 hooks 超时（秒）写入全局配置 [hooks] timeout_sec；
 // 下次写入/自愈 hooks 块（含 GUI 引导页安装）时生效。
