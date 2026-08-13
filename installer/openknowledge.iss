@@ -36,6 +36,7 @@ Name: "addpath"; Description: "将安装目录加入用户 PATH（终端可直�
 Source: "..\dist\ok.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\dist\web\*"; DestDir: "{app}\web"; Flags: ignoreversion recursesubdirs
 Source: "..\dist\changelogs\*"; DestDir: "{app}\changelogs"; Flags: ignoreversion recursesubdirs
+Source: "..\dist\runtime\*"; DestDir: "{app}\runtime"; Flags: ignoreversion recursesubdirs
 Source: "assets\logo.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]

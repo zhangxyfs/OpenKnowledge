@@ -18,6 +18,12 @@ contents:
     dst: /usr/lib/openknowledge/web/
   - src: dist/linux-amd64/changelogs/
     dst: /usr/lib/openknowledge/changelogs/
+  # runtime 整目录 0755：Windows 宿主落盘全 0644，须强制可执行位；
+  # 单列 llama-server 条目会与目录展开撞 dest（nfpm content collision），故合并为一条
+  - src: dist/linux-amd64/runtime/
+    dst: /usr/lib/openknowledge/runtime/
+    file_info:
+      mode: 0755
   - src: /usr/lib/openknowledge/ok
     dst: /usr/bin/ok
     type: symlink

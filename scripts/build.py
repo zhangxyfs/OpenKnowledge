@@ -19,6 +19,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 ISCC = os.environ.get("ISCC", r"C:\Users\Administrator\AppData\Local\Programs\Inno Setup 7\ISCC.exe")
 LDFLAGS = "-s -w -H windowsgui"
+LLAMA_TAG = "b10405"
+LLAMA_BASE_DEFAULT = "https://github.com/ggml-org/llama.cpp/releases/download"
 
 
 def app_version():
@@ -33,6 +35,30 @@ def app_version():
 def run(cmd, cwd=ROOT):
     print("+", " ".join(str(c) for c in cmd))
     subprocess.run([str(c) for c in cmd], check=True, cwd=cwd)
+
+
+def prepare_runtime():
+    """下载 llama.cpp 预编译 llama-server（win cpu x64）到 dist/runtime/。
+
+    内置 embedding sidecar 的运行时；版本钉死 LLAMA_TAG。
+    LLAMA_CPP_BASE_URL 可覆盖下载源（国内代理/镜像）。
+    """
+    import zipfile
+    dest = ROOT / "dist" / "runtime"
+    if (dest / "llama-server.exe").exists():
+        print("runtime 已存在，跳过下载（删除 dist/runtime 可强制刷新）")
+        return
+    base = os.environ.get("LLAMA_CPP_BASE_URL", LLAMA_BASE_DEFAULT)
+    url = f"{base}/{LLAMA_TAG}/llama-{LLAMA_TAG}-bin-win-cpu-x64.zip"
+    zip_path = ROOT / "dist" / "llama-win.zip"
+    run(["curl", "-fSL", "-o", str(zip_path), url])
+    dest.mkdir(exist_ok=True)
+    with zipfile.ZipFile(zip_path) as z:
+        z.extractall(dest)
+    zip_path.unlink()
+    if not (dest / "llama-server.exe").exists():
+        sys.exit("runtime 解包后缺 llama-server.exe（llama.cpp 资产布局变化？）")
+    print(f"runtime 就绪: {dest}（llama.cpp {LLAMA_TAG}）")
 
 
 def main():
@@ -64,6 +90,7 @@ def main():
     if cl_dist.exists():
         shutil.rmtree(cl_dist)
     shutil.copytree(ROOT / "docs" / "changelogs", cl_dist)
+    prepare_runtime()
     print("dist/ built: ok.exe + web/ + changelogs/")
 
     # 3. Inno Setup 打包
