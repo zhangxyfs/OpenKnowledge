@@ -650,14 +650,20 @@
     renderRxEnforce();
     renderCodexHelp();
     setBadge("badge-skills", s.skillsInstalled, "已安装", "未配置");
-    setBadge("badge-embedding", s.embeddingConfigured, "已配置", "未配置");
+    var emb = s.embedding || {};
+    setBadge("badge-embedding", !!emb.configured, "已配置", "未配置");
+    var ec = $("emb-current");
+    if (emb.configured) {
+      var tag = emb.type === "builtin" ? "内置" : emb.type === "ollama" ? "Ollama" : "自定义";
+      var parts = ["[" + tag + "] " + emb.name];
+      parts.push(emb.type === "builtin" ? (emb.model_label || emb.model) : (emb.model + " @ " + (emb.base_url || "")));
+      if (emb.type === "builtin") parts.push("本地运行，无需联网");
+      ec.textContent = parts.join(" · ");
+    } else {
+      ec.textContent = "未启用（仅关键词检索）";
+    }
     setBadge("badge-toggle", !s.disabled, "已开启", "已关闭");
     $("btn-toggle").textContent = s.disabled ? "开启" : "关闭";
-    if (s.embedding) {
-      if (s.embedding.base_url) $("emb-base-url").value = s.embedding.base_url;
-      if (s.embedding.model) $("emb-model").value = s.embedding.model;
-      $("emb-api-key").placeholder = s.embedding.has_key ? "已保存（留空保持不变）" : "api_key";
-    }
     refreshCapture();
   }
 
@@ -815,25 +821,6 @@
     api("/api/setup/skills", { method: "POST" })
       .then(function () { refreshStatus(); })
       .catch(function (err) { showError(err.message); });
-  });
-
-  $("btn-embedding").addEventListener("click", function () {
-    var out = $("emb-result");
-    out.textContent = "保存并测试中…";
-    api("/api/setup/embedding", {
-      method: "POST",
-      body: {
-        base_url: $("emb-base-url").value.trim(),
-        model: $("emb-model").value.trim(),
-        api_key: $("emb-api-key").value
-      }
-    }).then(function (res) {
-      out.textContent = res.ok ? "连通性验证通过" : ("验证失败: " + (res.error || "未知错误"));
-      refreshStatus();
-    }).catch(function (err) {
-      out.textContent = "";
-      showError(err.message);
-    });
   });
 
   $("btn-toggle").addEventListener("click", function () {
@@ -997,6 +984,227 @@
       if (v !== 0) state.lastVersion = v;
     }).catch(function () { /* 心跳失败不打扰用户 */ });
   }, 5000);
+
+  // ---------- embedding 配置弹窗 ----------
+
+  var embState = { data: null, sel: -1, pollTimer: null };
+
+  function embOpen() {
+    $("emb-modal").classList.remove("hidden");
+    embRefresh();
+  }
+  function embClose() {
+    $("emb-modal").classList.add("hidden");
+    if (embState.pollTimer) { clearTimeout(embState.pollTimer); embState.pollTimer = null; }
+  }
+  function embRefresh(keepSel) {
+    api("/api/setup/embedding").then(function (d) {
+      embState.data = d;
+      if (!keepSel) embState.sel = d.active ? d.profiles.findIndex(function (p) { return p.name === d.active; }) : -1;
+      if (embState.sel < 0 && d.profiles.length > 0) embState.sel = 0;
+      embRenderList();
+      embRenderForm();
+      embSchedulePoll();
+    });
+  }
+  function embRenderList() {
+    var d = embState.data, box = $("emb-list");
+    box.innerHTML = "";
+    d.profiles.forEach(function (p, i) {
+      var item = document.createElement("div");
+      item.className = "emb-item" + (i === embState.sel ? " active" : "");
+      var dot = document.createElement("span");
+      dot.className = "emb-dot" + (p.name === d.active ? "" : " off");
+      dot.title = "使用中";
+      var right = document.createElement("div");
+      var nm = document.createElement("div");
+      nm.className = "emb-item-name";
+      nm.textContent = p.name;
+      var tag = document.createElement("span");
+      tag.className = "emb-tag" + (p.type === "builtin" ? " local" : "");
+      tag.textContent = p.type === "builtin" ? "内置" : p.type === "ollama" ? "Ollama" : "自定义";
+      right.appendChild(nm); right.appendChild(tag);
+      item.appendChild(dot); item.appendChild(right);
+      item.onclick = function () { embState.sel = i; embRenderList(); embRenderForm(); };
+      box.appendChild(item);
+    });
+  }
+  function embCur() {
+    var d = embState.data;
+    return embState.sel >= 0 && d && d.profiles[embState.sel] ? d.profiles[embState.sel] : null;
+  }
+  function embRenderForm() {
+    var p = embCur(), d = embState.data;
+    $("emb-f-name").value = p ? p.name : "";
+    $("emb-f-type").value = p ? p.type : "builtin";
+    // 内置模型下拉
+    var biSel = $("emb-f-bi-model");
+    biSel.innerHTML = "";
+    (d.builtin_models || []).forEach(function (m) {
+      var o = document.createElement("option");
+      o.value = m.id; o.textContent = m.label + (m.downloaded ? "（已下载）" : "");
+      biSel.appendChild(o);
+    });
+    if (p && p.type === "builtin") biSel.value = p.model;
+    $("emb-f-bi-mirror").value = (p && p.mirror) || "hf-mirror";
+    $("emb-f-ol-url").value = p && p.type === "ollama" ? p.base_url : "http://localhost:11434";
+    $("emb-f-base-url").value = p && p.type === "openai" ? p.base_url : "";
+    $("emb-f-model").value = p && p.type === "openai" ? p.model : "";
+    $("emb-f-api-key").value = "";
+    $("emb-f-api-key").placeholder = p && p.has_key ? "已保存（留空保持不变）" : "api_key";
+    embTypeSwitch();
+    embRenderBiStatus();
+  }
+  function embTypeSwitch() {
+    var t = $("emb-f-type").value;
+    $("emb-fs-builtin").classList.toggle("hidden", t !== "builtin");
+    $("emb-fs-ollama").classList.toggle("hidden", t !== "ollama");
+    $("emb-fs-openai").classList.toggle("hidden", t !== "openai");
+    if (t === "ollama") embLoadOllamaModels();
+  }
+  function embLoadOllamaModels() {
+    var base = $("emb-f-ol-url").value.trim() || "http://localhost:11434";
+    var p = embCur();
+    api("/api/setup/embedding/ollama-models?base_url=" + encodeURIComponent(base)).then(function (r) {
+      var sel = $("emb-f-ol-model");
+      sel.innerHTML = "";
+      var ok = r.models && r.models.length > 0;
+      $("emb-ol-sel-row").classList.toggle("hidden", !ok);
+      $("emb-ol-input-row").classList.toggle("hidden", ok);
+      if (ok) {
+        r.models.forEach(function (m) {
+          var o = document.createElement("option"); o.value = m; o.textContent = m; sel.appendChild(o);
+        });
+        if (p && p.type === "ollama") sel.value = p.model;
+        $("emb-ol-hint").textContent = "已探测到 " + r.models.length + " 个已安装模型";
+      } else {
+        if (p && p.type === "ollama") $("emb-f-ol-model-text").value = p.model;
+        $("emb-ol-hint").textContent = "未能探测模型列表（" + (r.error || "无模型") + "），手动输入；未安装请先 ollama pull bge-m3";
+      }
+    });
+  }
+  function embRenderBiStatus() {
+    var d = embState.data, box = $("emb-bi-status");
+    var id = $("emb-f-bi-model").value;
+    var m = (d.builtin_models || []).filter(function (x) { return x.id === id; })[0];
+    if (!m) { box.textContent = "…"; return; }
+    var dl = d.download || {};
+    if (dl.state === "downloading" && dl.model_id === id) {
+      var pct = dl.total ? Math.floor(dl.done * 100 / dl.total) : 0;
+      box.innerHTML = "";
+      box.appendChild(document.createTextNode("正在下载 — " + fmtMB(dl.done) + " / " + fmtMB(dl.total)));
+      var bar = document.createElement("div"); bar.className = "emb-prog";
+      var fill = document.createElement("i"); fill.style.width = pct + "%";
+      bar.appendChild(fill); box.appendChild(bar);
+      var tip = document.createElement("span"); tip.textContent = pct + "%";
+      box.appendChild(tip);
+      var cancel = document.createElement("button");
+      cancel.className = "btn"; cancel.textContent = "取消"; cancel.style.marginLeft = "8px";
+      cancel.onclick = function () {
+        api("/api/setup/embedding/download/cancel", { method: "POST", body: { model_id: id } })
+          .then(function () { embRefresh(true); });
+      };
+      box.appendChild(cancel);
+      return;
+    }
+    if (m.downloaded) {
+      box.textContent = "✓ 模型已就绪（" + m.dim + " 维），sidecar 按需拉起、空闲自动退出";
+      return;
+    }
+    box.innerHTML = "";
+    if (!d.runtime_available) {
+      box.textContent = "⚠ 推理运行时缺失——内置模式仅安装版可用（裸 exe 形态请用 Ollama/自定义）";
+      return;
+    }
+    var btn = document.createElement("button");
+    btn.className = "btn"; btn.textContent = "下载模型（" + fmtMB(m.size) + "）";
+    btn.onclick = function () {
+      api("/api/setup/embedding/download", { method: "POST", body: { model_id: id, mirror: $("emb-f-bi-mirror").value } })
+        .then(function () { embRefresh(true); });
+    };
+    box.appendChild(btn);
+    if (dl.state === "error" && dl.model_id === id) {
+      var err = document.createElement("span");
+      err.style.color = "var(--danger)";
+      err.textContent = "  上次下载失败：" + dl.error;
+      box.appendChild(err);
+    }
+  }
+  function fmtMB(n) { return (n / 1048576).toFixed(0) + " MB"; }
+  function embSchedulePoll() {
+    if (embState.pollTimer) clearTimeout(embState.pollTimer);
+    var dl = embState.data && embState.data.download;
+    if (dl && dl.state === "downloading") {
+      embState.pollTimer = setTimeout(function () { embRefresh(true); }, 1000);
+    }
+  }
+  function embMsg(text, cls) {
+    var el = $("emb-form-msg");
+    el.textContent = text || "";
+    el.className = "emb-note" + (cls ? " " + cls : "");
+  }
+  function embCollect() {
+    var t = $("emb-f-type").value;
+    var body = { name: $("emb-f-name").value.trim(), type: t };
+    if (t === "openai") {
+      body.base_url = $("emb-f-base-url").value.trim();
+      body.model = $("emb-f-model").value.trim();
+      body.api_key = $("emb-f-api-key").value;
+    } else if (t === "ollama") {
+      body.base_url = $("emb-f-ol-url").value.trim() || "http://localhost:11434";
+      var selOk = !$("emb-ol-sel-row").classList.contains("hidden");
+      body.model = selOk ? $("emb-f-ol-model").value : $("emb-f-ol-model-text").value.trim();
+    } else {
+      body.model = $("emb-f-bi-model").value;
+      body.mirror = $("emb-f-bi-mirror").value;
+    }
+    return body;
+  }
+
+  $("btn-embedding-config").onclick = embOpen;
+  $("emb-close").onclick = embClose;
+  $("emb-f-type").onchange = embTypeSwitch;
+  $("emb-f-bi-model").onchange = embRenderBiStatus;
+  $("emb-f-ol-url").onchange = embLoadOllamaModels;
+  $("emb-add").onclick = function () { embState.sel = -1; embRenderList(); embRenderForm(); $("emb-f-name").focus(); };
+  $("emb-save").onclick = function () {
+    var body = embCollect();
+    if (!body.name) { embMsg("名称不能为空", "err"); return; }
+    api("/api/setup/embedding/profile", { method: "POST", body: body }).then(function () {
+      embMsg("已保存", "ok");
+      embRefresh(true);
+      refreshStatus();
+    }).catch(function (e) { embMsg(e.message || String(e), "err"); });
+  };
+  $("emb-activate").onclick = function () {
+    var body = embCollect();
+    if (!body.name) { embMsg("名称不能为空", "err"); return; }
+    api("/api/setup/embedding/profile", { method: "POST", body: body }).then(function () {
+      return api("/api/setup/embedding/active", { method: "POST", body: { name: body.name } });
+    }).then(function () {
+      embMsg("已设为使用中", "ok");
+      embRefresh(true);
+      refreshStatus();
+    }).catch(function (e) { embMsg(e.message || String(e), "err"); });
+  };
+  $("emb-test").onclick = function () {
+    var p = embCur();
+    if (!p) { embMsg("先保存再测试", "err"); return; }
+    embMsg("测试中…");
+    api("/api/setup/embedding/test", { method: "POST", body: { name: p.name } }).then(function (r) {
+      embMsg(r.ok ? "✓ 可用" : "✗ " + (r.error || "失败"), r.ok ? "ok" : "err");
+    }).catch(function (e) { embMsg(e.message || String(e), "err"); });
+  };
+  $("emb-delete").onclick = function () {
+    var p = embCur();
+    if (!p) return;
+    if (!confirm("删除配置「" + p.name + "」？" + (embState.data.active === p.name ? "它是使用中项，删除后退回关键词检索。" : ""))) return;
+    api("/api/setup/embedding/profile", { method: "DELETE", body: { name: p.name } }).then(function () {
+      embState.sel = -1;
+      embRefresh();
+      refreshStatus();
+    }).catch(function (e) { embMsg(e.message || String(e), "err"); });
+  };
 
   // ---------- 启动 ----------
 

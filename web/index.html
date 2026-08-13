@@ -130,16 +130,8 @@
         </div>
         <div class="card card-wide">
           <div class="card-head"><h3>embedding 语义检索</h3><span id="badge-embedding" class="badge badge-off">未配置</span></div>
-          <p class="card-desc muted">OpenAI 兼容服务（注意：DeepSeek 无 embedding 接口，会报 404）。</p>
-          <div class="embedding-form">
-            <div class="form-row">
-              <input id="emb-base-url" type="text" placeholder="base_url（默认 OpenAI）">
-              <input id="emb-model" type="text" placeholder="model（默认 text-embedding-3-small）">
-              <input id="emb-api-key" type="password" placeholder="api_key" autocomplete="off">
-              <button id="btn-embedding" type="button" class="btn">保存并测试</button>
-            </div>
-            <p id="emb-result" class="muted"></p>
-          </div>
+          <p id="emb-current" class="card-desc muted">未启用（仅关键词检索）</p>
+          <div class="card-actions"><button id="btn-embedding-config" type="button" class="btn">配置…</button></div>
         </div>
         <div class="card card-wide">
           <div class="card-head"><h3>经验沉淀</h3></div>
@@ -263,6 +255,60 @@
       <div id="changelog-content" class="changelog-content"></div>
       <div class="modal-actions">
         <button id="changelog-close" type="button" class="btn btn-primary">知道了</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="emb-modal" class="modal hidden">
+    <div class="modal-box emb-box">
+      <div class="emb-title">embedding 服务配置
+        <button id="emb-close" type="button" class="emb-x" aria-label="关闭">×</button>
+      </div>
+      <div class="emb-main">
+        <div class="emb-side">
+          <div id="emb-list"></div>
+          <button id="emb-add" type="button" class="btn">＋ 添加</button>
+        </div>
+        <div class="emb-form">
+          <label class="emb-row">名称 <input id="emb-f-name" type="text" autocomplete="off"></label>
+          <label class="emb-row">类型
+            <select id="emb-f-type">
+              <option value="builtin">内置本地模型（ok 托管 · 无需联网）</option>
+              <option value="ollama">Ollama（本机/局域网服务）</option>
+              <option value="openai">自定义（OpenAI 兼容服务）</option>
+            </select>
+          </label>
+          <div id="emb-fs-builtin">
+            <label class="emb-row">模型 <select id="emb-f-bi-model"></select></label>
+            <label class="emb-row">下载源
+              <select id="emb-f-bi-mirror">
+                <option value="hf-mirror">hf-mirror 镜像（国内推荐）</option>
+                <option value="huggingface">huggingface 官方</option>
+              </select>
+            </label>
+            <div id="emb-bi-status" class="emb-status muted">…</div>
+          </div>
+          <div id="emb-fs-ollama" class="hidden">
+            <label class="emb-row">地址 <input id="emb-f-ol-url" type="text" placeholder="http://localhost:11434"></label>
+            <label class="emb-row" id="emb-ol-sel-row">模型 <select id="emb-f-ol-model"></select></label>
+            <label class="emb-row hidden" id="emb-ol-input-row">模型（手动输入） <input id="emb-f-ol-model-text" type="text" placeholder="bge-m3"></label>
+            <p class="emb-note muted" id="emb-ol-hint"></p>
+          </div>
+          <div id="emb-fs-openai" class="hidden">
+            <label class="emb-row">base_url <input id="emb-f-base-url" type="text" placeholder="https://api.openai.com/v1"></label>
+            <label class="emb-row">model <input id="emb-f-model" type="text" placeholder="text-embedding-3-small"></label>
+            <label class="emb-row">api_key <input id="emb-f-api-key" type="password" autocomplete="off"></label>
+            <p class="emb-note muted">注意：DeepSeek 无 embedding 接口，会报 404。</p>
+          </div>
+          <p id="emb-form-msg" class="emb-note"></p>
+          <div class="emb-actions">
+            <button id="emb-save" type="button" class="btn btn-primary">保存</button>
+            <button id="emb-activate" type="button" class="btn">设为使用中</button>
+            <button id="emb-test" type="button" class="btn">测试</button>
+            <span style="flex:1"></span>
+            <button id="emb-delete" type="button" class="btn btn-danger">删除</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
