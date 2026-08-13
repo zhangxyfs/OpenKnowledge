@@ -172,7 +172,7 @@ func SaveReasonixEnforceMode(mode string) error {
 // TestEmbedding 以 10s 超时做 embedding 连通性检查。
 func TestEmbedding(baseURL, model, apiKey string) error {
 	client := &embed.OpenAIClient{BaseURL: baseURL, APIKey: apiKey, Model: model, Timeout: 10 * time.Second}
-	_, err := client.Embed(context.Background(), "ping")
+	_, err := client.EmbedQuery(context.Background(), "ping")
 	return err
 }
 

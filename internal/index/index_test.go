@@ -55,12 +55,30 @@ func writeEntryFile(t *testing.T, dir, name, content string) {
 // fakeEmbedder 返回确定性向量，避免真实网络。
 type fakeEmbedder struct{}
 
-func (fakeEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
+func (fakeEmbedder) ModelIdentity() string { return "" }
+
+func (fakeEmbedder) EmbedQuery(ctx context.Context, text string) ([]float32, error) {
+	return fakeEmbedder{}.EmbedDocument(ctx, text)
+}
+
+func (fakeEmbedder) EmbedDocument(_ context.Context, text string) ([]float32, error) {
 	// 含 "git" 的文本给 [1,0]，其余给 [0,1]
 	if strings.Contains(strings.ToLower(text), "git") {
 		return []float32{1, 0}, nil
 	}
 	return []float32{0, 1}, nil
+}
+
+func (fakeEmbedder) EmbedDocuments(ctx context.Context, texts []string) ([][]float32, error) {
+	out := make([][]float32, len(texts))
+	for i, t := range texts {
+		v, err := fakeEmbedder{}.EmbedDocument(ctx, t)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = v
+	}
+	return out, nil
 }
 
 func setupDB(t *testing.T) (*DB, string) {

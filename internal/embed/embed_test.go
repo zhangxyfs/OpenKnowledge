@@ -9,36 +9,82 @@ import (
 	"time"
 )
 
-func newFakeServer(t *testing.T, vec []float32) *httptest.Server {
-	t.Helper()
+// fakeEmbeddings 返回一个 httptest 服务器：记录最后一次请求体，
+// 按 input 顺序返回 [len(text),index] 形式的二维向量（故意乱序 index 以验证重排）。
+func fakeEmbeddings(t *testing.T, gotBody *string) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/embeddings" {
-			t.Errorf("unexpected path %s", r.URL.Path)
-		}
 		var req struct {
-			Model string `json:"model"`
-			Input string `json:"input"`
+			Model string   `json:"model"`
+			Input []string `json:"input"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			t.Errorf("bad request: %v", err)
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		b, _ := json.Marshal(req)
+		*gotBody = string(b)
+		type datum struct {
+			Embedding []float32 `json:"embedding"`
+			Index     int       `json:"index"`
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"data": []map[string]any{{"embedding": vec}},
-		})
+		data := make([]datum, len(req.Input))
+		for i, text := range req.Input {
+			data[len(req.Input)-1-i] = datum{Embedding: []float32{float32(len(text)), float32(i)}, Index: i}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
 	}))
 }
 
-func TestOpenAIClientEmbed(t *testing.T) {
-	srv := newFakeServer(t, []float32{1, 2, 3})
+func TestEmbedDocumentsBatchAndOrder(t *testing.T) {
+	var got string
+	srv := fakeEmbeddings(t, &got)
 	defer srv.Close()
-	c := &OpenAIClient{BaseURL: srv.URL, APIKey: "k", Model: "m", Timeout: 5 * time.Second}
-	vec, err := c.Embed(context.Background(), "hello")
+	c := &OpenAIClient{BaseURL: srv.URL, Model: "m", Timeout: 5 * time.Second}
+	vecs, err := c.EmbedDocuments(context.Background(), []string{"ab", "cdef"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(vec) != 3 || vec[0] != 1 {
-		t.Fatalf("unexpected %v", vec)
+	if len(vecs) != 2 || vecs[0][0] != 2 || vecs[1][0] != 4 {
+		t.Fatalf("应按 index 重排回原顺序: %v", vecs)
+	}
+	var req struct {
+		Input []string `json:"input"`
+	}
+	_ = json.Unmarshal([]byte(got), &req)
+	if len(req.Input) != 2 || req.Input[0] != "ab" {
+		t.Fatalf("input 应为数组: %s", got)
+	}
+}
+
+func TestQueryPrefixApplied(t *testing.T) {
+	var got string
+	srv := fakeEmbeddings(t, &got)
+	defer srv.Close()
+	c := &OpenAIClient{BaseURL: srv.URL, Model: "m", QueryPrefix: "Instruct: x\nQuery: ", DocPrefix: "doc: ", Timeout: 5 * time.Second}
+	if _, err := c.EmbedQuery(context.Background(), "你好"); err != nil {
+		t.Fatal(err)
+	}
+	var req struct {
+		Input []string `json:"input"`
+	}
+	_ = json.Unmarshal([]byte(got), &req)
+	if req.Input[0] != "Instruct: x\nQuery: 你好" {
+		t.Fatalf("查询侧应加前缀: %q", req.Input[0])
+	}
+	if _, err := c.EmbedDocument(context.Background(), "正文"); err != nil {
+		t.Fatal(err)
+	}
+	_ = json.Unmarshal([]byte(got), &req)
+	if req.Input[0] != "doc: 正文" {
+		t.Fatalf("文档侧应加文档前缀: %q", req.Input[0])
+	}
+}
+
+func TestModelIdentity(t *testing.T) {
+	c := &OpenAIClient{Identity: "openai:m@h"}
+	if c.ModelIdentity() != "openai:m@h" {
+		t.Fatal(c.ModelIdentity())
+	}
+	var zero OpenAIClient
+	if zero.ModelIdentity() != "" {
+		t.Fatal("空 Identity 应返回空串")
 	}
 }
 

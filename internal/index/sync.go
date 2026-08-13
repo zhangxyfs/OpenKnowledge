@@ -135,7 +135,7 @@ func (db *DB) Sync(dir string, client embed.Client) error {
 				if err != nil {
 					return rollback(err)
 				}
-				vec, err := client.Embed(context.Background(), e.EmbedText())
+				vec, err := client.EmbedDocument(context.Background(), e.EmbedText())
 				if err != nil {
 					return rollback(err)
 				}
@@ -180,7 +180,7 @@ func (db *DB) Sync(dir string, client embed.Client) error {
 			return rollback(err)
 		}
 		if client != nil {
-			vec, err := client.Embed(context.Background(), e.EmbedText())
+			vec, err := client.EmbedDocument(context.Background(), e.EmbedText())
 			if err != nil {
 				return rollback(err)
 			}

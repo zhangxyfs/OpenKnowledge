@@ -328,7 +328,7 @@ func Search(args []string, stdout, stderr io.Writer) int {
 	defer db.Close()
 	var queryVec []float32
 	if client := embeddingClient(pc); client != nil {
-		if vec, err := client.Embed(context.Background(), query); err != nil {
+		if vec, err := client.EmbedQuery(context.Background(), query); err != nil {
 			fmt.Fprintf(stderr, "embedding 失败，降级为关键词检索: %v\n", err)
 		} else {
 			queryVec = vec
@@ -461,7 +461,7 @@ func Doctor(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stdout, "[%s] 未配置 embedding（仅关键词检索可用）\n", p.Name)
 			continue
 		}
-		if _, err := client.Embed(context.Background(), "ping"); err != nil {
+		if _, err := client.EmbedQuery(context.Background(), "ping"); err != nil {
 			fmt.Fprintf(stdout, "[%s] embedding API 不可用: %v\n", p.Name, err)
 			healthy = false
 		} else {

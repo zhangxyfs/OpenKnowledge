@@ -95,7 +95,7 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 	}
 	var queryVec []float32
 	if client != nil {
-		if vec, err := client.Embed(context.Background(), promptText); err != nil {
+		if vec, err := client.EmbedQuery(context.Background(), promptText); err != nil {
 			logErr("prompt embed: %v", err)
 		} else {
 			queryVec = vec
