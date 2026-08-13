@@ -148,7 +148,7 @@
     <pre data-i18n="d.s1pre"><code>ok setup            <span class="c"># 或只装某个 agent：ok setup --agent zcode</span></code></pre>
     <p><code>ok setup</code> <span data-i18n="d.s1lead">依次完成三件事：</span></p>
     <ol>
-      <li data-i18n="d.s1l1"><b>写入 hooks 配置</b>——覆盖全部已检测的 AI 助手：Kimi Code 写 <code>~/.kimi-code/config.toml</code> 的 3 条 hook 标记块（自动备份、幂等覆盖），Pi 写 TypeScript 扩展，ZCode 合并写 <code>config.json</code>，Reasonix 安装 Extension Protocol 插件包，opencode 写 <code>~/.config/opencode/plugins/</code> 的 TypeScript 插件，claude 合并写 <code>~/.claude/settings.json</code> 的 hooks（Claude Code / CodePilot 等兼容宿主共用），codex 合并写 <code>~/.codex/hooks.json</code>（hook 契约兼容 Claude；技能零适配共享技能目录；ok 自动开启特性开关并写入信任记录；桌面端 26.707 与 CLI 0.147+ 均实证可用）</li>
+      <li data-i18n="d.s1l1"><b>写入 hooks 配置</b>——覆盖全部已检测的 AI 助手：Kimi Code 写 <code>~/.kimi-code/config.toml</code> 的 3 条 hook 标记块（自动备份、幂等覆盖），Pi 写 TypeScript 扩展，ZCode 合并写 <code>config.json</code>，Reasonix 安装 Extension Protocol 插件包，opencode 写 <code>~/.config/opencode/plugins/</code> 的 TypeScript 插件，claude 合并写 <code>~/.claude/settings.json</code> 的 hooks（Claude Code / CodePilot 等兼容宿主共用），codex 合并写 <code>~/.codex/hooks.json</code>（hook 契约兼容 Claude；技能零适配共享技能目录；ok 自动开启特性开关并写入信任记录；桌面端 26.707 与 CLI 0.147+ 均实证可用），qoder 合并写 <code>~/.qoder-cn/settings.json</code> 的 hooks（Qoder CN 终端 CLI；契约兼容 Claude，ok 自动开启 hooksConfig.enabled 开关——默认关闭时装好也静默不派发），qoder-ide 合并写 <code>~/.lingma/settings.json</code> 的 hooks（Qoder CN IDE 灵码内核：知识注入与触碰追踪可用、Stop 不可阻断致强制检查降级）</li>
       <li data-i18n="d.s1l2"><b>安装六个技能</b>——<code>openknowledge-init / on / off / propose / capture / wiki</code>，写入各 agent 的技能目录</li>
       <li data-i18n="d.s1l3"><b>配置 embedding</b>——交互询问 base_url / model / API key，写入全局配置并当场验证连通性；回车跳过则只用关键词检索</li>
     </ol>
