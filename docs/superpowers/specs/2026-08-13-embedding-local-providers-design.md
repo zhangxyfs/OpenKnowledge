@@ -115,7 +115,7 @@ mirror = "hf-mirror"        # hf-mirror | huggingface | 自定义 base URL
 批量输入。
 
 **模型清单**（烘焙进二进制；每条含 id/repo/文件/size/sha256/维度/pooling/
-查询指令前缀，实现时钉死具体值）：
+query_prefix/doc_prefix，实现时钉死具体值）：
 
 | id | 模型 | 大小量级 | 维度 | pooling | 说明 |
 |---|---|---|---|---|---|
@@ -169,10 +169,10 @@ mirror = "hf-mirror"        # hf-mirror | huggingface | 自定义 base URL
   都支持），`ok index` 全量重建分批（如 32 条/批）显著提速内置/本地模型；
   增量 sync 仍单条。
 - **查询/文档双路径**：接口区分 EmbedQuery（检索侧）与 EmbedDocument（建
-  索引侧）。清单中 `query_instruct` 非空的模型（Qwen3-Embedding）仅查询侧
-  自动套 `Instruct: <检索指令>\nQuery: ` 前缀，文档侧原文嵌入；其余模型
-  两路径行为一致。pooling 按清单值传给 sidecar 启动参数（bge-m3=cls，
-  qwen3=last）。
+  索引侧）。清单中 `query_prefix`/`doc_prefix` 非空的模型在对应侧自动套
+  前缀（Qwen3-Embedding 查询侧 `Instruct: <检索指令>\nQuery: `；nomic 双侧
+  `search_query: `/`search_document: `；bge-m3 均不加）。pooling 按清单值
+  传给 sidecar 启动参数（bge-m3=cls，qwen3=last，nomic=mean）。
 - 检索打分、分词、排除 mandatory/draft 等逻辑**不变**。
 
 ## 8. GUI 设计（视觉稿已确认）
