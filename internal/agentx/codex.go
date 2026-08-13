@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -31,8 +32,9 @@ func codexHooksPath() string { return filepath.Join(CodexHome(), "hooks.json") }
 func codexConfigPath() string { return filepath.Join(CodexHome(), "config.toml") }
 
 // codexHookEvents 是 ok 接入的 Codex hook 事件（对应 ok 的三条 hook 链路）。
-// 命令形态与 claude 适配器相同：shell 字符串（正斜杠 exe + 双引号），输出协议
-// Claude JSON（args 末尾 "claude"）——Codex hook 契约逐字兼容 Claude Code
+// 命令形态按平台分叉（见 codexCommand）：Windows 用 .cmd 包装文件裸路径，其他平台
+// 与 claude 适配器相同（shell 字符串：正斜杠 exe + 双引号）；输出协议 Claude JSON
+// （args 末尾 "claude"）——Codex hook 契约逐字兼容 Claude Code
 // （hookSpecificOutput.additionalContext 注入、Stop decision:block 阻断），
 // hook.go 输出层零改动。PostToolUse 只追 apply_patch（Codex 专用写盘工具，
 // 无 Write/Edit），不追 Bash——与 claude 不追 Bash 对齐。
@@ -48,14 +50,79 @@ var codexHookEvents = []struct {
 	{"Stop", "stop", "*", "stop", false},
 }
 
-// codexCommand 生成 hook 命令串（claudeCommand 同款形态）。
+// codexCommand 生成 hook 命令串，按平台分叉：
+//   - Windows：Codex 执行 hooks.json 的 command 时整行外套双引号
+//     cmd.exe /C "<整行>"（codex-rs/hooks/src/engine/command_runner.rs），含内嵌
+//     引号的命令静默不执行却报 Completed（上游 issue #38168，Open 未修）——故
+//     command 用 .cmd 包装文件绝对路径裸串（无引号、反斜杠形态），与 exe 位置
+//     解耦：exe 迁移只改包装文件内容，hooks.json 不变，信任哈希永不因此过期。
+//   - 其他平台（linux/darwin）：claudeCommand 同款 quoted shell 串
+//     （上游 bug 仅 Windows cmd 路径）。
+//
+// 已知限制：用户名含空格时包装路径带空格，hooks.json 裸串命令仍会被 #38168 外层
+// 引号 bug 截断——上游修复前不额外处理。
 func codexCommand(exe, okHook string) string {
+	if runtime.GOOS == "windows" {
+		return codexWrapperPath(okHook)
+	}
 	return strconv.Quote(filepath.ToSlash(exe)) + " hook " + okHook + " claude"
 }
 
-// isOKCodexHook 判定一条 hook 条目是否 ok 生成：type=command 且命令串以
-// " hook <prompt|post-tool|stop> claude" 结尾。不看 exe basename——改名/迁移/
-// 测试二进制都不影响识别。
+// codexWrapperPath 返回 Windows 包装文件路径：<CodexHome>/ok-hook-<okHook>.cmd
+// （filepath.Join 在 Windows 出反斜杠形态——hooks.json command 裸串即它）。
+func codexWrapperPath(okHook string) string {
+	return filepath.Join(CodexHome(), "ok-hook-"+okHook+".cmd")
+}
+
+// codexWrapperContent 返回包装文件内容：单行 @"<exe>" hook <okHook> claude（CRLF
+// 结尾）。exe 路径在 .cmd 文件内部带引号无妨——#38168 外层引号 bug 只作用于
+// hooks.json 的命令行。
+func codexWrapperContent(exe, okHook string) string {
+	return "@\"" + exe + "\" hook " + okHook + " claude\r\n"
+}
+
+// ensureCodexWrappers 确保三个包装文件存在且内容为当前 exe（缺失/过期重写，
+// 已当前则不写盘）。仅 Windows 调用。
+func ensureCodexWrappers(exe string) error {
+	for _, e := range codexHookEvents {
+		path := codexWrapperPath(e.okHook)
+		want := codexWrapperContent(exe, e.okHook)
+		if data, err := os.ReadFile(path); err == nil && string(data) == want {
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return fmt.Errorf("写入 codex hook 包装: %w", err)
+		}
+		if err := os.WriteFile(path, []byte(want), 0o644); err != nil {
+			return fmt.Errorf("写入 codex hook 包装: %w", err)
+		}
+	}
+	return nil
+}
+
+// removeCodexWrappers 删除三个包装文件，返回是否有删除。仅删内容确为 ok 生成的
+// （含 " hook <okHook> claude"）——防误删用户同名文件。仅 Windows 调用。
+func removeCodexWrappers() bool {
+	removed := false
+	for _, e := range codexHookEvents {
+		path := codexWrapperPath(e.okHook)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		if strings.Contains(string(data), " hook "+e.okHook+" claude") &&
+			os.Remove(path) == nil {
+			removed = true
+		}
+	}
+	return removed
+}
+
+// isOKCodexHook 判定一条 hook 条目是否 ok 生成：type=command 且命令串形态匹配——
+// Windows 认包装文件裸路径（trim 后以 / 或 \ 分隔的 ok-hook-<okHook>.cmd 结尾，
+// 大小写不敏感，Equalfold 语意——cmd.exe 路径语义）；其他平台认后缀
+// " hook <prompt|post-tool|stop> claude"。不看 exe basename——改名/迁移/测试
+// 二进制都不影响识别。
 func isOKCodexHook(h map[string]any) bool {
 	typ, _ := h["type"].(string)
 	cmd, _ := h["command"].(string)
@@ -64,11 +131,24 @@ func isOKCodexHook(h map[string]any) bool {
 	}
 	cmd = strings.TrimSpace(cmd)
 	for _, e := range codexHookEvents {
+		if runtime.GOOS == "windows" {
+			for _, sep := range []string{"/", "\\"} {
+				if hasSuffixFold(cmd, sep+"ok-hook-"+e.okHook+".cmd") {
+					return true
+				}
+			}
+			continue
+		}
 		if strings.HasSuffix(cmd, " hook "+e.okHook+" claude") {
 			return true
 		}
 	}
 	return false
+}
+
+// hasSuffixFold 报告 s 是否以 suffix 结尾（大小写不敏感，Equalfold 语意）。
+func hasSuffixFold(s, suffix string) bool {
+	return len(s) >= len(suffix) && strings.EqualFold(s[len(s)-len(suffix):], suffix)
 }
 
 // codexAgent Codex 适配器：hook 集成 = 合并写用户层 ~/.codex/hooks.json 并确保
@@ -81,6 +161,9 @@ func init() { Register(codexAgent{}) }
 
 func (codexAgent) ID() string          { return "codex" }
 func (codexAgent) DisplayName() string { return "Codex" }
+
+// HooksTarget 展示路径返回 hooks.json；Windows 另在同目录维护 ok-hook-*.cmd
+// 包装文件（hooks.json command 指向它们，见 codexCommand）。
 func (codexAgent) HooksTarget() string { return codexHooksPath() }
 func (codexAgent) SkillsDir() string   { return SkillsHome() }
 
@@ -192,10 +275,17 @@ func hasOKCodexHook(events map[string]any) bool {
 }
 
 // codexHooksCurrent 报告三事件的 ok hook 是否均为当前期望形态
-// （command=exe、matcher 与 timeout 正确）。
+// （command=当前命令、matcher 与 timeout 正确）；Windows 另要求包装文件内容为
+// 当前 exe（exe 迁移后包装过期 = 集成失效，需自愈重写）。
 func codexHooksCurrent(events map[string]any, exe string) bool {
 	wantTimeout := float64(HookTimeoutSec())
 	for _, e := range codexHookEvents {
+		if runtime.GOOS == "windows" {
+			data, err := os.ReadFile(codexWrapperPath(e.okHook))
+			if err != nil || string(data) != codexWrapperContent(exe, e.okHook) {
+				return false
+			}
+		}
 		groups, _ := events[e.event].([]any)
 		found := false
 		for _, g := range groups {
@@ -410,8 +500,10 @@ func writeCodexConfig(orig []byte, text, op string) error {
 // Codex 对每条 hooks.json hook 计算内容哈希并与 config.toml
 // [hooks.state.'<hooks.json路径>:<label>:<组索引>:<hook索引>'] 节的 trusted_hash
 // 比对：不一致（Modified）或无记录（Untrusted）时静默跳过全部 hooks、无任何提示。
-// hooks.json 任何内容变化（exe 迁移/重装/自愈重写）都会使信任过期——因此 ok 在
+// hooks.json 任何内容变化（重装/自愈重写）都会使信任过期——因此 ok 在
 // 安装/自愈写 hooks.json 后必须同步重算并写入信任记录。
+// （Windows 上 exe 迁移不再触发：command=包装路径与 exe 解耦，只改包装文件内容，
+// 哈希输入不变——见 codexCommand。）
 // 哈希公式经 Codex 源码（hooks/src/engine/discovery.rs hook_hash →
 // config/src/fingerprint.rs version_for_toml）与真实信任记录逐位双向验证：
 // trusted_hash = "sha256:" + sha256hex(canonicalJSON(identity))，
@@ -653,6 +745,12 @@ func (codexAgent) InstallHooks(exe string) error {
 	if err != nil {
 		return err
 	}
+	if runtime.GOOS == "windows" {
+		// 先写 3 个包装文件（当前 exe）——hooks.json command 指向它们。
+		if err := ensureCodexWrappers(exe); err != nil {
+			return err
+		}
+	}
 	events := codexEventsEdit(cfg)
 	stripOKCodexHooks(events)
 	for _, e := range codexHookEvents {
@@ -669,11 +767,16 @@ func (codexAgent) InstallHooks(exe string) error {
 }
 
 // RemoveHooks 移除 hooks.json 里的 ok 条目并连带清理 config.toml 里 ok 的
-// hooks.state 信任节（第三方节保留）；config.toml 的 codex_hooks 特性开关单独
+// hooks.state 信任节（第三方节保留）；Windows 另删 3 个包装文件（仅删内容确为
+// ok 生成的，防误删用户同名文件）；config.toml 的 codex_hooks 特性开关单独
 // 存在无副作用（只是允许 Codex 派发 hooks），不随移除关闭。
 func (codexAgent) RemoveHooks() (bool, error) {
+	wrappersRemoved := false
+	if runtime.GOOS == "windows" {
+		wrappersRemoved = removeCodexWrappers()
+	}
 	if _, err := os.Stat(codexHooksPath()); os.IsNotExist(err) {
-		return false, nil
+		return wrappersRemoved, nil
 	}
 	cfg, err := loadCodexHooks()
 	if err != nil {
@@ -681,7 +784,7 @@ func (codexAgent) RemoveHooks() (bool, error) {
 	}
 	events := codexEventsOf(cfg)
 	if events == nil || !hasOKCodexHook(events) {
-		return false, nil
+		return wrappersRemoved, nil
 	}
 	trustKeys := codexTrustKeys(events) // 剥离前取 ok 组实际索引
 	stripOKCodexHooks(events)
@@ -698,6 +801,8 @@ func (codexAgent) RemoveHooks() (bool, error) {
 // 超时变更）时重写；从未安装（无任何 ok 条目）则 no-op——用户显式移除的集成
 // 不复活。codex_hooks 特性开关被关/缺失、hooks.state 信任记录过期/缺失同样视为
 // 过期（曾安装过才走到这）：按当前 hooks.json 内容重算补写。
+// Windows 先重写过期/缺失的包装文件（exe 迁移只动包装内容）——包装刷新后
+// hooks.json 命令（包装路径）往往仍当前，无需重写，信任哈希随之不变。
 func (codexAgent) EnsureHooks(exe string) error {
 	if _, err := os.Stat(codexHooksPath()); err != nil {
 		return nil
@@ -709,6 +814,11 @@ func (codexAgent) EnsureHooks(exe string) error {
 	events := codexEventsOf(cfg)
 	if events == nil || !hasOKCodexHook(events) {
 		return nil // 从未安装（无任何 ok 条目）不复活——含用户显式移除
+	}
+	if runtime.GOOS == "windows" {
+		if err := ensureCodexWrappers(exe); err != nil {
+			return err
+		}
 	}
 	if !codexHooksCurrent(events, exe) {
 		events = codexEventsEdit(cfg)

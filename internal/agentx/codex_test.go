@@ -40,23 +40,46 @@ func TestCodexHomeOfficialEnv(t *testing.T) {
 }
 
 func TestIsOKCodexHook(t *testing.T) {
+	// Windows 形态（测试在 Windows 跑）：包装文件裸路径，认 / 与 \ 分隔、大小写不敏感。
 	cases := []struct {
 		name string
 		hook map[string]any
 		want bool
 	}{
-		{"prompt", map[string]any{"type": "command", "command": `"D:/x/ok.exe" hook prompt claude`}, true},
-		{"post-tool", map[string]any{"type": "command", "command": `"D:/x/ok.exe" hook post-tool claude`}, true},
-		{"stop", map[string]any{"type": "command", "command": `"D:/x/ok.exe" hook stop claude`}, true},
-		{"尾部空白容忍", map[string]any{"type": "command", "command": `"D:/x/ok.exe" hook prompt claude  `}, true},
-		{"非 command 类型", map[string]any{"type": "process", "command": `"D:/x/ok.exe" hook prompt claude`}, false},
-		{"非 ok 命令", map[string]any{"type": "command", "command": "echo hi"}, false},
-		{"相邻词误匹配", map[string]any{"type": "command", "command": "myhook prompt claude"}, false},
-		{"缺 claude 协议段", map[string]any{"type": "command", "command": `"D:/x/ok.exe" hook prompt`}, false},
+		{"prompt 反斜杠", map[string]any{"type": "command", "command": `C:\Users\X\.codex\ok-hook-prompt.cmd`}, true},
+		{"post-tool 反斜杠", map[string]any{"type": "command", "command": `C:\Users\X\.codex\ok-hook-post-tool.cmd`}, true},
+		{"stop 反斜杠", map[string]any{"type": "command", "command": `C:\Users\X\.codex\ok-hook-stop.cmd`}, true},
+		{"正斜杠分隔", map[string]any{"type": "command", "command": `C:/Users/X/.codex/ok-hook-prompt.cmd`}, true},
+		{"大小写变体命中", map[string]any{"type": "command", "command": `C:\USERS\X\.CODEX\OK-HOOK-PROMPT.CMD`}, true},
+		{"尾部空白容忍", map[string]any{"type": "command", "command": `C:\x\ok-hook-stop.cmd  `}, true},
+		{"非 command 类型", map[string]any{"type": "process", "command": `C:\x\ok-hook-prompt.cmd`}, false},
+		{"第三方命令", map[string]any{"type": "command", "command": "echo hi"}, false},
+		{"相似文件名 prompter 不误判", map[string]any{"type": "command", "command": `C:\x\ok-hook-prompter.cmd`}, false},
+		{"相似前缀 my- 不误判", map[string]any{"type": "command", "command": `C:\x\my-ok-hook-prompt.cmd`}, false},
+		{"后缀 .bak 不误判", map[string]any{"type": "command", "command": `C:\x\ok-hook-prompt.cmd.bak`}, false},
+		{"裸文件名无分隔不命中", map[string]any{"type": "command", "command": `ok-hook-prompt.cmd`}, false},
+		{"旧 quoted 形态不再识别", map[string]any{"type": "command", "command": `"D:/x/ok.exe" hook prompt claude`}, false},
 	}
 	for _, c := range cases {
 		if got := isOKCodexHook(c.hook); got != c.want {
 			t.Errorf("%s: isOKCodexHook() = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// codexWantWrappers 断言 home 下三个包装文件存在且内容为 exe 的期望形态。
+func codexWantWrappers(t *testing.T, home, exe string) {
+	t.Helper()
+	for _, okHook := range []string{"prompt", "post-tool", "stop"} {
+		wp := filepath.Join(home, "ok-hook-"+okHook+".cmd")
+		data, err := os.ReadFile(wp)
+		if err != nil {
+			t.Errorf("包装文件 %s 未生成: %v", wp, err)
+			continue
+		}
+		want := `@"` + exe + `" hook ` + okHook + " claude\r\n"
+		if string(data) != want {
+			t.Errorf("包装文件 %s 内容 = %q, want %q", wp, string(data), want)
 		}
 	}
 }
@@ -116,10 +139,11 @@ func TestCodexInstallHooks(t *testing.T) {
 	if len(pre) != 1 {
 		t.Error("第三方 PreToolUse 组被删")
 	}
+	// Windows 期望（测试在 Windows 跑）：command = 包装文件裸路径（无引号、反斜杠形态）
 	wantCmd := map[string]string{
-		"UserPromptSubmit": `"D:/develop/OpenKnowledge/dist/ok.exe" hook prompt claude`,
-		"PostToolUse":      `"D:/develop/OpenKnowledge/dist/ok.exe" hook post-tool claude`,
-		"Stop":             `"D:/develop/OpenKnowledge/dist/ok.exe" hook stop claude`,
+		"UserPromptSubmit": filepath.Join(home, "ok-hook-prompt.cmd"),
+		"PostToolUse":      filepath.Join(home, "ok-hook-post-tool.cmd"),
+		"Stop":             filepath.Join(home, "ok-hook-stop.cmd"),
 	}
 	wantMatcher := map[string]string{"UserPromptSubmit": "*", "PostToolUse": "apply_patch", "Stop": "*"}
 	wantTimeout := float64(HookTimeoutSec())
@@ -145,6 +169,8 @@ func TestCodexInstallHooks(t *testing.T) {
 			t.Errorf("%s: 未找到期望的 ok hook 组", ev)
 		}
 	}
+	// 包装文件：3 个，内容为 @"<exe>" hook <okHook> claude（CRLF 结尾）
+	codexWantWrappers(t, home, codexTestExe())
 	if _, err := os.Stat(hp + ".bak-openknowledge"); err != nil {
 		t.Error("未生成 .bak-openknowledge 备份")
 	}
@@ -210,9 +236,27 @@ func TestCodexRemoveHooks(t *testing.T) {
 	if pre, _ := events["PreToolUse"].([]any); len(pre) != 1 {
 		t.Error("第三方 PreToolUse 被误删")
 	}
+	// 3 个包装文件随卸载删除
+	for _, okHook := range []string{"prompt", "post-tool", "stop"} {
+		if _, err := os.Stat(filepath.Join(home, "ok-hook-"+okHook+".cmd")); !os.IsNotExist(err) {
+			t.Errorf("包装文件 ok-hook-%s.cmd 未删除", okHook)
+		}
+	}
 	removed, err = a.RemoveHooks()
 	if err != nil || removed {
 		t.Fatalf("二次 RemoveHooks = (%v, %v), want (false, nil)", removed, err)
+	}
+	// 用户同名文件（内容非 ok 生成）不误删
+	userFile := filepath.Join(home, "ok-hook-prompt.cmd")
+	if err := os.WriteFile(userFile, []byte("@echo my own hook\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	removed, err = a.RemoveHooks()
+	if err != nil || removed {
+		t.Fatalf("三次 RemoveHooks = (%v, %v), want (false, nil)", removed, err)
+	}
+	if data, err := os.ReadFile(userFile); err != nil || !strings.Contains(string(data), "my own hook") {
+		t.Error("用户同名包装文件被误删")
 	}
 }
 
@@ -243,6 +287,8 @@ func TestCodexEnsureHooks(t *testing.T) {
 	if strings.Contains(string(data), `D:\old`) || strings.Contains(string(data), `D:/old`) {
 		t.Error("旧 exe 路径残留")
 	}
+	// 包装内容刷新为新 exe
+	codexWantWrappers(t, home, currentExe(t))
 	// 用户显式移除 → 不复活
 	if _, err := a.RemoveHooks(); err != nil {
 		t.Fatal(err)
@@ -255,6 +301,50 @@ func TestCodexEnsureHooks(t *testing.T) {
 	_ = json.Unmarshal(data, &cfg)
 	if hasOKCodexHook(codexEventsOf(cfg)) {
 		t.Error("用户显式移除的集成被复活")
+	}
+}
+
+// TestCodexExeMigrationKeepsTrust 是本设计的核心收益：exe 迁移后 EnsureHooks 自愈
+// 只重写包装文件内容，hooks.json（命令=包装路径）与 config.toml 信任哈希逐字节不动
+// ——迁移不再破信任（旧 quoted 形态下 hooks.json 内容变 → 哈希过期 → 静默跳过）。
+func TestCodexExeMigrationKeepsTrust(t *testing.T) {
+	home := isolateCodex(t)
+	a := codexAgent{}
+	if err := a.InstallHooks(`D:\old\ok.exe`); err != nil {
+		t.Fatal(err)
+	}
+	hooksBefore, err := os.ReadFile(codexHooksPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	configBefore, err := os.ReadFile(codexConfigPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	newExe := currentExe(t)
+	if err := a.EnsureHooks(newExe); err != nil {
+		t.Fatal(err)
+	}
+	// 包装内容刷新为新 exe
+	codexWantWrappers(t, home, newExe)
+	// hooks.json 未被重写（命令与 exe 解耦）
+	hooksAfter, err := os.ReadFile(codexHooksPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(hooksAfter) != string(hooksBefore) {
+		t.Error("exe 迁移不应触发 hooks.json 重写（命令=包装路径，与 exe 无关）")
+	}
+	// 信任哈希不变（哈希输入=包装路径串）——config.toml 逐字节不动
+	configAfter, err := os.ReadFile(codexConfigPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(configAfter) != string(configBefore) {
+		t.Errorf("exe 迁移后信任记录变化（信任不应过期）:\nbefore:\n%s\nafter:\n%s", configBefore, configAfter)
+	}
+	if !a.HooksInstalled() {
+		t.Error("exe 迁移自愈后 HooksInstalled 应为 true")
 	}
 }
 
