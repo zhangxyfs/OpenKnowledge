@@ -585,11 +585,22 @@ func TestEmbeddingBadURL(t *testing.T) {
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 
-	code, data := do(t, "POST", srv.URL+"/api/setup/embedding", testToken, map[string]any{
+	code, data := do(t, "POST", srv.URL+"/api/setup/embedding/profile", testToken, map[string]any{
+		"name":     "a",
+		"type":     "openai",
 		"base_url": "http://127.0.0.1:1",
 		"model":    "m",
 		"api_key":  "sekret-key",
 	})
+	if code != 200 {
+		t.Fatalf("status = %d, body %s", code, data)
+	}
+	// 配置应已落盘（保存先于连通性测试）
+	if _, err := os.Stat(filepath.Join(okHome, "config.toml")); err != nil {
+		t.Fatalf("global config not saved: %v", err)
+	}
+	// 死服务器连通性测试应 ok=false
+	code, data = do(t, "POST", srv.URL+"/api/setup/embedding/test", testToken, map[string]any{"name": "a"})
 	if code != 200 {
 		t.Fatalf("status = %d, body %s", code, data)
 	}
@@ -603,42 +614,33 @@ func TestEmbeddingBadURL(t *testing.T) {
 	if res.OK {
 		t.Fatalf("expected ok=false against dead server: %s", data)
 	}
-	// 配置应已落盘（SaveEmbedding 先于 TestEmbedding）
-	if _, err := os.Stat(filepath.Join(okHome, "config.toml")); err != nil {
-		t.Fatalf("global config not saved: %v", err)
-	}
 	// 响应不得包含 key
 	if strings.Contains(string(data), "sekret-key") {
 		t.Fatalf("api key leaked in response: %s", data)
 	}
 }
 
-// 留空 api_key 应保留已保存的 key；status 应回填 base_url/model/has_key。
+// 留空 api_key 应保留已保存的 key；GET /api/setup/embedding 的 profiles
+// 应回填 base_url/model/has_key（不回显 key 本体）。
 func TestEmbeddingEmptyKeyKeepsExisting(t *testing.T) {
 	h, _, okHome := newEnv(t)
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 
-	// 未保存过 key 时留空 → 400
-	code, _ := do(t, "POST", srv.URL+"/api/setup/embedding", testToken, map[string]any{
-		"base_url": "http://127.0.0.1:1",
-		"model":    "m",
-		"api_key":  "",
-	})
-	if code != 400 {
-		t.Fatalf("empty key without existing should be 400, got %d", code)
-	}
-
 	// 先保存一个 key
-	if code, _ := do(t, "POST", srv.URL+"/api/setup/embedding", testToken, map[string]any{
+	if code, data := do(t, "POST", srv.URL+"/api/setup/embedding/profile", testToken, map[string]any{
+		"name":     "a",
+		"type":     "openai",
 		"base_url": "http://127.0.0.1:1",
 		"model":    "m1",
 		"api_key":  "sekret-key",
 	}); code != 200 {
-		t.Fatal("seed save failed")
+		t.Fatalf("seed save failed: %s", data)
 	}
 	// 留空 key + 改 model → 保留 sekret-key
-	code, data := do(t, "POST", srv.URL+"/api/setup/embedding", testToken, map[string]any{
+	code, data := do(t, "POST", srv.URL+"/api/setup/embedding/profile", testToken, map[string]any{
+		"name":     "a",
+		"type":     "openai",
 		"base_url": "http://127.0.0.1:1",
 		"model":    "m2",
 		"api_key":  "",
@@ -654,26 +656,26 @@ func TestEmbeddingEmptyKeyKeepsExisting(t *testing.T) {
 		t.Fatalf("key should be kept and model updated: %q", cfgData)
 	}
 
-	// status 回填 base_url/model/has_key（不回显 key 本体）
-	code, data = do(t, "GET", srv.URL+"/api/status", testToken, nil)
+	// GET /api/setup/embedding 的 profiles 回填 base_url/model/has_key（不回显 key 本体）
+	code, data = do(t, "GET", srv.URL+"/api/setup/embedding", testToken, nil)
 	if code != 200 {
 		t.Fatalf("status = %d", code)
 	}
 	var st struct {
-		Embedding struct {
+		Profiles []struct {
 			BaseURL string `json:"base_url"`
 			Model   string `json:"model"`
 			HasKey  bool   `json:"has_key"`
-		} `json:"embedding"`
+		} `json:"profiles"`
 	}
 	if err := json.Unmarshal(data, &st); err != nil {
 		t.Fatal(err)
 	}
-	if st.Embedding.BaseURL != "http://127.0.0.1:1" || st.Embedding.Model != "m2" || !st.Embedding.HasKey {
-		t.Fatalf("status embedding wrong: %s", data)
+	if len(st.Profiles) != 1 || st.Profiles[0].BaseURL != "http://127.0.0.1:1" || st.Profiles[0].Model != "m2" || !st.Profiles[0].HasKey {
+		t.Fatalf("profiles embedding wrong: %s", data)
 	}
 	if strings.Contains(string(data), "sekret-key") {
-		t.Fatalf("api key leaked in status: %s", data)
+		t.Fatalf("api key leaked in embedding get: %s", data)
 	}
 }
 

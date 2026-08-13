@@ -39,12 +39,14 @@ type Handler struct {
 	beats    chan<- struct{}
 	done     chan struct{}
 	doneOnce sync.Once
+	dlMu     sync.Mutex
+	dl       map[string]*dlJob
 }
 
 // NewHandler 构建路由。beats 收到每次 /api/heartbeat 的信号（非阻塞，可传 nil）；
 // /api/shutdown 会关闭 Done() 返回的通道，由调用方执行 Server.Shutdown。
 func NewHandler(webDir, token string, beats chan<- struct{}) *Handler {
-	h := &Handler{webDir: webDir, token: token, beats: beats, done: make(chan struct{})}
+	h := &Handler{webDir: webDir, token: token, beats: beats, done: make(chan struct{}), dl: map[string]*dlJob{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", h.serveIndex)
 	mux.HandleFunc("GET /index.html", h.serveIndex)
@@ -74,7 +76,14 @@ func NewHandler(webDir, token string, beats chan<- struct{}) *Handler {
 	api("POST /api/uninstall", h.apiUninstall)
 	api("POST /api/setup/hooks", h.apiSetupHooks)
 	api("POST /api/setup/skills", h.apiSetupSkills)
-	api("POST /api/setup/embedding", h.apiSetupEmbedding)
+	api("GET /api/setup/embedding", h.apiEmbeddingGet)
+	api("POST /api/setup/embedding/profile", h.apiEmbeddingSave)
+	api("DELETE /api/setup/embedding/profile", h.apiEmbeddingDelete)
+	api("POST /api/setup/embedding/active", h.apiEmbeddingActive)
+	api("POST /api/setup/embedding/test", h.apiEmbeddingTest)
+	api("POST /api/setup/embedding/download", h.apiEmbeddingDownload)
+	api("POST /api/setup/embedding/download/cancel", h.apiEmbeddingDownloadCancel)
+	api("GET /api/setup/embedding/ollama-models", h.apiOllamaModels)
 	api("POST /api/reasonix/enforce-mode", h.apiReasonixEnforceMode)
 	api("POST /api/toggle", h.apiToggle)
 	api("GET /api/changelog", h.apiChangelog)
@@ -326,14 +335,21 @@ func (h *Handler) apiStatus(w http.ResponseWriter, _ *http.Request) {
 		}
 	}
 	embeddingConfigured := false
-	embedding := map[string]any{"base_url": "", "model": "", "has_key": false}
+	embedding := map[string]any{"configured": false}
 	hooksTimeout := 10
 	if cfg, err := config.LoadMerged("", filepath.Join(registry.Home(), "config.toml")); err == nil {
 		if p := cfg.Embedding.ActiveProfile(); p != nil {
 			embeddingConfigured = true
-			embedding["base_url"] = p.BaseURL
-			embedding["model"] = p.Model
-			embedding["has_key"] = p.ResolvedAPIKey() != ""
+			embedding = map[string]any{
+				"configured": true, "name": p.Name, "type": p.Type,
+				"model": p.Model, "base_url": p.BaseURL,
+			}
+			if p.Type == "builtin" {
+				if m := embed.FindBuiltinModel(p.Model); m != nil {
+					embedding["model_label"] = m.Label
+					embedding["dim"] = m.Dim
+				}
+			}
 		}
 		if cfg.Hooks.TimeoutSec > 0 {
 			hooksTimeout = cfg.Hooks.TimeoutSec
@@ -1062,48 +1078,6 @@ func (h *Handler) apiReasonixEnforceMode(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "mode": setupx.ReasonixEnforceMode()})
-}
-
-func (h *Handler) apiSetupEmbedding(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		BaseURL string `json:"base_url"`
-		Model   string `json:"model"`
-		APIKey  string `json:"api_key"`
-	}
-	if !decodeJSON(w, r, &req) {
-		return
-	}
-	if req.BaseURL == "" {
-		req.BaseURL = "https://api.openai.com/v1"
-	}
-	if req.Model == "" {
-		req.Model = "text-embedding-3-small"
-	}
-	if req.APIKey == "" {
-		// 留空 = 保留 active openai profile 已保存的 key
-		if cfg, err := config.LoadMerged("", filepath.Join(registry.Home(), "config.toml")); err == nil {
-			if p := cfg.Embedding.ActiveProfile(); p != nil && p.Type == "openai" {
-				req.APIKey = p.ResolvedAPIKey()
-			}
-		}
-		if req.APIKey == "" {
-			writeErr(w, http.StatusBadRequest, "api_key 不能为空（尚未保存过 key）")
-			return
-		}
-	}
-	result := func(err error) {
-		resp := map[string]any{"ok": err == nil, "error": ""}
-		if err != nil {
-			resp["error"] = err.Error()
-		}
-		writeJSON(w, http.StatusOK, resp)
-	}
-	p := config.EmbeddingProfile{Name: "默认", Type: "openai", BaseURL: req.BaseURL, Model: req.Model, APIKey: req.APIKey}
-	if err := setupx.SaveEmbeddingProfile(p, true); err != nil {
-		result(err)
-		return
-	}
-	result(setupx.TestEmbeddingProfile(p, 10*time.Second))
 }
 
 func (h *Handler) apiToggle(w http.ResponseWriter, r *http.Request) {
