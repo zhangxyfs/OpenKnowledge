@@ -323,7 +323,11 @@ func Search(args []string, stdout, stderr io.Writer) int {
 		if vec, err := client.EmbedQuery(context.Background(), query); err != nil {
 			fmt.Fprintf(stderr, "embedding 失败，降级为关键词检索: %v\n", err)
 		} else {
-			queryVec = vec
+			var warn string
+			queryVec, warn = embedx.QueryVec(db, client, vec)
+			if warn != "" {
+				fmt.Fprintln(stderr, warn)
+			}
 		}
 	}
 	terms := retrieve.Terms(query)
@@ -359,6 +363,15 @@ func Index(args []string, stdout, stderr io.Writer) int {
 	if c := embeddingClient(pc); c != nil {
 		client = c
 	}
+	if client != nil && client.ModelIdentity() != "" {
+		if m, _, err := db.EmbeddingMeta(); err == nil && m != "" && m != client.ModelIdentity() {
+			fmt.Fprintf(stdout, "embedding 模型已切换（%s → %s），重建全部向量…\n", m, client.ModelIdentity())
+			if err := db.ClearVectors(); err != nil {
+				fmt.Fprintln(stderr, err)
+				return 1
+			}
+		}
+	}
 	if err := db.Sync(pc.Store.KnowledgeDir(), client); err != nil {
 		var corrupt *index.CorruptEntriesError
 		if errors.As(err, &corrupt) {
@@ -378,7 +391,7 @@ func Index(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "INDEX 已重建（%d 条）；未配置 embedding API key，跳过向量重建\n", n)
 		return 1
 	}
-	fmt.Fprintf(stdout, "INDEX 已重建；索引共 %d 条\n", n)
+	fmt.Fprintf(stdout, "INDEX 已重建；索引共 %d 条（embedding：%s）\n", n, client.ModelIdentity())
 	return 0
 }
 

@@ -5,12 +5,14 @@ package embedx
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
 	"openknowledge/internal/config"
 	"openknowledge/internal/embed"
 	"openknowledge/internal/embedsidecar"
+	"openknowledge/internal/index"
 )
 
 // Client 返回使用中（active）profile 的客户端；未配置/暂不可用返回 nil。
@@ -99,4 +101,23 @@ func (s sidecarClient) EmbedDocuments(ctx context.Context, texts []string) ([][]
 		embedsidecar.Touch()
 	}
 	return v, err
+}
+
+// QueryVec 判定 queryVec 能否进入语义通道：索引的模型身份与当前客户端不符
+// （或维度不符）时返回 nil + 中文提示（调用方决定展示层级：CLI stderr / hook 日志）。
+// 无 meta 记录（从未算过向量）或旧式客户端（身份空）不拦截。
+func QueryVec(db *index.DB, client embed.Client, queryVec []float32) ([]float32, string) {
+	if client == nil || len(queryVec) == 0 || client.ModelIdentity() == "" {
+		return queryVec, ""
+	}
+	model, dim, err := db.EmbeddingMeta()
+	if err != nil || model == "" {
+		return queryVec, ""
+	}
+	if model != client.ModelIdentity() || (dim > 0 && dim != len(queryVec)) {
+		return nil, fmt.Sprintf(
+			"embedding 模型已切换（索引=%s，当前=%s），本次退化为关键词检索；运行 ok index 重建后恢复",
+			model, client.ModelIdentity())
+	}
+	return queryVec, ""
 }

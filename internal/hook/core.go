@@ -90,7 +90,11 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 		if vec, err := client.EmbedQuery(context.Background(), promptText); err != nil {
 			logErr("prompt embed: %v", err)
 		} else {
-			queryVec = vec
+			var warn string
+			queryVec, warn = embedx.QueryVec(db, client, vec)
+			if warn != "" {
+				logErr("prompt embed identity: %s", warn)
+			}
 		}
 	}
 	hits, err := db.Query(retrieve.Terms(promptText), queryVec, pc.Config.Retrieve)
