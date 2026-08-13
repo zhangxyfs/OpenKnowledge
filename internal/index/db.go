@@ -10,6 +10,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	_ "modernc.org/sqlite"
 )
@@ -35,6 +36,9 @@ CREATE TABLE IF NOT EXISTS vectors(
 CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
   title, tags, summary, body,
   filename UNINDEXED
+);
+CREATE TABLE IF NOT EXISTS meta(
+  key TEXT PRIMARY KEY, value TEXT NOT NULL
 );
 `
 
@@ -109,6 +113,50 @@ func (db *DB) Count() (int, error) {
 	var n int
 	err := db.sql.QueryRow(`SELECT COUNT(*) FROM entries`).Scan(&n)
 	return n, err
+}
+
+// SetMeta 写 kb 级元数据（embedding 模型身份等）。
+func (db *DB) SetMeta(key, value string) error {
+	_, err := db.sql.Exec(
+		`INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`,
+		key, value)
+	return err
+}
+
+// GetMeta 读元数据；不存在返回 ("", nil)。
+func (db *DB) GetMeta(key string) (string, error) {
+	var v string
+	err := db.sql.QueryRow(`SELECT value FROM meta WHERE key=?`, key).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return v, err
+}
+
+// EmbeddingMeta 返回建索引的模型身份与维度；未记录返回 ("", 0, nil)。
+func (db *DB) EmbeddingMeta() (string, int, error) {
+	model, err := db.GetMeta("embedding_model")
+	if err != nil {
+		return "", 0, err
+	}
+	ds, err := db.GetMeta("embedding_dim")
+	if err != nil {
+		return "", 0, err
+	}
+	dim := 0
+	if ds != "" {
+		dim, _ = strconv.Atoi(ds)
+	}
+	return model, dim, nil
+}
+
+// ClearVectors 清空向量表并复位 embedding 身份 meta（模型切换后的全量重建前置）。
+func (db *DB) ClearVectors() error {
+	if _, err := db.sql.Exec(`DELETE FROM vectors`); err != nil {
+		return err
+	}
+	_, err := db.sql.Exec(`DELETE FROM meta WHERE key IN ('embedding_model','embedding_dim')`)
+	return err
 }
 
 // legacyVectors 是旧版 vectors.json 的格式（v1.2 embed.VectorSet），仅用于迁移导入。

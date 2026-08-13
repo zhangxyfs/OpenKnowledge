@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"openknowledge/internal/embed"
@@ -43,7 +44,12 @@ func readEntry(path string) (*entry.Entry, error) {
 // 先用 os.ReadDir 枚举文件名+mtime（不读文件内容），与 entries 表按
 // filename+mtime 对比；仅新增/变化的条目才 read+parse 并 upsert
 // （entries 存原文，entries_fts 存 ftsText 切分文本），client!=nil 时
-// 为变化条目重算向量、并为缺向量的未变化条目补齐向量（只读这些文件）；
+// 收集变化条目与缺向量的未变化条目（只读这些文件）的 EmbedText，
+// 提交前按 32 条一批调 EmbedDocuments 批量算向量写入 vectors 表；
+// 提交后若 client 身份非空且确有向量写入，则刷新 meta 表的
+// embedding_model/embedding_dim。client 身份与 meta 记录不符时
+// 跳过全部向量写与 meta 更新（INDEX/FTS 照常），杜绝新旧模型向量
+// 混合——需调用方显式 ClearVectors 后再同步以全量重建。
 // 库中多余的 filename 删除。变化条目解析失败时跳过该文件（已索引旧行
 // 保留，无旧行则缺席），其余条目照常提交——一个 YAML 笔误不能压制全部
 // 注入；提交成功后若有跳过，返回 *CorruptEntriesError 警告（调用方用
@@ -121,6 +127,17 @@ func (db *DB) Sync(dir string, client embed.Client) error {
 		return err
 	}
 
+	// 模型身份闸：client 身份与索引 meta 不符时跳过全部向量写（INDEX/FTS 照常），
+	// 杜绝新旧模型向量混合；由 ok index 显式 ClearVectors 后全量重建。
+	embedBlocked := client == nil
+	if client != nil && client.ModelIdentity() != "" {
+		if m, _, err := db.EmbeddingMeta(); err == nil && m != "" && m != client.ModelIdentity() {
+			embedBlocked = true
+		}
+	}
+	type pendingEmbed struct{ name, text string }
+	var pending []pendingEmbed
+
 	alive := map[string]bool{}
 	changed := false
 	var skipped []string
@@ -129,20 +146,13 @@ func (db *DB) Sync(dir string, client embed.Client) error {
 		alive[name] = true
 		mtime := f.mtime
 		if old, ok := existing[name]; ok && old == mtime {
-			// 未变化条目不读不解析、不重算向量；仅在缺向量（曾无 key 同步）且有 key 时补齐
-			if client != nil && !hasVector[name] {
+			// 未变化条目不读不解析；仅在缺向量且可算向量时收集补齐
+			if !embedBlocked && !hasVector[name] {
 				e, err := readEntry(f.path)
 				if err != nil {
 					return rollback(err)
 				}
-				vec, err := client.EmbedDocument(context.Background(), e.EmbedText())
-				if err != nil {
-					return rollback(err)
-				}
-				if _, err := tx.Exec(`INSERT OR REPLACE INTO vectors(filename,dim,blob) VALUES(?,?,?)`,
-					name, len(vec), encodeVector(vec)); err != nil {
-					return rollback(err)
-				}
+				pending = append(pending, pendingEmbed{name, e.EmbedText()})
 			}
 			continue
 		}
@@ -179,15 +189,8 @@ func (db *DB) Sync(dir string, client embed.Client) error {
 			ftsText(e.Title), ftsText(strings.Join(e.Tags, " ")), ftsText(e.Summary), ftsText(e.Body), name); err != nil {
 			return rollback(err)
 		}
-		if client != nil {
-			vec, err := client.EmbedDocument(context.Background(), e.EmbedText())
-			if err != nil {
-				return rollback(err)
-			}
-			if _, err := tx.Exec(`INSERT OR REPLACE INTO vectors(filename,dim,blob) VALUES(?,?,?)`,
-				name, len(vec), encodeVector(vec)); err != nil {
-				return rollback(err)
-			}
+		if !embedBlocked {
+			pending = append(pending, pendingEmbed{name, e.EmbedText()})
 		}
 	}
 	for name := range existing {
@@ -204,8 +207,39 @@ func (db *DB) Sync(dir string, client embed.Client) error {
 			}
 		}
 	}
+	const embedBatchSize = 32
+	vecDim := 0
+	for i := 0; i < len(pending); i += embedBatchSize {
+		j := i + embedBatchSize
+		if j > len(pending) {
+			j = len(pending)
+		}
+		texts := make([]string, 0, j-i)
+		for _, p := range pending[i:j] {
+			texts = append(texts, p.text)
+		}
+		vecs, err := client.EmbedDocuments(context.Background(), texts)
+		if err != nil {
+			return rollback(err)
+		}
+		for k, vec := range vecs {
+			vecDim = len(vec)
+			if _, err := tx.Exec(`INSERT OR REPLACE INTO vectors(filename,dim,blob) VALUES(?,?,?)`,
+				pending[i+k].name, len(vec), encodeVector(vec)); err != nil {
+				return rollback(err)
+			}
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return err
+	}
+	if !embedBlocked && client != nil && vecDim > 0 && client.ModelIdentity() != "" {
+		if err := db.SetMeta("embedding_model", client.ModelIdentity()); err != nil {
+			return err
+		}
+		if err := db.SetMeta("embedding_dim", strconv.Itoa(vecDim)); err != nil {
+			return err
+		}
 	}
 	// diff 为空时跳过重写（hook 热路径零写盘）；INDEX.md 缺失时总是重建
 	if !changed {
