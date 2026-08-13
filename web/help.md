@@ -52,7 +52,11 @@ daemon 常驻后台、按需自动拉起，无需手动管理；托盘图标右�
 ### 全局配置 `~/.openknowledge/config.toml`
 
 - `[hooks] timeout_sec`（默认 10）——hook 超时秒数，过短在高负载下会被宿主静默杀死。改法：GUI 引导页"hook 超时"卡（保存后自动重写所有 agent），或手改后重跑 `ok setup`
-- `[embedding] base_url / model / api_key / timeout_sec`（默认 5）——语义检索，可选；不配则纯关键词检索，照样可用。改法：`ok setup` 交互向导（带连通性验证）
+- `[embedding]`（语义检索，可选；不配则纯关键词检索，照样可用）——三套服务配置（profile）存一处、`active` 指定"使用中"，三种形态任选：
+  - **自定义（openai）**：任何 OpenAI 兼容服务（线上或自建）。填 `base_url` / `model` / `api_key`（key 可留空适配无鉴权本地服务，也可用 `api_key_env` 指向环境变量）
+  - **Ollama**：先安装 Ollama 并 `ollama pull bge-m3`（或其他 embedding 模型），然后填 `base_url`（默认 `http://127.0.0.1:11434`，也可是局域网地址）与模型名，免 key；GUI/CLI 会自动探测已拉取的模型列表
+  - **内置（builtin，仅安装版）**：ok 托管的 llama.cpp 本地模型，**完全离线、知识不出本机**。选模型（4 档，默认 Qwen3-Embedding-0.6B 约 639MB，其余约 400–640MB）→ 选镜像（默认 hf-mirror 国内镜像）→ 下载 → 设为使用中。首次拉起需数秒到一分钟，期间自动降级为关键词检索、就绪后自动恢复语义检索；**切换模型后跑一次 `ok index` 重建向量**（会提示）
+  - 改法：GUI 引导页 embedding 卡"配置…"弹窗（左列表右表单，显式"设为使用中"），或 `ok setup` 交互向导（三选一，带下载进度与连通性验证）；`timeout_sec` 默认 5 秒
 - `[reasonix] enforce_mode`（默认 mixed）——reasonix 强制检查表达：soft 全软提示 / hard 全硬阻断 / mixed 软+硬。改法：GUI 引导页三档卡（仅选中 reasonix 时显示），**即时生效**
 
 ### 项目配置（知识库根目录 `config.toml`）

@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-2.13.0-2563eb">
+  <img alt="version" src="https://img.shields.io/badge/version-2.14.0-2563eb">
   <img alt="go" src="https://img.shields.io/badge/go-%3E%3D1.25-00ADD8">
   <img alt="platform" src="https://img.shields.io/badge/platform-windows%20%7C%20linux-0078d6">
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-green"></a>
@@ -40,6 +40,7 @@
 |---------|-------------|
 | **Base injection** | On the first question of each session, the project's mandatory entries (full text) plus the knowledge index are sent to the AI |
 | **Retrieval injection** | Every question is matched by hybrid keyword + vector-semantic retrieval, injecting the most relevant entries (e.g. "git commit conventions") |
+| **Three semantic-retrieval forms** | Hosted OpenAI-compatible / local Ollama / built-in llama.cpp on-device model (works offline, knowledge never leaves the machine), managed in one GUI dialog |
 | **Enforcement** | Tracks files the AI modified; if code changed but no changelog was written by the end of the turn, the turn is blocked until it's fixed (at most once per rule per session) |
 | **Multi-agent support** | Kimi Code, Pi, ZCode, Reasonix, opencode, Claude Code/CodePilot, Codex and Qoder CN share the same knowledge base (extensible adapter architecture) — kimi via TOML hook marker blocks, pi via a TypeScript extension, zcode via the Claude JSON protocol, reasonix via an Extension Protocol sidecar, opencode via a TypeScript plugin, claude via a merged hooks write to ~/.claude/settings.json (shared by Claude Code, CodePilot and other compatible hosts), codex via a merged hooks write to ~/.codex/hooks.json (Claude-compatible hook contract; zero skill adaptation via the shared ~/.agents/skills), qoder via a merged hooks write to ~/.qoder-cn/settings.json (Claude-compatible hook contract plus the hooksConfig.enabled switch; zero skill adaptation via ~/.qoder-cn/skills; covers the terminal CLI), qoder-ide via a merged hooks write to ~/.lingma/settings.json (Qoder CN IDE Lingma core: injection and touch tracking work, Stop is not blockable so enforcement degrades; skills go to ~/.lingma/skills; an IDE restart is required) |
 | **One-step setup** | `ok setup` configures hooks, installs skills, and sets up embeddings |
@@ -94,7 +95,7 @@ go build -o ok ./cmd/ok            # Linux/macOS
 
 1. **Writes hook configurations** for every detected AI assistant — for kimi that's 3 hook marker blocks in `~/.kimi-code/config.toml` (idempotent, backs up the original; existing ok hooks are detected and overwritten with the current exe path, never duplicated); pi gets a TypeScript extension; zcode gets a merged `config.json` write; opencode gets a TypeScript plugin in `~/.config/opencode/plugins/`; claude gets a merged hooks write to `~/.claude/settings.json`; codex gets a merged hooks write to `~/.codex/hooks.json` (ok auto-enables the feature flag and writes trust records — exe migrations no longer break trust; verified working on desktop app 26.707 and CLI 0.147+); qoder gets a merged hooks write to `~/.qoder-cn/settings.json` (ok auto-enables the hooksConfig.enabled switch — hooks are silently not dispatched otherwise; Windows commands go through .cmd wrappers to dodge the cmd /s quote-stripping); qoder-ide gets a merged hooks write to `~/.lingma/settings.json` (Qoder CN IDE Lingma core: Stop is not blockable so enforcement degrades; an IDE restart is required). Use `ok setup --agent <id>` to target one agent only
 2. **Installs the six skills** `openknowledge-init / on / off / propose / capture / wiki` into each agent's skills directory (kimi/pi/opencode/codex share `~/.agents/skills/`; zcode uses `~/.zcode/skills`; claude uses `~/.claude/skills`; qoder uses `~/.qoder-cn/skills`; qoder-ide uses `~/.lingma/skills`)
-3. **Configures embeddings** — prompts for base_url / model / API key (paste directly; press Enter to skip and use keyword-only retrieval), writes the global config and verifies connectivity on the spot
+3. **Configures embeddings** — pick one of three forms: hosted OpenAI-compatible service (base_url / model / API key, key optional), local Ollama (key-free, model list auto-detected), or the built-in on-device model (auto-download, fully offline; press Enter to skip and use keyword-only retrieval), writes the global config and verifies connectivity on the spot
 
 ## Quick start
 
@@ -197,11 +198,28 @@ The capture mode is switched with `ok capture propose|auto`: `propose` means the
 Effective config = built-in defaults ← global `~/.openknowledge/config.toml` ← per-project `~/.openknowledge/projects/<name>/config.toml` (each layer overrides the previous).
 
 ```toml
-# Global config (ok setup can write this interactively)
+# Global config (ok setup can write this interactively; the GUI guide-tab dialog manages multiple profiles)
 [embedding]
-base_url = "https://api.openai.com/v1"   # any OpenAI-compatible service
-api_key = "sk-..."                        # or use api_key_env to point at an environment variable
+active = "default"                 # active profile name; empty = keyword-only retrieval
+
+[[embedding.profiles]]             # form 1: hosted/self-hosted OpenAI-compatible service
+name = "default"
+type = "openai"
+base_url = "https://api.openai.com/v1"
+api_key = "sk-..."                 # or use api_key_env to point at an environment variable; may be empty for key-less local services
 model = "text-embedding-3-small"
+
+# [[embedding.profiles]]           # form 2: local/LAN Ollama (key-free)
+# name = "ollama"
+# type = "ollama"
+# base_url = "http://127.0.0.1:11434"
+# model = "bge-m3"
+
+# [[embedding.profiles]]           # form 3: built-in llama.cpp on-device model (offline, installer builds only)
+# name = "builtin"
+# type = "builtin"
+# model = "qwen3-emb-0.6b-q8"      # one of 4 manifest tiers; download via GUI/CLI, then activate
+# mirror = "hf-mirror"
 
 # Project config: enforcement rule example
 [[enforce]]
@@ -216,7 +234,7 @@ message = "Code was changed this session without a changelog update; please add 
 **What**: hybrid retrieval on SQLite + FTS5 —
 
 - **Keyword channel**: FTS5 full-text index + BM25 scoring (rare terms weigh more, long docs get no advantage), weighted across title/tags/summary/body; Chinese uses bigram tokenization, zero dependencies
-- **Semantic channel**: OpenAI-compatible embeddings + cosine similarity, recalling entries that "ask differently but mean the same"
+- **Semantic channel**: embeddings + cosine similarity, recalling entries that "ask differently but mean the same"; three forms to choose from — hosted OpenAI-compatible / local Ollama / built-in llama.cpp on-device model (works offline, knowledge never leaves the machine; switching models triggers an automatic vector rebuild on `ok index`)
 - The two scores are normalized and blended (α/β tunable), top-2 injected (`top_n` configurable)
 - **Draft entries (from `ok propose`) stay out of both retrieval channels**: excluded from FTS and vectors until approved
 

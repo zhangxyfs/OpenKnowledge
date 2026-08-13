@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-2.13.0-2563eb">
+  <img alt="version" src="https://img.shields.io/badge/version-2.14.0-2563eb">
   <img alt="go" src="https://img.shields.io/badge/go-%3E%3D1.25-00ADD8">
   <img alt="platform" src="https://img.shields.io/badge/platform-windows%20%7C%20linux-0078d6">
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-green"></a>
@@ -39,6 +39,7 @@
 |------|------|
 | **基础注入** | 每个会话首次提问时，自动把项目的强制约定（mandatory 条目）全文 + 知识索引发送给 AI |
 | **检索注入** | 每次提问按关键词 + 向量语义混合检索，把最相关的知识条目注入上下文（如"git 提交规范"） |
+| **语义检索三种形态** | 线上 OpenAI 兼容 / 本机 Ollama / 内置 llama.cpp 本地模型（离线可用，知识不出本机），GUI 弹窗统一管理 |
 | **强制检查** | 跟踪 AI 改过的文件；回合结束时发现改了代码却没写变更日志，就阻断并要求补齐（同会话同规则只阻断一次） |
 | **多 Agent 支持** | Kimi Code、Pi、ZCode、Reasonix、opencode、Claude Code/CodePilot、Codex、Qoder CN 共用同一套知识库（可扩展适配器架构）——kimi 走 TOML hooks 标记块，pi 走 TypeScript 扩展，zcode 走 Claude JSON 协议，reasonix 走 Extension Protocol sidecar，opencode 走 TypeScript 插件 hooks，claude 走 ~/.claude/settings.json 合并写（Claude Code / CodePilot 等兼容宿主共用），codex 走 ~/.codex/hooks.json 合并写（hook 契约兼容 Claude，技能零适配共享 ~/.agents/skills），qoder 走 ~/.qoder-cn/settings.json 合并写（hook 契约兼容 Claude + hooksConfig.enabled 开关，技能零适配进 ~/.qoder-cn/skills；覆盖终端 CLI），qoder-ide 走 ~/.lingma/settings.json 合并写（Qoder CN IDE 灵码内核：注入+触碰追踪可用，Stop 不可阻断致 enforce 降级；技能进 ~/.lingma/skills；改配置需重启 IDE 生效） |
 | **一键引导** | `ok setup` 自动完成 hooks 配置、技能安装与 embedding 配置 |
@@ -93,7 +94,7 @@ go build -o ok ./cmd/ok            # Linux/macOS
 
 1. **写入 hooks 配置**——覆盖全部已检测的 AI 助手：kimi 是 `~/.kimi-code/config.toml` 的 3 条 hook 标记块（幂等，自动备份；已存在的 ok hooks 会被检测并覆盖更新 exe 路径，不重复堆积），pi 是 TypeScript 扩展，zcode 是 `config.json` 合并写，opencode 是 `~/.config/opencode/plugins/` 的 TypeScript 插件，claude 是 `~/.claude/settings.json` 的 hooks 合并写，codex 是 `~/.codex/hooks.json` 的 hooks 合并写（ok 自动开启特性开关并写入信任记录，exe 迁移自愈不破信任；桌面端 26.707 与 CLI 0.147+ 均实证可用），qoder 是 `~/.qoder-cn/settings.json` 的 hooks 合并写（ok 自动开启 hooksConfig.enabled 开关——默认关闭时装好也静默不派发；Windows 命令走 .cmd 包装规避 cmd /s 引号剥离），qoder-ide 是 `~/.lingma/settings.json` 的 hooks 合并写（Qoder CN IDE 灵码内核：Stop 不可阻断致 enforce 降级，改配置需重启 IDE 生效）；`ok setup --agent <id>` 可只装指定 agent
 2. **安装六个技能**——`openknowledge-init / on / off / propose / capture / wiki`，写入各 agent 的技能目录（kimi/pi/opencode/codex 共享 `~/.agents/skills/`，zcode 为 `~/.zcode/skills`，claude 为 `~/.claude/skills`，qoder 为 `~/.qoder-cn/skills`，qoder-ide 为 `~/.lingma/skills`）
-3. **配置 embedding**——交互询问 base_url / model / API key（可直接粘贴；回车跳过则只用关键词检索），写入全局配置并当场验证连通性
+3. **配置 embedding**——三选一：线上 OpenAI 兼容服务（base_url / model / API key，key 可留空）、本机 Ollama（免 key，自动探测模型列表）、内置本地模型（选模型后自动下载，完全离线；回车跳过则只用关键词检索），写入全局配置并当场验证连通性
 
 ## 快速开始
 
@@ -196,11 +197,28 @@ summary: 每次代码修改必须立即记录变更日志
 生效配置 = 内置默认 ← 全局 `~/.openknowledge/config.toml` ← 项目 `~/.openknowledge/projects/<名>/config.toml`（逐层覆盖）。
 
 ```toml
-# 全局配置（ok setup 可交互写入）
+# 全局配置（ok setup 可交互写入；GUI 引导页"配置…"弹窗可管理多套）
 [embedding]
-base_url = "https://api.openai.com/v1"   # 任何 OpenAI 兼容服务
-api_key = "sk-..."                        # 或用 api_key_env 指向环境变量
+active = "默认"                    # 使用中 profile 名；空 = 只用关键词检索
+
+[[embedding.profiles]]             # 形态一：线上/自建 OpenAI 兼容服务
+name = "默认"
+type = "openai"
+base_url = "https://api.openai.com/v1"
+api_key = "sk-..."                 # 或用 api_key_env 指向环境变量；无鉴权本地服务可留空
 model = "text-embedding-3-small"
+
+# [[embedding.profiles]]           # 形态二：本机/局域网 Ollama（免 key）
+# name = "ollama"
+# type = "ollama"
+# base_url = "http://127.0.0.1:11434"
+# model = "bge-m3"
+
+# [[embedding.profiles]]           # 形态三：内置 llama.cpp 本地模型（离线，仅安装版）
+# name = "内置"
+# type = "builtin"
+# model = "qwen3-emb-0.6b-q8"      # 清单内 4 档之一，GUI/CLI 下载后激活
+# mirror = "hf-mirror"
 
 # 项目配置：强制规则示例
 [[enforce]]
@@ -215,7 +233,7 @@ message = "本次会话修改了代码但未更新变更日志，请先按规范
 **用什么**：SQLite + FTS5 的混合检索——
 
 - **关键词通道**：FTS5 全文索引 + BM25 打分（稀有词更值钱、长文不占优），按 标题/标签/摘要/正文 分权重；中文用二元组分词，零依赖
-- **语义通道**：OpenAI 兼容 embedding + 余弦相似度，召回"问法不同但意思相近"的条目
+- **语义通道**：embedding + 余弦相似度，召回"问法不同但意思相近"的条目；三种形态任选——线上 OpenAI 兼容 / 本机 Ollama / 内置 llama.cpp 本地模型（离线可用，知识不出本机；切换模型后 `ok index` 自动清向量重建）
 - 两路分数归一化后加权混合（α/β 可调），取 top-2 注入（`top_n` 可配）
 - **草稿条目（`ok propose` 产生）不进检索通道**：FTS 与向量都排除，批准后自动参与
 

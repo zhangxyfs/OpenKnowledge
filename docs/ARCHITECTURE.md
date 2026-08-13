@@ -225,15 +225,18 @@ func (e Embedding) ResolvedAPIKey() string  // api_key 字段 > api_key_env 环�
 
 纯路径计算层：`KnowledgeDir()/IndexPath()/KbPath()/StateDir()/ConfigPath()`；另有 `TruncateToBudget` 按"字符数(rune) ÷ 2"保守估算 token 并截断注入文本。INDEX.md 的生成已移交给 `index` 包。
 
-### 5.5 embed — 向量客户端（90 行）
+### 5.5 embed / embedx / embedsidecar — 向量客户端与内置推理 sidecar
 
-- `Client` 接口隔离 HTTP 细节，测试用 `httptest` fake server，不碰真实网络
-- `OpenAIClient` 实现 OpenAI 兼容协议：`POST {base_url}/embeddings`，`Authorization: Bearer <key>`，带 context 超时
+- `embed.Client` 接口隔离 HTTP 细节，测试用 `httptest` fake server，不碰真实网络。查询与建索引是**两条路径**：`EmbedQuery`（查询侧前缀）/ `EmbedDocument` + `EmbedDocuments`（文档侧前缀 + 批量，`ok index` 重建按 32 条/批）——指令感知模型只在对应路径加前缀（qwen3 查询侧 Instruct 前缀、nomic `search_query`/`search_document`）；`ModelIdentity()` 返回建索引的模型身份串（写入 kb.db meta 供切换检测，空串=旧式构造不参与判定）
+- `OpenAIClient` 实现 OpenAI 兼容协议：`POST {base_url}/embeddings`，key 空则不带 `Authorization`（适配无鉴权本地服务），带 context 超时——线上服务 / Ollama / 内置 llama-server **三形态共用**同一客户端
+- **内置模型清单**（`manifest.go` 的 `BuiltinModels`，4 档）：repo/文件名/size/sha256/维度/pooling/双路径前缀全部钉死（默认 qwen3-emb-0.6b-q8 639MB 1024 维；bge-m3 Q4_K_M/Q8_0；nomic-embed-text v1.5 768 维），变更新增条目即可；`MirrorBase` 解析镜像源（默认 hf-mirror 国内镜像 / huggingface / 自定义 base）；`Download` 为 `.part` 断点续传（Range）→ 整文件 sha256 校验 → 原子改名，校验不符删 `.part` 防循环续传坏文件
+- `embedx` 是**三形态唯一构造点**（CLI/hook/GUI 共用）：openai 直连；ollama 在 base_url 后补 `/v1`；builtin 经 embedsidecar 状态文件发现端口——未就绪写 want 标记请求 daemon 拉起并**立即返回 nil**（调用方走纯关键词降级，绝不等待冷启动）；`QueryVec` 在客户端身份与索引 meta 不符时拦截语义通道并返回中文提示（展示层级由调用方定：CLI stderr / hook 日志）
+- `embedsidecar` 管理内置推理 sidecar（llama.cpp `llama-server`）：状态文件 `<KB根>/embed-sidecar.json`（pid/port/model_id/last_used；800ms 预算快探 `/health`）、want 标记 `embed-sidecar.want`、日志 `embed-sidecar.log`；`Manager` 仅 daemon 持有，生命周期见 17.4
 - 条目向量不再存 vectors.json，而是存于 kb.db 的 `vectors` 表（float32 小端 blob，见 5.6）；旧版 vectors.json 在首次打开 kb.db 时自动导入并改名为 `.bak`
 
 ### 5.6 index/retrieve — 索引化混合检索（db.go 138 + sync.go 240 + query.go 138 + retrieve.go 44 行）
 
-检索不再逐文件扫描 Markdown，而是查询 SQLite 索引库 `kb.db`（位于各项目 KB 根目录）。同步按 filename+mtime 增量（枚举优先、只解析变化文件）；查询为 `score = α·归一BM25 + β·余弦` 的混合打分。**草稿条目（frontmatter `draft: true`，由 `ok propose` 写入）不进 FTS 与向量，检索与注入一律排除；INDEX.md 中以【草稿】标记，批准（`ok approve` / GUI 采纳）后才参与检索**。**算法实现细节（分词、BM25、归一化、混合、降级矩阵、实测性能）见第 17 章**，配置参数见第 18 章。
+检索不再逐文件扫描 Markdown，而是查询 SQLite 索引库 `kb.db`（位于各项目 KB 根目录；entries/entries_fts/vectors 之外另有 `meta(key,value)` 表记录建向量的模型身份 `embedding_model`/`embedding_dim`，见 17.4）。同步按 filename+mtime 增量（枚举优先、只解析变化文件）；查询为 `score = α·归一BM25 + β·余弦` 的混合打分。**草稿条目（frontmatter `draft: true`，由 `ok propose` 写入）不进 FTS 与向量，检索与注入一律排除；INDEX.md 中以【草稿】标记，批准（`ok approve` / GUI 采纳）后才参与检索**。**算法实现细节（分词、BM25、归一化、混合、降级矩阵、实测性能）见第 17 章**，配置参数见第 18 章。
 
 ### 5.7 state — 会话状态（96 行）
 
@@ -285,7 +288,14 @@ API 一览：
 | POST | `/api/capture` | `{"project","mode"}` 写项目 `[capture]` 小节（等价 `ok capture <mode>`；非法模式 400） |
 | POST | `/api/setup/hooks` | 等价 `ok setup` 的 hooks 步骤；body 可指定 `{"agent":"<id>"}` 只装单个 agent（未知 id 400），缺省为全部已检测 agent；响应 `installed` 列出每个 agent 的写入目标 |
 | POST | `/api/setup/skills` | 安装六个技能（init/on/off/propose/capture/wiki）到已检测 agent 的技能目录并集 |
-| POST | `/api/setup/embedding` | 保存 embedding 配置并当场连通性验证（`{"ok":bool,"error":…}`） |
+| GET | `/api/setup/embedding` | embedding 配置总览：profiles 列表 + active + 各 profile 形态/就绪状态（内置含模型下载进度） |
+| POST | `/api/setup/embedding/profile` | 保存（新增/更新）一个 profile（三形态表单） |
+| DELETE | `/api/setup/embedding/profile` | 删除 profile；删"使用中"的允许，`active` 置空退回纯关键词 |
+| POST | `/api/setup/embedding/active` | 显式"设为使用中"（`{"name"}`；builtin 要求模型已下载） |
+| POST | `/api/setup/embedding/test` | 单 profile 连通性验证（`{"ok":bool,"error":…}`） |
+| POST | `/api/setup/embedding/download` | 下载内置模型（断点续传 + sha256 校验；前端轮询进度） |
+| POST | `/api/setup/embedding/download/cancel` | 取消下载（保留 `.part` 供续传） |
+| GET | `/api/setup/embedding/ollama-models` | 探测 Ollama `/api/tags` 模型列表 |
 | POST | `/api/reasonix/enforce-mode` | `{"mode":"mixed"\|"soft"\|"hard"}` 写 reasonix 强制检查档位（落盘即生效，sidecar 实时读） |
 | POST | `/api/toggle` | `{"on":bool}` 全局开关（等价 `ok on`/`ok off`） |
 | POST | `/api/heartbeat?project=` | 页面心跳 + 返回该项目 kb.db mtime 作为 `version`——前端 5s 轮询，版本变化才重拉条目列表 |
@@ -298,7 +308,7 @@ API 一览：
 | GET | `/api/export?project=<名\|all>` | 知识库导出 zip（`backup.Export`；project 缺省 all，项目不存在 404） |
 | POST | `/api/import` | multipart `file` 上传备份 zip 导入（`backup.Import`，32MB 上限；`ErrBadPackage` → 400，成功返回 `Report{imported, skipped, projects}`） |
 
-前端 `web/`（零依赖原生 HTML/JS/CSS）：「管理」标签页（项目下拉按 `last_update` 降序、条目列表每页 12 条、新建/编辑/删除、检索预览带命中高亮、草稿徽标与「采纳」按钮、分支上下文/⎇born⇢scope 双徽标/分支过滤器/合并谱系行、摘要列两行截断+悬停浮窗显示全文、「刷新」按钮全量拉齐项目与条目并带三态反馈、全局开关；daemon 被替换致 token 过期 401 时自动刷新一次页面取新 token，sessionStorage 标志防循环）+「引导」标签页（hooks/技能/embedding/全局开关状态卡、agents 下拉联动、「经验沉淀」卡片查看/切换 capture 模式与轮次间隔、reasonix 强制检查三档卡、危险区「卸载」卡片）+「其他」标签页（数据导出/导入、更新日志弹窗与常驻入口、使用帮助卡、**「删除项目知识库」危险卡**——弹窗明示影响面 + 默认勾选的删除前 zip 备份 + 「我已了解后果」勾选与输入完整项目名双重解锁、关于卡片）。hooks 未安装时「管理」页隐藏，「引导」为默认页。
+前端 `web/`（零依赖原生 HTML/JS/CSS）：「管理」标签页（项目下拉按 `last_update` 降序、条目列表每页 12 条、新建/编辑/删除、检索预览带命中高亮、草稿徽标与「采纳」按钮、分支上下文/⎇born⇢scope 双徽标/分支过滤器/合并谱系行、摘要列两行截断+悬停浮窗显示全文、「刷新」按钮全量拉齐项目与条目并带三态反馈、全局开关；daemon 被替换致 token 过期 401 时自动刷新一次页面取新 token，sessionStorage 标志防循环）+「引导」标签页（hooks/技能/全局开关状态卡、**embedding 卡片显示使用中服务单行摘要 + "配置…"弹窗（左 profile 列表右三形态表单，内置含下载进度与显式"设为使用中"）**、agents 下拉联动、「经验沉淀」卡片查看/切换 capture 模式与轮次间隔、reasonix 强制检查三档卡、危险区「卸载」卡片）+「其他」标签页（数据导出/导入、更新日志弹窗与常驻入口、使用帮助卡、**「删除项目知识库」危险卡**——弹窗明示影响面 + 默认勾选的删除前 zip 备份 + 「我已了解后果」勾选与输入完整项目名双重解锁、关于卡片）。hooks 未安装时「管理」页隐藏，「引导」为默认页。
 
 ### 5.12 backup — 知识库导出/导入（251 行）
 
@@ -366,8 +376,8 @@ ok setup [--agent <id>]
       kimi：备份 ~/.kimi-code/config.toml → 标记块幂等写入 3 条 hook
       pi：渲染 TS 扩展写入 ~/.pi/agent/extensions/openknowledge.ts（既有非本工具文件先备份）
   → 安装 openknowledge-init/on/off/propose/capture/wiki 六个技能到 ~/.agents/skills/（烧入 exe 路径）
-  → 交互（或 flags）收集 embedding base_url/model/API key
-      → 写全局 ~/.openknowledge/config.toml（0600）→ 立即连通性验证
+  → 交互（或 flags）收集 embedding：三选一（线上 OpenAI 兼容 / Ollama / 内置本地模型，
+      内置含清单选择与镜像下载进度）→ 写全局 ~/.openknowledge/config.toml（0600）→ 立即连通性验证
   → 打印引导
 ```
 
@@ -386,6 +396,7 @@ ok setup [--agent <id>]
 - 安装器写 HKCU Run 登录自启；卸载/ok daemon stop/setupx.Uninstall 均可停 daemon
 - kb.db 所有写入收敛到 daemon 单进程；index.Open 另加 busy_timeout(3000) 兜底短暂并发
 - 系统托盘（internal/tray）内嵌 daemon 进程：右下角图标，单击弹菜单（版本号 + 退出）、双击打开/聚焦唯一 GUI 窗口；菜单"退出"与 `ok daemon stop` 同走 /api/shutdown 链路
+- embedding sidecar janitor（10s 周期调和）：active=内置且模型就绪 → 拉起/保持 llama-server；空闲 10 分钟回收、崩溃有界重启 ×3、切换/停用即回收、daemon 退出兜底回收（实现见 5.5/17.4）
 
 ### 6.6 wiki（项目 wiki 的生成驱动与落后提醒）
 
@@ -469,13 +480,17 @@ hook prompt（基础注入之后）
 ~/.openknowledge/
 ├── ok.log                  # hook 错误日志（fail-open 的唯一痕迹）
 ├── registry.toml           # 项目注册表：[[project]] name + paths
-├── config.toml             # 全局配置：embedding/inject/retrieve 默认值
+├── config.toml             # 全局配置：[[embedding.profiles]]/inject/retrieve 默认值
 ├── hooks-disabled          # 全局开关标志文件（存在即全部静默）
+├── models/                 # 内置 embedding 模型（GGUF，约 139MB–639MB/档，sha256 钉死校验）
+├── embed-sidecar.json      # 内置 sidecar 状态（pid/port/model_id/last_used；hook/cli 只读发现）
+├── embed-sidecar.want      # want 拉起标记（hook/cli 写，daemon 调和时见到拉起后清除）
+├── embed-sidecar.log       # llama-server stdout/stderr
 └── projects/<项目名>/
     ├── config.toml         # 项目配置（覆盖全局；[[enforce]] 仅这里有）
     ├── knowledge/*.md      # 知识条目（一文件一条，frontmatter + 正文）
     ├── INDEX.md            # 机器生成的轻量索引（标题+类型+tags+摘要，由 index.Sync 重建）
-    ├── kb.db               # SQLite 索引库：entries（原文）+ entries_fts（FTS5）+ vectors（向量 blob）
+    ├── kb.db               # SQLite 索引库：entries（原文）+ entries_fts（FTS5）+ vectors（向量 blob）+ meta（embedding_model/embedding_dim 身份）
     └── state/
         ├── session-*.json  # 会话状态（Touched/BlockedRules/BaseInjected/WikiNudged，超 7 天 GC）
         └── wiki.json       # wiki 游标（base_branch + cursors 按分支记录 last_commit/generated_at/entry_count + merges 合并谱系数组，旧单游标格式读取时惰性迁移；固定文件名，不受 session 7 天 GC 影响）
@@ -557,11 +572,18 @@ reasonix 适配器（`reasonix.go`）：不写 settings.json hook（其 UserProm
 
 opencode 适配器（`opencode.go` + 内嵌模板 `opencode_plugin.ts`）：opencode 无 hooks 配置字段，其 hooks 形态是"插件文件返回 hooks 对象"——对每个配置目录 glob `{plugin,plugins}/*.{ts,js}` 单文件直接 import（Bun 原生跑 TS，免 package.json）。安装/幂等/自愈机制与 pi 同款（头标记 + 模板 sha256 前 12 位指纹 + 外部文件先备份 `.bak-openknowledge`；曾安装且过期才重写，显式移除不复活）。插件三钩子：`chat.message` ≈ UserPromptSubmit（`ok hook prompt` 纯文本 stdout 以 `synthetic:true` text part push 进 `output.parts` 注入——parts 按引用传入且 hook 后继续使用并持久化；自建 part 的 id 必须 `prt` 前缀，PartID schema 强制，否则 prompt_async 校验 Die 卡死会话）；`tool.execute.after` ≈ PostToolUse（`write`/`edit` 取 `args.filePath`，`apply_patch` 从 `patchText` 解析 `*** Add/Update/Delete File:` 行——gpt 系新模型 apply_patch 与 write/edit 互斥，必须覆盖；相对路径按 directory 绝对化后逐路径调 `ok hook post-tool`）；`event: session.idle` ≈ Stop（exit 2 + stderr 时经 SDK `client.session.promptAsync` 把 reason 作为用户消息补发回该会话，驱动当场自省——idle 无法拒绝停止，与 pi 的 `sendMessage(triggerTurn)` 同构；防重靠 ok 侧 `CheckStop` 的 LastExtractReminder/MarkBlocked 语义，插件侧与 pi 一致不计数）。子进程走 `node:child_process` execFile（内建 timeout 10s/5s/5s + windowsHide；Node/Bun 双运行时兼容——桌面端服务器跑在 Electron/Node 里，`"bun"` 模块导入会让插件整个加载失败，v2.11.0 修复实报），全程 fail-open。技能共享 SkillsHome（opencode 原生扫描 `~/.agents/skills`，机制零改动）。
 
-### 9.3 OpenAI 兼容 embedding API
+### 9.3 embedding 服务三形态（OpenAI 兼容协议统一）
 
-- 端点：`POST {base_url}/embeddings`，请求 `{model, input}`，响应 `{data:[{embedding}]}`
-- key 解析：`api_key` 字段（全局/项目）→ `api_key_env` 环境变量 → 无（纯关键词）
-- 超时：客户端 `timeout_sec`（默认 5s）< hook 配置的 10s 上限，保证任何情况下 hook 不会拖累会话
+配置为多 profile（`[[embedding.profiles]]` + `active` 指定使用中；≤v2.13 的平铺字段读取时自动迁移为"默认" openai profile），三种形态统一走 OpenAI 兼容协议：
+
+| 形态 | 端点 | 说明 |
+|------|------|------|
+| openai（自定义） | 用户给的 `base_url` | 线上或自建 OpenAI 兼容服务；`api_key` 可留空适配无鉴权本地服务；key 解析：profile `api_key` 字段 → `api_key_env` 环境变量 → 无 |
+| ollama | `base_url` + `/v1`（构造点自动补） | 本机/局域网 Ollama，免 key；GUI/CLI 经 `/api/tags` 自动探测模型列表 |
+| builtin（内置） | sidecar 状态文件给出的 `http://127.0.0.1:<port>/v1` | ok 托管 llama.cpp `llama-server`，**完全离线、知识不出本机**；仅安装版可用（runtime 随安装包分发） |
+
+- 协议：`POST {base_url}/embeddings`，请求 `{model, input:[...]}`，响应 `{data:[{embedding,index}]}`（按 index 重排）
+- 超时：客户端 `timeout_sec`（默认 5s）< hook 配置的 10s 上限，保证任何情况下 hook 不会拖累会话；builtin 未就绪**立即**降级（写 want 标记），不占超时预算
 
 ---
 
@@ -627,9 +649,13 @@ opencode 适配器（`opencode.go` + 内嵌模板 `opencode_plugin.ts`）：open
 go build -o ok.exe ./cmd/ok   # Windows
 go build -o ok ./cmd/ok       # Linux/macOS
 bash scripts/build-dist.sh    # 发布构建：dist/ok.exe（-ldflags "-s -w -H windowsgui" + 版本注入）+ dist/web/
+python scripts/build.py       # 一键构建：dist/（ok.exe + web/ + changelogs/ + runtime/）+ Inno 安装包
+bash scripts/build-linux.sh   # Linux 发布：tar + deb（含 runtime/）
 ```
 
 无构建标签、无代码生成、无资源嵌入；`go.mod` 声明 `go 1.25.0`。GUI 的 web 资源不内嵌，由 `dist/web/` 随二进制分发。应用版本号由 build-dist.sh 用 sed 从 `installer/openknowledge.iss` 的 `#define AppVersion` 提取，经 `-ldflags -X openknowledge/internal/version.Version=<版本>` 注入 `internal/version.Version`（事实源只有 .iss 一处；裸 `go build` 为 `dev`）。
+
+**runtime 随包分发（内置 embedding 推理运行时）**：`build.py`/`build-linux.sh` 从 llama.cpp release 下载预编译 `llama-server`（版本钉死 b10405 CPU 版，win `bin-win-cpu-x64` zip / linux `bin-ubuntu-x64` tar；`LLAMA_CPP_BASE_URL` 可换源）到 `dist/runtime/`，iss 装到 `{app}\runtime`、linux 包装进 tar/deb 同目录——安装包体积因此约 50MB 级。运行时定位 `<exe 所在目录>/runtime/llama-server`，缺失则内置形态不可用（裸 exe 便携形态）并在 GUI/CLI/doctor 明确提示。**模型不随包分发**：首次启用内置形态时按清单从镜像源下载（默认 hf-mirror，约 139MB–639MB/档，断点续传 + sha256 校验）到 `<KB根>/models/`。
 
 ### 12.2 常用开发命令
 
@@ -711,9 +737,10 @@ go build ./...         # 编译检查
 ### 15.3 语义检索不生效
 
 检查：
-- 全局 `~/.openknowledge/config.toml` 的 `[embedding]` 是否有 `api_key`
+- 全局 `~/.openknowledge/config.toml` 的 `[embedding]` 是否配置了 `active` 指向的 profile（旧平铺字段会自动迁移）
 - 项目 config.toml 是否覆盖了全局（项目级配置优先级最高，旧模板可能有写死的 embedding 段）
-- 切换过 embedding 模型后必须删除 kb.db 再运行 `ok index` 重建向量（增量同步不会重算未变化条目；维度不匹配时余弦静默为 0）
+- 切换 embedding 模型/服务后：身份不符时语义通道显式跳过并在 search/doctor 提示——`ok index` 检测切换自动清向量全量重建（无需再手删 kb.db）
+- 内置形态：`ok doctor` 看 sidecar 状态（daemon 是否在跑、模型是否已下载、runtime 是否随安装包存在）
 
 ### 15.4 强制检查不触发
 
@@ -738,11 +765,9 @@ go build ./...         # 编译检查
 2. **防御性钳制**：`config.Load` 对 `max_tokens < 0`、`top_n < 0` 做钳制（当前手改配置为负数时 `TruncateToBudget` 会 panic——hook 路径虽有 recover 兜底，CLI 路径没有）。
 3. **写盘原子化**：INDEX.md / state / registry 改为临时文件 + rename，避免崩溃半截文件。
 4. **ok.log 治理**：当前只增不减且会写入 embedding 错误响应体（≤512B），建议只记状态码并加大小滚动。
-5. **embedding 模型漂移检测**：`ok doctor` 对比 kb.db 中向量维度与当前模型维度，不一致时提示重建索引。
-6. **ok index 强制重算开关**：当前 Sync 按 mtime 增量，换模型后需删 kb.db 才能全量重算向量；可加 `--force` 标志。
-7. **Doctor 校验 enforce glob**：用 doublestar 预编译用户配置的 glob，格式错误提前暴露（当前 malformed glob 静默不生效）。
-8. **CRLF 归一**：仓库在 Windows 下全量 CRLF，`gofmt -l` 全报未格式化；建议加 `.gitattributes`（`* text=auto eol=lf`）统一为 LF。
-9. **v2 候选方向**（当前为非目标，勿提前实现）：hooks 自动沉淀经验、其他 AI 工具适配、本地 embedding、知识库远程同步。
+5. **Doctor 校验 enforce glob**：用 doublestar 预编译用户配置的 glob，格式错误提前暴露（当前 malformed glob 静默不生效）。
+6. **CRLF 归一**：仓库在 Windows 下全量 CRLF，`gofmt -l` 全报未格式化；建议加 `.gitattributes`（`* text=auto eol=lf`）统一为 LF。
+7. **v2 候选方向**（当前为非目标，勿提前实现）：hooks 自动沉淀经验、其他 AI 工具适配、知识库远程同步。（v2.14.0 已实现原候选"本地 embedding"：内置 llama.cpp sidecar 形态，见 5.5/17.4；原"模型漂移检测"与"ok index 强制重算"也由 meta 身份管理落地——身份不符显式跳过，`ok index` 自动清向量全量重建。）
 
 ---
 
@@ -759,7 +784,8 @@ go build ./...         # 编译检查
             ▼
         kb.db ──┬── entries（原文 + mtime + mandatory）
                 ├── entries_fts（FTS5，切分后文本）
-                └── vectors（float32 blob）
+                ├── vectors（float32 blob）
+                └── meta（embedding_model/embedding_dim 模型身份）
 [查询侧]  用户提问
             │  Terms 分词 ──► FTS5 BM25 ─┐
             │  embedding  ──► 余弦相似度 ─┤ score = α·kw + β·cos
@@ -793,6 +819,7 @@ CREATE TABLE entries(filename PK, title, type, tags, summary, body,
 CREATE VIRTUAL TABLE entries_fts USING fts5(
     title, tags, summary, body, filename UNINDEXED); -- 切分后文本，独立维护
 CREATE TABLE vectors(filename PK, dim, blob);        -- float32 小端
+CREATE TABLE meta(key PK, value);                    -- embedding_model/embedding_dim 模型身份
 ```
 
 FTS 表为**独立内容表**（非 external-content + 触发器），由 Sync 显式
@@ -819,13 +846,12 @@ WHERE entries_fts MATCH ? AND e.mandatory = 0
 
 ### 17.4 语义通道：向量余弦
 
-- **写入**：条目向量 = `Embed(标题+摘要+正文)`（OpenAI 兼容接口），float32
-  小端 blob 存 `vectors` 表；mtime 未变的条目不重算（增量），缺向量的
-  未变化条目在有 key 时补齐（backfill）。
-- **查询**：`queryVec` 与全量向量逐条算余弦（万条约 60MB 内存、毫秒级），
-  维度不匹配返回 0（换模型未重建时静默降级而不是崩）。
-- **成本边界**：hook 路径每次最多为**提问**算 1 次 embedding（5s 超时），
-  条目向量只在同步时算。
+- **三形态接入**（配置 `[[embedding.profiles]]` + `active`，`embedx` 唯一构造点，形态细节见 9.3）：openai 直连、ollama 补 `/v1`、builtin 经 sidecar 状态文件发现端口；三形态共用 `OpenAIClient`，仅以 `QueryPrefix`/`DocPrefix` 区分双路径前缀。
+- **写入**：条目向量 = `EmbedDocument(标题+摘要+正文)`，float32 小端 blob 存 `vectors` 表；mtime 未变的条目不重算（增量），缺向量的未变化条目在有 client 时补齐（backfill）；`ok index` 全量重建按 **32 条/批**调 `EmbedDocuments`。
+- **查询**：`EmbedQuery(提问)` 与全量向量逐条算余弦（万条约 60MB 内存、毫秒级），维度不匹配返回 0。
+- **模型身份管理（kb.db meta）**：client 的 `ModelIdentity()`（如 `builtin:qwen3-emb-0.6b-q8`、`ollama:bge-m3@http://…`）与维度在确有向量写入后落 `meta(embedding_model/embedding_dim)`。**查询侧**身份/维度不符 → `embedx.QueryVec` 拦截：语义通道显式跳过并返回中文提示（"运行 ok index 重建后恢复"，替代以往维度不等静默归零）；**同步侧**身份不符 → `Sync` 阻断全部向量写（INDEX/FTS 照常），杜绝新旧模型向量混合；`ok index` 检测到切换先 `ClearVectors` 再全量重建。
+- **内置形态 sidecar 生命周期**（daemon 托管，`embedsidecar.Manager`）：daemon 内 10s 周期 `Reconcile`——active=内置且模型文件就绪时才允许在线；拉起条件 = 激活刚变化或 want 标记 pending（hook/cli 发现未就绪时写 `embed-sidecar.want`，自己绝不等待冷启动）；`Ensure` 幂等拉起（随机回环端口 + `-m <gguf> --embeddings --pooling <清单值>`，90s 就绪等待，状态写 `embed-sidecar.json`）；**空闲 10 分钟回收**（按 `last_used`，每次成功调用经 `Touch` 刷新）；**崩溃有界重启 ×3**（连续失败进入冷却，直到配置变化重试）；模型切换/停用内置 → 立即回收；**daemon 退出时回收 sidecar**（跨进程残留按状态文件 PID 杀）。
+- **成本边界**：hook 路径每次最多为**提问**算 1 次 embedding（5s 超时），条目向量只在同步时算。
 
 ### 17.5 混合打分与排序
 
@@ -871,13 +897,20 @@ os.ReadDir(knowledge/)                # 只拿文件名，不读内容
 
 | 场景 | 行为 |
 |------|------|
-| 未配置 embedding key | 纯关键词检索（`queryVec=nil`），一切正常 |
-| embedding API 超时/挂掉 | 同步先失败 → `Sync(nil)` 重试 → 关键词检索；注入不缺席 |
+| 未配置 embedding（active 空） | 纯关键词检索（`queryVec=nil`），一切正常 |
+| openai/ollama 连接失败/超时 | 同步先失败 → `Sync(nil)` 重试 → 关键词检索；注入不缺席 |
+| builtin 模型未下载 | profile 可保存不可激活；GUI/CLI 明确提示去下载 |
+| sidecar 未运行/冷启动中 | hook/cli 立即降级纯 BM25 + 写 want 标记，daemon 10s 周期见到拉起；**绝不等待冷启动** |
+| sidecar 崩溃 | daemon 有界重启 ×3（连续失败冷却至配置变化），期间降级；daemon 退出时回收 sidecar |
+| sidecar 空闲 10 分钟 | daemon 回收（杀进程删状态文件），下次需要时经 want 再拉起 |
+| 模型下载失败/校验不符 | 保留 `.part` 可续传重试；sha256 不符删 `.part`；不激活 |
+| 模型身份与索引不符 | 语义通道显式跳过 + 提示 `ok index`（替代以往维度不等静默归零）；Sync 阻断向量写杜绝混合；`ok index` 自动清向量全量重建（32/批） |
+| 删除"使用中"的 profile | 允许删除，`active` 置空退回纯关键词，GUI/CLI 明确提示 |
 | 条目缺向量（未 index） | 该条目语义分为 0，仍可被关键词命中 |
-| 切换 embedding 模型未重建 | 维度不匹配余弦为 0；需删 kb.db 后 `ok index` |
 | 单个条目文件损坏 | 跳过并保留其旧索引（`CorruptEntriesError` 警告），其余正常 |
 | 草稿条目（draft: true） | 不进 FTS 与向量：同步只写入 INDEX.md（标【草稿】），检索与注入排除；批准后正常参与 |
 | kb.db 损坏/丢失 | hook 记 ok.log 后 exit 0（fail-open）；`ok index` 可重建 |
+| hook 超时预算 | embedding `timeout_sec=5s` 不变，绝不等待 sidecar 拉起 |
 
 ### 17.8 实测性能（本机，1 万条目）
 
@@ -910,11 +943,10 @@ os.ReadDir(knowledge/)                # 只拿文件名，不读内容
 
 | 参数 | 默认 | 作用与调优 |
 |------|------|-----------|
-| `embedding.base_url` | `https://api.openai.com/v1` | 任何 OpenAI 兼容端点（OpenAI/硅基流动/Ollama 等） |
-| `embedding.api_key` | 空 | 直接存 key（0600）；与 `api_key_env` 二选一，字段优先 |
-| `embedding.api_key_env` | 空 | 或指向环境变量名（如 `OPENAI_API_KEY`），不落明文 |
-| `embedding.model` | `text-embedding-3-small` | 换模型后必须删 kb.db 再 `ok index` |
-| `embedding.timeout_sec` | `5` | 必须小于 hook 配置的 10s，保证 prompt hook 不超时 |
+| `embedding.active` | 空 | 使用中 profile 名；空 = 未配置（纯关键词检索） |
+| `[[embedding.profiles]]` | 无 | 可保存多套服务配置：`name`/`type`（`openai` 线上兼容 · `ollama` 本机/局域网免 key · `builtin` 内置 llama.cpp 离线）+ `base_url`/`model`/`api_key`（0600；与 `api_key_env` 二选一，字段优先）/`api_key_env`/`mirror`（builtin 下载源，默认 hf-mirror）。≤v2.13 的平铺 `base_url`/`api_key`/`api_key_env`/`model` 读取时自动迁移为"默认" openai profile |
+| `embedding.timeout_sec` | `5` | 必须小于 hook 配置的 10s，保证 prompt hook 不超时；builtin 未就绪立即降级不占预算 |
+| ~~换模型重建~~ | — | 不再需要手删 kb.db：身份不符自动跳过语义通道，`ok index` 检测切换自动清向量全量重建 |
 | `inject.max_tokens` | `1500` | 单次注入预算（字符数÷2 估算）；mandatory 多/条目长则调大 |
 | `retrieve.alpha` | `1.0` | 关键词分权重。术语精确的场景（错误码、命令名）可调大 |
 | `retrieve.beta` | `1.0` | 语义分权重。问法多变的场景可调大（前提是 embedding 质量好） |
