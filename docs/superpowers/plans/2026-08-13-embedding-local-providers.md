@@ -3702,10 +3702,14 @@ b) 文件末尾追加弹窗模块（沿用 `$`/`api` helper 与既有代码风�
     $("emb-modal").classList.add("hidden");
     if (embState.pollTimer) { clearTimeout(embState.pollTimer); embState.pollTimer = null; }
   }
-  function embRefresh(keepSel) {
+  function embRefresh(keepSel, selectName) { // selectName：保存/激活后按名重定位（评审修复）
     api("/api/setup/embedding").then(function (d) {
       embState.data = d;
-      if (!keepSel) embState.sel = d.active ? d.profiles.findIndex(function (p) { return p.name === d.active; }) : -1;
+      if (selectName != null) {
+        embState.sel = d.profiles.findIndex(function (p) { return p.name === selectName; });
+      } else if (!keepSel) {
+        embState.sel = d.active ? d.profiles.findIndex(function (p) { return p.name === d.active; }) : -1;
+      }
       if (embState.sel < 0 && d.profiles.length > 0) embState.sel = 0;
       embRenderList();
       embRenderForm();
@@ -3877,7 +3881,7 @@ b) 文件末尾追加弹窗模块（沿用 `$`/`api` helper 与既有代码风�
     if (!body.name) { embMsg("名称不能为空", "err"); return; }
     api("/api/setup/embedding/profile", { method: "POST", body: body }).then(function () {
       embMsg("已保存", "ok");
-      embRefresh(true);
+      embRefresh(true, body.name);
       refreshStatus();
     }).catch(function (e) { embMsg(e.message || String(e), "err"); });
   };
@@ -3888,7 +3892,7 @@ b) 文件末尾追加弹窗模块（沿用 `$`/`api` helper 与既有代码风�
       return api("/api/setup/embedding/active", { method: "POST", body: { name: body.name } });
     }).then(function () {
       embMsg("已设为使用中", "ok");
-      embRefresh(true);
+      embRefresh(true, body.name);
       refreshStatus();
     }).catch(function (e) { embMsg(e.message || String(e), "err"); });
   };
