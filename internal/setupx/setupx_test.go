@@ -15,6 +15,8 @@ func TestInstallSkills(t *testing.T) {
 	t.Setenv("OK_CLAUDE_HOME", filepath.Join(t.TempDir(), "nonexistent-claude"))
 	t.Setenv("OK_CODEPILOT_HOME", filepath.Join(t.TempDir(), "nonexistent-codepilot"))
 	t.Setenv("OK_CODEX_HOME", filepath.Join(t.TempDir(), "nonexistent-codex"))
+	t.Setenv("OK_QODER_HOME", filepath.Join(t.TempDir(), "nonexistent-qoder"))
+	t.Setenv("OK_QODER_IDE_HOME", filepath.Join(t.TempDir(), "nonexistent-qoder-ide"))
 	t.Setenv("OK_REASONIX_HOME", filepath.Join(t.TempDir(), "nonexistent-reasonix"))
 	if err := InstallSkills(`D:\bin\ok.exe`); err != nil {
 		t.Fatal(err)
@@ -24,9 +26,9 @@ func TestInstallSkills(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
-		if !strings.Contains(string(data), "D:/bin/ok.exe") {
-			t.Fatalf("%s missing baked exe path: %q", name, data)
-		}
+	if !strings.Contains(string(data), filepath.ToSlash(`D:\bin\ok.exe`)) {
+		t.Fatalf("%s missing baked exe path: %q", name, data)
+	}
 	}
 }
 
@@ -38,6 +40,8 @@ func TestInstallWikiSkillContent(t *testing.T) {
 	t.Setenv("OK_CLAUDE_HOME", filepath.Join(t.TempDir(), "nonexistent-claude"))
 	t.Setenv("OK_CODEPILOT_HOME", filepath.Join(t.TempDir(), "nonexistent-codepilot"))
 	t.Setenv("OK_CODEX_HOME", filepath.Join(t.TempDir(), "nonexistent-codex"))
+	t.Setenv("OK_QODER_HOME", filepath.Join(t.TempDir(), "nonexistent-qoder"))
+	t.Setenv("OK_QODER_IDE_HOME", filepath.Join(t.TempDir(), "nonexistent-qoder-ide"))
 	t.Setenv("OK_REASONIX_HOME", filepath.Join(t.TempDir(), "nonexistent-reasonix"))
 	if err := InstallSkills(`D:\bin\ok.exe`); err != nil {
 		t.Fatal(err)
@@ -47,7 +51,7 @@ func TestInstallWikiSkillContent(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := string(data)
-	for _, want := range []string{"name: openknowledge-wiki", "wiki status", "wiki mark", "D:/bin/ok.exe", "--type reference", "wiki"} {
+	for _, want := range []string{"name: openknowledge-wiki", "wiki status", "wiki mark", filepath.ToSlash(`D:\bin\ok.exe`), "--type reference", "wiki"} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("skill missing %q", want)
 		}

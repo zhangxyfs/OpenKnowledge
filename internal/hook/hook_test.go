@@ -67,6 +67,18 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	os.Setenv("OK_CODEX_HOME", codexDir)
+	qoderDir, err := os.MkdirTemp("", "hook-test-qoder-home")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	os.Setenv("OK_QODER_HOME", qoderDir)
+	qoderIdeDir, err := os.MkdirTemp("", "hook-test-qoder-ide-home")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	os.Setenv("OK_QODER_IDE_HOME", qoderIdeDir)
 	os.Exit(m.Run())
 }
 

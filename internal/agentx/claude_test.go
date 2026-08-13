@@ -81,11 +81,12 @@ func TestClaudeInstallHooks(t *testing.T) {
 	if len(pre) != 1 {
 		t.Error("第三方 PreToolUse 组被删")
 	}
-	// 三事件各多出一个 ok 组
+	// 三事件各多出一个 ok 组（命令形态经 claudeCommand 生成——ToSlash 随平台分叉，
+	// 测试期望与生产形态一致，不写死 D:/ 或 D:\ 形态）
 	wantCmd := map[string]string{
-		"UserPromptSubmit": `"D:/develop/OpenKnowledge/dist/ok.exe" hook prompt claude`,
-		"PostToolUse":      `"D:/develop/OpenKnowledge/dist/ok.exe" hook post-tool claude`,
-		"Stop":             `"D:/develop/OpenKnowledge/dist/ok.exe" hook stop claude`,
+		"UserPromptSubmit": claudeCommand(claudeTestExe(), "prompt"),
+		"PostToolUse":      claudeCommand(claudeTestExe(), "post-tool"),
+		"Stop":             claudeCommand(claudeTestExe(), "stop"),
 	}
 	wantMatcher := map[string]string{"UserPromptSubmit": "*", "PostToolUse": "Write|Edit", "Stop": "*"}
 	wantTimeout := float64(HookTimeoutSec())

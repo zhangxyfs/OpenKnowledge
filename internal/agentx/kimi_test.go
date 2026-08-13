@@ -80,7 +80,7 @@ timeout = 3
 	if c := strings.Count(got, "[[hooks]]"); c != 4 {
 		t.Fatalf("expected 3 new + 1 foreign hook tables, got %d: %q", c, got)
 	}
-	if !strings.Contains(got, "D:/new/ok.exe hook prompt") {
+	if !strings.Contains(got, filepath.ToSlash(`D:\new\ok.exe`)+" hook prompt") {
 		t.Fatalf("new exe path should overwrite the old one: %q", got)
 	}
 }

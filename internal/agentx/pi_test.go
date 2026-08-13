@@ -28,7 +28,7 @@ func TestPiAgentInstallDetectRemove(t *testing.T) {
 		t.Fatalf("extension not written: %v", err)
 	}
 	content := string(data)
-	if !strings.Contains(content, "// fingerprint: ") || !strings.Contains(content, "D:/x/ok.exe") {
+	if !strings.Contains(content, "// fingerprint: ") || !strings.Contains(content, filepath.ToSlash(`D:\x\ok.exe`)) {
 		t.Fatalf("bad extension content: %.200s", content)
 	}
 	if strings.Contains(content, "{{EXE}}") {
@@ -91,7 +91,7 @@ func TestPiAgentEnsureHooksStaleRewrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(a.HooksTarget())
-	if !strings.Contains(string(data), "D:/new/ok.exe") {
+	if !strings.Contains(string(data), filepath.ToSlash(`D:\new\ok.exe`)) {
 		t.Fatal("EnsureHooks should rewrite stale extension with new exe path")
 	}
 	// 文件不存在时 EnsureHooks 为 no-op（pi 不会触发 hook）

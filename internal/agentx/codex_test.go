@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -40,18 +41,20 @@ func TestCodexHomeOfficialEnv(t *testing.T) {
 }
 
 func TestIsOKCodexHook(t *testing.T) {
-	// Windows 形态（测试在 Windows 跑）：包装文件裸路径，认 / 与 \ 分隔、大小写不敏感。
+	// Windows 形态（包装文件裸路径，认 / 与 \ 分隔、大小写不敏感）仅在 Windows 期望命中；
+	// 其他平台 isOKCodexHook 只认 quoted 后缀，.cmd 案例期望 false。
+	isWin := runtime.GOOS == "windows"
 	cases := []struct {
 		name string
 		hook map[string]any
 		want bool
 	}{
-		{"prompt 反斜杠", map[string]any{"type": "command", "command": `C:\Users\X\.codex\ok-hook-prompt.cmd`}, true},
-		{"post-tool 反斜杠", map[string]any{"type": "command", "command": `C:\Users\X\.codex\ok-hook-post-tool.cmd`}, true},
-		{"stop 反斜杠", map[string]any{"type": "command", "command": `C:\Users\X\.codex\ok-hook-stop.cmd`}, true},
-		{"正斜杠分隔", map[string]any{"type": "command", "command": `C:/Users/X/.codex/ok-hook-prompt.cmd`}, true},
-		{"大小写变体命中", map[string]any{"type": "command", "command": `C:\USERS\X\.CODEX\OK-HOOK-PROMPT.CMD`}, true},
-		{"尾部空白容忍", map[string]any{"type": "command", "command": `C:\x\ok-hook-stop.cmd  `}, true},
+		{"prompt 反斜杠", map[string]any{"type": "command", "command": `C:\Users\X\.codex\ok-hook-prompt.cmd`}, isWin},
+		{"post-tool 反斜杠", map[string]any{"type": "command", "command": `C:\Users\X\.codex\ok-hook-post-tool.cmd`}, isWin},
+		{"stop 反斜杠", map[string]any{"type": "command", "command": `C:\Users\X\.codex\ok-hook-stop.cmd`}, isWin},
+		{"正斜杠分隔", map[string]any{"type": "command", "command": `C:/Users/X/.codex/ok-hook-prompt.cmd`}, isWin},
+		{"大小写变体命中", map[string]any{"type": "command", "command": `C:\USERS\X\.CODEX\OK-HOOK-PROMPT.CMD`}, isWin},
+		{"尾部空白容忍", map[string]any{"type": "command", "command": `C:\x\ok-hook-stop.cmd  `}, isWin},
 		{"非 command 类型", map[string]any{"type": "process", "command": `C:\x\ok-hook-prompt.cmd`}, false},
 		{"第三方命令", map[string]any{"type": "command", "command": "echo hi"}, false},
 		{"相似文件名 prompter 不误判", map[string]any{"type": "command", "command": `C:\x\ok-hook-prompter.cmd`}, false},
@@ -143,11 +146,21 @@ func TestCodexInstallHooks(t *testing.T) {
 	if len(pre) != 1 {
 		t.Error("第三方 PreToolUse 组被删")
 	}
-	// Windows 期望（测试在 Windows 跑）：command = 包装文件裸路径（无引号、反斜杠形态）
-	wantCmd := map[string]string{
-		"UserPromptSubmit": filepath.Join(home, "ok-hook-prompt.cmd"),
-		"PostToolUse":      filepath.Join(home, "ok-hook-post-tool.cmd"),
-		"Stop":             filepath.Join(home, "ok-hook-stop.cmd"),
+	// 期望命令形态随平台分叉：Windows = 包装文件裸路径（无引号、反斜杠形态）；
+	// 其他平台 = quoted shell 串（经 codexCommand 生成，与生产形态一致）。
+	var wantCmd map[string]string
+	if runtime.GOOS == "windows" {
+		wantCmd = map[string]string{
+			"UserPromptSubmit": filepath.Join(home, "ok-hook-prompt.cmd"),
+			"PostToolUse":      filepath.Join(home, "ok-hook-post-tool.cmd"),
+			"Stop":             filepath.Join(home, "ok-hook-stop.cmd"),
+		}
+	} else {
+		wantCmd = map[string]string{
+			"UserPromptSubmit": codexCommand(codexTestExe(), "prompt"),
+			"PostToolUse":      codexCommand(codexTestExe(), "post-tool"),
+			"Stop":             codexCommand(codexTestExe(), "stop"),
+		}
 	}
 	wantMatcher := map[string]string{"UserPromptSubmit": "*", "PostToolUse": "apply_patch", "Stop": "*"}
 	wantTimeout := float64(HookTimeoutSec())
@@ -173,8 +186,10 @@ func TestCodexInstallHooks(t *testing.T) {
 			t.Errorf("%s: 未找到期望的 ok hook 组", ev)
 		}
 	}
-	// 包装文件：3 个，内容为 @"<exe>" hook <okHook> claude（CRLF 结尾）
-	codexWantWrappers(t, home, codexTestExe())
+	// 包装文件：3 个，内容为 @"<exe>" hook <okHook> claude（CRLF 结尾）——仅 Windows
+	if runtime.GOOS == "windows" {
+		codexWantWrappers(t, home, codexTestExe())
+	}
 	if _, err := os.Stat(hp + ".bak-openknowledge"); err != nil {
 		t.Error("未生成 .bak-openknowledge 备份")
 	}
@@ -233,10 +248,19 @@ func TestCodexInstallStripsLegacyForm(t *testing.T) {
 		t.Fatalf("写回后 JSON 非法: %v", err)
 	}
 	events, _ := cfg["hooks"].(map[string]any)
-	wantCmd := map[string]string{
-		"UserPromptSubmit": filepath.Join(home, "ok-hook-prompt.cmd"),
-		"PostToolUse":      filepath.Join(home, "ok-hook-post-tool.cmd"),
-		"Stop":             filepath.Join(home, "ok-hook-stop.cmd"),
+	var wantCmd map[string]string
+	if runtime.GOOS == "windows" {
+		wantCmd = map[string]string{
+			"UserPromptSubmit": filepath.Join(home, "ok-hook-prompt.cmd"),
+			"PostToolUse":      filepath.Join(home, "ok-hook-post-tool.cmd"),
+			"Stop":             filepath.Join(home, "ok-hook-stop.cmd"),
+		}
+	} else {
+		wantCmd = map[string]string{
+			"UserPromptSubmit": codexCommand(codexTestExe(), "prompt"),
+			"PostToolUse":      codexCommand(codexTestExe(), "post-tool"),
+			"Stop":             codexCommand(codexTestExe(), "stop"),
+		}
 	}
 	for ev, cmd := range wantCmd {
 		groups, _ := events[ev].([]any)
@@ -250,14 +274,15 @@ func TestCodexInstallStripsLegacyForm(t *testing.T) {
 		}
 		hm, _ := hooks[0].(map[string]any)
 		if c, _ := hm["command"].(string); c != cmd {
-			t.Errorf("%s: command = %q, want %q（.cmd 包装路径）", ev, c, cmd)
+			t.Errorf("%s: command = %q, want %q", ev, c, cmd)
 		}
 	}
-	// 全文无旧 quoted 残留（exe 路径与 hook 后缀串均不应出现）
+	// 旧 quoted 残留检查：Windows 期望全文无 quoted 后缀（.cmd 形态替换了它）；
+	// 其他平台新形态本身就是 quoted——只查旧 exe 路径不残留。
 	if s := string(data); strings.Contains(s, "D:/old") ||
-		strings.Contains(s, " hook prompt claude") ||
-		strings.Contains(s, " hook post-tool claude") ||
-		strings.Contains(s, " hook stop claude") {
+		(runtime.GOOS == "windows" && (strings.Contains(s, " hook prompt claude") ||
+			strings.Contains(s, " hook post-tool claude") ||
+			strings.Contains(s, " hook stop claude"))) {
 		t.Errorf("hooks.json 旧 quoted 形态残留:\n%s", s)
 	}
 }
@@ -301,27 +326,34 @@ func TestCodexRemoveHooks(t *testing.T) {
 	if pre, _ := events["PreToolUse"].([]any); len(pre) != 1 {
 		t.Error("第三方 PreToolUse 被误删")
 	}
-	// 3 个包装文件随卸载删除
-	for _, okHook := range []string{"prompt", "post-tool", "stop"} {
-		if _, err := os.Stat(filepath.Join(home, "ok-hook-"+okHook+".cmd")); !os.IsNotExist(err) {
-			t.Errorf("包装文件 ok-hook-%s.cmd 未删除", okHook)
+	// 3 个包装文件随卸载删除 + 用户同名文件不误删——仅 Windows 有包装形态
+	if runtime.GOOS == "windows" {
+		for _, okHook := range []string{"prompt", "post-tool", "stop"} {
+			if _, err := os.Stat(filepath.Join(home, "ok-hook-"+okHook+".cmd")); !os.IsNotExist(err) {
+				t.Errorf("包装文件 ok-hook-%s.cmd 未删除", okHook)
+			}
 		}
+		removed, err = a.RemoveHooks()
+		if err != nil || removed {
+			t.Fatalf("二次 RemoveHooks = (%v, %v), want (false, nil)", removed, err)
+		}
+		// 用户同名文件（内容非 ok 生成）不误删
+		userFile := filepath.Join(home, "ok-hook-prompt.cmd")
+		if err := os.WriteFile(userFile, []byte("@echo my own hook\r\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		removed, err = a.RemoveHooks()
+		if err != nil || removed {
+			t.Fatalf("三次 RemoveHooks = (%v, %v), want (false, nil)", removed, err)
+		}
+		if data, err := os.ReadFile(userFile); err != nil || !strings.Contains(string(data), "my own hook") {
+			t.Error("用户同名包装文件被误删")
+		}
+		return
 	}
 	removed, err = a.RemoveHooks()
 	if err != nil || removed {
 		t.Fatalf("二次 RemoveHooks = (%v, %v), want (false, nil)", removed, err)
-	}
-	// 用户同名文件（内容非 ok 生成）不误删
-	userFile := filepath.Join(home, "ok-hook-prompt.cmd")
-	if err := os.WriteFile(userFile, []byte("@echo my own hook\r\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	removed, err = a.RemoveHooks()
-	if err != nil || removed {
-		t.Fatalf("三次 RemoveHooks = (%v, %v), want (false, nil)", removed, err)
-	}
-	if data, err := os.ReadFile(userFile); err != nil || !strings.Contains(string(data), "my own hook") {
-		t.Error("用户同名包装文件被误删")
 	}
 }
 
@@ -352,8 +384,10 @@ func TestCodexEnsureHooks(t *testing.T) {
 	if strings.Contains(string(data), `D:\old`) || strings.Contains(string(data), `D:/old`) {
 		t.Error("旧 exe 路径残留")
 	}
-	// 包装内容刷新为新 exe
-	codexWantWrappers(t, home, currentExe(t))
+	// 包装内容刷新为新 exe（仅 Windows 有包装形态）
+	if runtime.GOOS == "windows" {
+		codexWantWrappers(t, home, currentExe(t))
+	}
 	// 用户显式移除 → 不复活
 	if _, err := a.RemoveHooks(); err != nil {
 		t.Fatal(err)
@@ -390,23 +424,40 @@ func TestCodexExeMigrationKeepsTrust(t *testing.T) {
 	if err := a.EnsureHooks(newExe); err != nil {
 		t.Fatal(err)
 	}
-	// 包装内容刷新为新 exe
-	codexWantWrappers(t, home, newExe)
-	// hooks.json 未被重写（命令与 exe 解耦）
 	hooksAfter, err := os.ReadFile(codexHooksPath())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(hooksAfter) != string(hooksBefore) {
-		t.Error("exe 迁移不应触发 hooks.json 重写（命令=包装路径，与 exe 无关）")
-	}
-	// 信任哈希不变（哈希输入=包装路径串）——config.toml 逐字节不动
 	configAfter, err := os.ReadFile(codexConfigPath())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(configAfter) != string(configBefore) {
-		t.Errorf("exe 迁移后信任记录变化（信任不应过期）:\nbefore:\n%s\nafter:\n%s", configBefore, configAfter)
+	if runtime.GOOS == "windows" {
+		// Windows：包装内容刷新为新 exe；hooks.json（命令=包装路径）与 config.toml
+		// 信任记录逐字节不动——迁移不破信任。
+		codexWantWrappers(t, home, newExe)
+		if string(hooksAfter) != string(hooksBefore) {
+			t.Error("exe 迁移不应触发 hooks.json 重写（命令=包装路径，与 exe 无关）")
+		}
+		if string(configAfter) != string(configBefore) {
+			t.Errorf("exe 迁移后信任记录变化（信任不应过期）:\nbefore:\n%s\nafter:\n%s", configBefore, configAfter)
+		}
+	} else {
+		// 其他平台（quoted 形态）：exe 直接进命令串，迁移必然重写 hooks.json 并同步
+		// 重算信任——断言旧路径无残留且信任与当前内容一致。
+		if string(hooksAfter) == string(hooksBefore) {
+			t.Error("quoted 形态下 exe 迁移应重写 hooks.json")
+		}
+		if strings.Contains(string(hooksAfter), `D:\old`) || strings.Contains(string(hooksAfter), `D:/old`) {
+			t.Error("旧 exe 路径残留")
+		}
+		cfg, err := loadCodexHooks()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !codexTrustConsistent(string(configAfter), codexTrustEntries(codexEventsOf(cfg), newExe)) {
+			t.Errorf("exe 迁移后信任记录与 hooks.json 内容不一致:\n%s", string(configAfter))
+		}
 	}
 	if !a.HooksInstalled() {
 		t.Error("exe 迁移自愈后 HooksInstalled 应为 true")
