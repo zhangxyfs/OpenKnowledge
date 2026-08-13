@@ -69,7 +69,8 @@ func Uninstall() (*UninstallResult, error) {
 	return r, nil
 }
 
-// RemoveSection 从 toml 文件中删除指定小节（到下一个 [section] 或文件尾），
+// RemoveSection 从 toml 文件中删除指定小节（到下一个 [section] 或文件尾；
+// 子小节如 [embedding.xxx] / [[embedding.profiles]] 一并视为该小节内容删除），
 // 其余内容原样保留；文件因此不再含任何有效内容时删除文件本身。
 // 返回是否真的删除了小节。
 func RemoveSection(path, section string) (bool, error) {
@@ -79,6 +80,11 @@ func RemoveSection(path, section string) (bool, error) {
 	}
 	if err != nil {
 		return false, err
+	}
+	name := strings.Trim(section, "[]")
+	// 子小节判定：[name.xxx] 或 [[name.xxx]] 属于本小节的延续（profiles 形态）
+	isSub := func(t string) bool {
+		return strings.HasPrefix(t, "["+name+".") || strings.HasPrefix(t, "[["+name+".")
 	}
 	lines := strings.Split(string(data), "\n")
 	start, end := -1, len(lines)
@@ -90,7 +96,7 @@ func RemoveSection(path, section string) (bool, error) {
 			}
 			continue
 		}
-		if strings.HasPrefix(t, "[") {
+		if strings.HasPrefix(t, "[") && !isSub(t) {
 			end = i
 			break
 		}

@@ -15,7 +15,7 @@ import (
 
 	"openknowledge/internal/agentx"
 	"openknowledge/internal/config"
-	"openknowledge/internal/embed"
+	"openknowledge/internal/embedx"
 	"openknowledge/internal/registry"
 )
 
@@ -79,18 +79,9 @@ func InstallSkills(exe string) error {
 	return nil
 }
 
-// SaveEmbedding 把 embedding 配置写入全局配置（0600）：
-// LoadMerged → 设置字段 → 清空 APIKeyEnv → 编码 → 写入。
-func SaveEmbedding(baseURL, model, apiKey string) error {
+// saveGlobalConfig 把配置写回全局 config.toml（0600）。Save* 系列共用。
+func saveGlobalConfig(cfg config.Config) error {
 	globalPath := filepath.Join(registry.Home(), "config.toml")
-	cfg, err := config.LoadMerged("", globalPath)
-	if err != nil {
-		return fmt.Errorf("全局配置读取失败，跳过 embedding: %w", err)
-	}
-	cfg.Embedding.BaseURL = baseURL
-	cfg.Embedding.Model = model
-	cfg.Embedding.APIKey = apiKey
-	cfg.Embedding.APIKeyEnv = ""
 	var buf strings.Builder
 	if err := toml.NewEncoder(&buf).Encode(cfg); err != nil {
 		return fmt.Errorf("全局配置编码失败: %w", err)
@@ -104,7 +95,84 @@ func SaveEmbedding(baseURL, model, apiKey string) error {
 	return nil
 }
 
+// SaveEmbeddingProfile 保存（同名覆盖）一个 profile 到全局配置；activate 时
+// 同时置为使用中。api_key 留空 = 保留同名旧 key（GUI 密文不回传语义）。
+func SaveEmbeddingProfile(p config.EmbeddingProfile, activate bool) error {
+	globalPath := filepath.Join(registry.Home(), "config.toml")
+	cfg, err := config.LoadMerged("", globalPath)
+	if err != nil {
+		return fmt.Errorf("全局配置读取失败，跳过 embedding: %w", err)
+	}
+	for i := range cfg.Embedding.Profiles {
+		if cfg.Embedding.Profiles[i].Name == p.Name {
+			if p.APIKey == "" {
+				p.APIKey = cfg.Embedding.Profiles[i].APIKey
+			}
+			cfg.Embedding.Profiles[i] = p
+			if activate {
+				cfg.Embedding.Active = p.Name
+			}
+			return saveGlobalConfig(cfg)
+		}
+	}
+	cfg.Embedding.Profiles = append(cfg.Embedding.Profiles, p)
+	if activate {
+		cfg.Embedding.Active = p.Name
+	}
+	return saveGlobalConfig(cfg)
+}
 
+// SetActiveEmbedding 切换使用中 profile；name 空串 = 停用（纯关键词检索）。
+func SetActiveEmbedding(name string) error {
+	globalPath := filepath.Join(registry.Home(), "config.toml")
+	cfg, err := config.LoadMerged("", globalPath)
+	if err != nil {
+		return fmt.Errorf("全局配置读取失败: %w", err)
+	}
+	if name != "" {
+		found := false
+		for _, p := range cfg.Embedding.Profiles {
+			if p.Name == name {
+				found = true
+			}
+		}
+		if !found {
+			return fmt.Errorf("profile 不存在: %s", name)
+		}
+	}
+	cfg.Embedding.Active = name
+	return saveGlobalConfig(cfg)
+}
+
+// DeleteEmbeddingProfile 删除 profile；删除使用中项时 Active 置空（退回纯关键词）。
+func DeleteEmbeddingProfile(name string) error {
+	globalPath := filepath.Join(registry.Home(), "config.toml")
+	cfg, err := config.LoadMerged("", globalPath)
+	if err != nil {
+		return fmt.Errorf("全局配置读取失败: %w", err)
+	}
+	kept := cfg.Embedding.Profiles[:0]
+	for _, p := range cfg.Embedding.Profiles {
+		if p.Name != name {
+			kept = append(kept, p)
+		}
+	}
+	cfg.Embedding.Profiles = kept
+	if cfg.Embedding.Active == name {
+		cfg.Embedding.Active = ""
+	}
+	return saveGlobalConfig(cfg)
+}
+
+// TestEmbeddingProfile 以 timeout 做 profile 连通性检查（builtin 在 Task 7 扩展）。
+func TestEmbeddingProfile(p config.EmbeddingProfile, timeout time.Duration) error {
+	c := embedx.ClientForProfile(p, timeout)
+	if c == nil {
+		return fmt.Errorf("profile 不可用（类型 %s，检查必填项）", p.Type)
+	}
+	_, err := c.EmbedQuery(context.Background(), "ping")
+	return err
+}
 // SaveHooksTimeout 把 hooks 超时（秒）写入全局配置 [hooks] timeout_sec；
 // 下次写入/自愈 hooks 块（含 GUI 引导页安装）时生效。
 func SaveHooksTimeout(sec int) error {
@@ -114,17 +182,7 @@ func SaveHooksTimeout(sec int) error {
 		return fmt.Errorf("全局配置读取失败: %w", err)
 	}
 	cfg.Hooks.TimeoutSec = sec
-	var buf strings.Builder
-	if err := toml.NewEncoder(&buf).Encode(cfg); err != nil {
-		return fmt.Errorf("全局配置编码失败: %w", err)
-	}
-	if err := os.MkdirAll(registry.Home(), 0o755); err != nil {
-		return err
-	}
-	if err := os.WriteFile(globalPath, []byte(buf.String()), 0o600); err != nil {
-		return fmt.Errorf("全局配置写入失败: %w", err)
-	}
-	return nil
+	return saveGlobalConfig(cfg)
 }
 
 // ReasonixEnforceMode 返回 reasonix sidecar 的强制检查表达方式：
@@ -156,24 +214,7 @@ func SaveReasonixEnforceMode(mode string) error {
 		return fmt.Errorf("全局配置读取失败: %w", err)
 	}
 	cfg.Reasonix.EnforceMode = mode
-	var buf strings.Builder
-	if err := toml.NewEncoder(&buf).Encode(cfg); err != nil {
-		return fmt.Errorf("全局配置编码失败: %w", err)
-	}
-	if err := os.MkdirAll(registry.Home(), 0o755); err != nil {
-		return err
-	}
-	if err := os.WriteFile(globalPath, []byte(buf.String()), 0o600); err != nil {
-		return fmt.Errorf("全局配置写入失败: %w", err)
-	}
-	return nil
-}
-
-// TestEmbedding 以 10s 超时做 embedding 连通性检查。
-func TestEmbedding(baseURL, model, apiKey string) error {
-	client := &embed.OpenAIClient{BaseURL: baseURL, APIKey: apiKey, Model: model, Timeout: 10 * time.Second}
-	_, err := client.EmbedQuery(context.Background(), "ping")
-	return err
+	return saveGlobalConfig(cfg)
 }
 
 // DisabledFlagPath 返回 hooks 全局关闭标志文件路径。

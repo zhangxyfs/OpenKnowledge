@@ -46,8 +46,8 @@ func setupUninstallEnv(t *testing.T) (kimiHome, okHome string) {
 			t.Fatal(err)
 		}
 	}
-	// 全局配置：embedding + inject（inject 应保留）
-	global := "[embedding]\nbase_url = \"https://x\"\napi_key = \"sk\"\n\n[inject]\nmax_tokens = 2000\n"
+	// 全局配置：embedding（profiles 形态）+ inject（inject 应保留）
+	global := "[embedding]\nactive = \"默认\"\ntimeout_sec = 5\n\n[[embedding.profiles]]\nname = \"默认\"\ntype = \"openai\"\nbase_url = \"https://x\"\napi_key = \"sk\"\n\n[inject]\nmax_tokens = 2000\n"
 	if err := os.WriteFile(filepath.Join(okHome, "config.toml"), []byte(global), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -90,10 +90,10 @@ func TestUninstall(t *testing.T) {
 		}
 	}
 
-	// embedding 移除，inject 保留
+	// embedding 移除（含 [[embedding.profiles]] 子小节），inject 保留
 	data, _ = os.ReadFile(filepath.Join(okHome, "config.toml"))
 	got = string(data)
-	if strings.Contains(got, "[embedding]") || strings.Contains(got, "api_key") {
+	if strings.Contains(got, "[embedding]") || strings.Contains(got, "[[embedding.profiles]]") || strings.Contains(got, "api_key") {
 		t.Fatalf("embedding should be removed: %q", got)
 	}
 	if !strings.Contains(got, "[inject]") || !strings.Contains(got, "max_tokens = 2000") {

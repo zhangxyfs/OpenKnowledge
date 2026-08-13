@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"openknowledge/internal/config"
 )
 
 func TestInstallSkills(t *testing.T) {
@@ -101,5 +103,57 @@ func TestProposeSkillTemplateHasClassification(t *testing.T) {
 		if !strings.Contains(tpl, want) {
 			t.Fatalf("propose skill template missing %q", want)
 		}
+	}
+}
+
+func TestEmbeddingProfileSaveActivateDelete(t *testing.T) {
+	t.Setenv("OK_HOME", t.TempDir())
+	globalPath := filepath.Join(os.Getenv("OK_HOME"), "config.toml")
+	// 新增并激活
+	p := config.EmbeddingProfile{Name: "默认", Type: "openai", BaseURL: "http://h/v1", Model: "m1", APIKey: "sk-1"}
+	if err := SaveEmbeddingProfile(p, true); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadMerged("", globalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ap := cfg.Embedding.ActiveProfile()
+	if ap == nil || ap.Name != "默认" || ap.Model != "m1" || ap.APIKey != "sk-1" {
+		t.Fatalf("save+activate: %+v", cfg.Embedding)
+	}
+	// 同名覆盖且 api_key 留空保留旧 key
+	p2 := config.EmbeddingProfile{Name: "默认", Type: "openai", BaseURL: "http://h/v1", Model: "m2"}
+	if err := SaveEmbeddingProfile(p2, true); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _ = config.LoadMerged("", globalPath)
+	if ap := cfg.Embedding.ActiveProfile(); ap == nil || ap.Model != "m2" || ap.APIKey != "sk-1" {
+		t.Fatalf("同名覆盖应保留旧 key: %+v", cfg.Embedding)
+	}
+	// 第二个 profile + 切换/停用
+	if err := SaveEmbeddingProfile(config.EmbeddingProfile{Name: "本地", Type: "ollama", BaseURL: "http://localhost:11434", Model: "bge-m3"}, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetActiveEmbedding("本地"); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetActiveEmbedding("不存在"); err == nil {
+		t.Fatal("切换不存在 profile 应报错")
+	}
+	cfg, _ = config.LoadMerged("", globalPath)
+	if cfg.Embedding.Active != "本地" || len(cfg.Embedding.Profiles) != 2 {
+		t.Fatalf("切换: %+v", cfg.Embedding)
+	}
+	// 删除使用中项 → Active 置空
+	if err := DeleteEmbeddingProfile("本地"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _ = config.LoadMerged("", globalPath)
+	if cfg.Embedding.Active != "" || len(cfg.Embedding.Profiles) != 1 {
+		t.Fatalf("删除 active 应置空: %+v", cfg.Embedding)
+	}
+	if err := SetActiveEmbedding(""); err != nil {
+		t.Fatal(err)
 	}
 }

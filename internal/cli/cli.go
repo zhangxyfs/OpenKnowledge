@@ -17,6 +17,7 @@ import (
 	"openknowledge/internal/agentx"
 	"openknowledge/internal/config"
 	"openknowledge/internal/embed"
+	"openknowledge/internal/embedx"
 	"openknowledge/internal/entry"
 	"openknowledge/internal/index"
 	"openknowledge/internal/procx"
@@ -290,18 +291,9 @@ func afterAdd(pc *project.Context, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// embeddingClient 配置齐全时返回客户端，否则返回 nil。
-func embeddingClient(pc *project.Context) *embed.OpenAIClient {
-	key := pc.Config.Embedding.ResolvedAPIKey()
-	if key == "" || pc.Config.Embedding.BaseURL == "" {
-		return nil
-	}
-	return &embed.OpenAIClient{
-		BaseURL: pc.Config.Embedding.BaseURL,
-		APIKey:  key,
-		Model:   pc.Config.Embedding.Model,
-		Timeout: time.Duration(pc.Config.Embedding.TimeoutSec) * time.Second,
-	}
+// embeddingClient 配置齐全时返回客户端，否则返回 nil（构造收口在 embedx）。
+func embeddingClient(pc *project.Context) embed.Client {
+	return embedx.Client(pc.Config)
 }
 
 // Search: ok search <查询>

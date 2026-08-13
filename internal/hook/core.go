@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"openknowledge/internal/embed"
+	"openknowledge/internal/embedx"
 	"openknowledge/internal/enforce"
 	"openknowledge/internal/index"
 	"openknowledge/internal/project"
@@ -31,15 +31,7 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 	if registry.HooksDisabled() {
 		return ""
 	}
-	var client embed.Client
-	if key := pc.Config.Embedding.ResolvedAPIKey(); key != "" && pc.Config.Embedding.BaseURL != "" {
-		client = &embed.OpenAIClient{
-			BaseURL: pc.Config.Embedding.BaseURL,
-			APIKey:  key,
-			Model:   pc.Config.Embedding.Model,
-			Timeout: time.Duration(pc.Config.Embedding.TimeoutSec) * time.Second,
-		}
-	}
+	client := embedx.Client(pc.Config)
 	db, err := index.Open(pc.Store.KbPath())
 	if err != nil {
 		logErr("prompt open index: %v", err)

@@ -33,7 +33,8 @@ func TestSetupWithEmbeddingFlags(t *testing.T) {
 		t.Fatalf("global config not written: %v", err)
 	}
 	got := string(data)
-	if !strings.Contains(got, `api_key = "sk-test"`) || !strings.Contains(got, `base_url = "https://g.example.com/v1"`) || !strings.Contains(got, `model = "m1"`) {
+	if !strings.Contains(got, `active = "默认"`) || !strings.Contains(got, "[[embedding.profiles]]") ||
+		!strings.Contains(got, `api_key = "sk-test"`) || !strings.Contains(got, `base_url = "https://g.example.com/v1"`) || !strings.Contains(got, `model = "m1"`) {
 		t.Fatalf("global config wrong: %q", got)
 	}
 }

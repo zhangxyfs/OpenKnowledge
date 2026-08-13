@@ -650,7 +650,7 @@ func TestEmbeddingEmptyKeyKeepsExisting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(cfgData), "sekret-key") || !strings.Contains(string(cfgData), `model = "m2"`) {
+	if !strings.Contains(string(cfgData), "sekret-key") || !strings.Contains(string(cfgData), `model = "m2"`) || !strings.Contains(string(cfgData), "[[embedding.profiles]]") {
 		t.Fatalf("key should be kept and model updated: %q", cfgData)
 	}
 

@@ -61,7 +61,9 @@ func TestLoadMergedPrecedence(t *testing.T) {
 	if cfg.Retrieve.TopN != 9 {
 		t.Fatalf("project should override global, got %d", cfg.Retrieve.TopN)
 	}
-	if cfg.Embedding.BaseURL != "https://g.example.com/v1" || cfg.Embedding.APIKey != "gk" {
+	// 全局旧版平铺配置迁移为 "默认" profile 后生效
+	p := cfg.Embedding.ActiveProfile()
+	if p == nil || p.BaseURL != "https://g.example.com/v1" || p.ResolvedAPIKey() != "gk" {
 		t.Fatalf("global embedding should apply, got %+v", cfg.Embedding)
 	}
 	if cfg.Inject.MaxTokens != 800 {
@@ -78,14 +80,80 @@ func TestLoadMergedMissingFiles(t *testing.T) {
 
 func TestResolvedAPIKey(t *testing.T) {
 	t.Setenv("OK_TEST_KEY", "envkey")
-	if got := (Embedding{APIKey: "direct", APIKeyEnv: "OK_TEST_KEY"}).ResolvedAPIKey(); got != "direct" {
+	if got := (EmbeddingProfile{APIKey: "direct", APIKeyEnv: "OK_TEST_KEY"}).ResolvedAPIKey(); got != "direct" {
 		t.Fatalf("direct key should win, got %q", got)
 	}
-	if got := (Embedding{APIKeyEnv: "OK_TEST_KEY"}).ResolvedAPIKey(); got != "envkey" {
+	if got := (EmbeddingProfile{APIKeyEnv: "OK_TEST_KEY"}).ResolvedAPIKey(); got != "envkey" {
 		t.Fatalf("env fallback failed, got %q", got)
 	}
-	if got := (Embedding{}).ResolvedAPIKey(); got != "" {
+	if got := (EmbeddingProfile{}).ResolvedAPIKey(); got != "" {
 		t.Fatalf("expected empty, got %q", got)
+	}
+}
+
+func TestLegacyEmbeddingMigration(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	old := "[embedding]\nbase_url = \"https://api.siliconflow.cn/v1\"\nmodel = \"BAAI/bge-m3\"\napi_key = \"sk-x\"\ntimeout_sec = 7\n"
+	if err := os.WriteFile(path, []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := cfg.Embedding.ActiveProfile()
+	if p == nil || p.Name != "默认" || p.Type != "openai" || p.BaseURL != "https://api.siliconflow.cn/v1" || p.Model != "BAAI/bge-m3" || p.ResolvedAPIKey() != "sk-x" {
+		t.Fatalf("迁移结果: %+v", p)
+	}
+	if cfg.Embedding.BaseURL != "" || cfg.Embedding.Model != "" || cfg.Embedding.APIKey != "" {
+		t.Fatal("迁移后平铺字段应清空")
+	}
+	if cfg.Embedding.TimeoutSec != 7 {
+		t.Fatal("timeout_sec 保留")
+	}
+	if p.ModelIdentity() != "openai:BAAI/bge-m3@https://api.siliconflow.cn/v1" {
+		t.Fatal(p.ModelIdentity())
+	}
+}
+
+func TestProfilesMergeByName(t *testing.T) {
+	dir := t.TempDir()
+	global := "[embedding]\nactive = \"a\"\n[[embedding.profiles]]\nname = \"a\"\ntype = \"openai\"\nmodel = \"m1\"\n[[embedding.profiles]]\nname = \"b\"\ntype = \"ollama\"\nbase_url = \"http://localhost:11434\"\nmodel = \"bge-m3\"\n"
+	project := "[[embedding.profiles]]\nname = \"a\"\ntype = \"openai\"\nmodel = \"m2\"\n"
+	gp := filepath.Join(dir, "g.toml")
+	pp := filepath.Join(dir, "p.toml")
+	os.WriteFile(gp, []byte(global), 0o600)
+	os.WriteFile(pp, []byte(project), 0o600)
+	cfg, err := LoadMerged(pp, gp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Embedding.Profiles) != 2 {
+		t.Fatalf("按名合并应为 2 条: %+v", cfg.Embedding.Profiles)
+	}
+	for _, p := range cfg.Embedding.Profiles {
+		if p.Name == "a" && p.Model != "m2" {
+			t.Fatal("项目级同名覆盖")
+		}
+	}
+	if cfg.Embedding.Active != "a" {
+		t.Fatal("active 继承全局")
+	}
+}
+
+func TestActiveProfileAndIdentity(t *testing.T) {
+	var e Embedding
+	if e.ActiveProfile() != nil {
+		t.Fatal("空 active 应为 nil")
+	}
+	b := EmbeddingProfile{Name: "内", Type: "builtin", Model: "qwen3-emb-0.6b-q8"}
+	if b.ModelIdentity() != "builtin:qwen3-emb-0.6b-q8" {
+		t.Fatal(b.ModelIdentity())
+	}
+	o := EmbeddingProfile{Name: "o", Type: "ollama", BaseURL: "http://h:11434", Model: "bge-m3"}
+	if o.ModelIdentity() != "ollama:bge-m3@http://h:11434" {
+		t.Fatal(o.ModelIdentity())
 	}
 }
 

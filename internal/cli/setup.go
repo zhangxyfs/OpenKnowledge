@@ -8,8 +8,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"openknowledge/internal/agentx"
+	"openknowledge/internal/config"
 	"openknowledge/internal/registry"
 	"openknowledge/internal/setupx"
 )
@@ -127,12 +129,13 @@ func setupEmbedding(nonInteractive bool, baseURL, model, apiKey string, in io.Re
 	if model == "" {
 		model = "text-embedding-3-small"
 	}
-	if err := setupx.SaveEmbedding(baseURL, model, apiKey); err != nil {
+	p := config.EmbeddingProfile{Name: "默认", Type: "openai", BaseURL: baseURL, Model: model, APIKey: apiKey}
+	if err := setupx.SaveEmbeddingProfile(p, true); err != nil {
 		fmt.Fprintf(stdout, "%v\n", err)
 		return
 	}
 	fmt.Fprintf(stdout, "embedding 已写入全局配置 %s\n", filepath.Join(registry.Home(), "config.toml"))
-	if err := setupx.TestEmbedding(baseURL, model, apiKey); err != nil {
+	if err := setupx.TestEmbeddingProfile(p, 10*time.Second); err != nil {
 		fmt.Fprintf(stdout, "embedding 连通性验证失败（不影响使用关键词检索）: %v\n", err)
 	} else {
 		fmt.Fprintln(stdout, "embedding 连通性验证通过")

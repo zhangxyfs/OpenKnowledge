@@ -20,6 +20,7 @@ import (
 	"openknowledge/internal/backup"
 	"openknowledge/internal/config"
 	"openknowledge/internal/embed"
+	"openknowledge/internal/embedx"
 	"openknowledge/internal/entry"
 	"openknowledge/internal/index"
 	"openknowledge/internal/registry"
@@ -328,10 +329,12 @@ func (h *Handler) apiStatus(w http.ResponseWriter, _ *http.Request) {
 	embedding := map[string]any{"base_url": "", "model": "", "has_key": false}
 	hooksTimeout := 10
 	if cfg, err := config.LoadMerged("", filepath.Join(registry.Home(), "config.toml")); err == nil {
-		embeddingConfigured = cfg.Embedding.BaseURL != "" && cfg.Embedding.ResolvedAPIKey() != ""
-		embedding["base_url"] = cfg.Embedding.BaseURL
-		embedding["model"] = cfg.Embedding.Model
-		embedding["has_key"] = cfg.Embedding.ResolvedAPIKey() != ""
+		if p := cfg.Embedding.ActiveProfile(); p != nil {
+			embeddingConfigured = true
+			embedding["base_url"] = p.BaseURL
+			embedding["model"] = p.Model
+			embedding["has_key"] = p.ResolvedAPIKey() != ""
+		}
 		if cfg.Hooks.TimeoutSec > 0 {
 			hooksTimeout = cfg.Hooks.TimeoutSec
 		}
@@ -700,22 +703,13 @@ func (h *Handler) apiSearch(w http.ResponseWriter, r *http.Request) {
 // ---------- 草稿批准与捕获模式 ----------
 
 // embeddingClientFor 按合并配置构建 embedding 客户端；未配置返回 nil。
-// 与 cli.embeddingClient 同语义，供 approve 批准草稿时补算向量。
+// 构造收口在 embedx，供 approve 批准草稿时补算向量。
 func embeddingClientFor(st *store.Store) embed.Client {
 	cfg, err := config.LoadMerged(st.ConfigPath(), filepath.Join(registry.Home(), "config.toml"))
 	if err != nil {
 		return nil
 	}
-	key := cfg.Embedding.ResolvedAPIKey()
-	if key == "" || cfg.Embedding.BaseURL == "" {
-		return nil
-	}
-	return &embed.OpenAIClient{
-		BaseURL: cfg.Embedding.BaseURL,
-		APIKey:  key,
-		Model:   cfg.Embedding.Model,
-		Timeout: time.Duration(cfg.Embedding.TimeoutSec) * time.Second,
-	}
+	return embedx.Client(cfg)
 }
 
 // syncApprove 批准后的索引同步：带 embedding 客户端算向量，失败降级为只同步
@@ -1086,9 +1080,11 @@ func (h *Handler) apiSetupEmbedding(w http.ResponseWriter, r *http.Request) {
 		req.Model = "text-embedding-3-small"
 	}
 	if req.APIKey == "" {
-		// 留空 = 保留已保存的 key；一个都没有才报错
+		// 留空 = 保留 active openai profile 已保存的 key
 		if cfg, err := config.LoadMerged("", filepath.Join(registry.Home(), "config.toml")); err == nil {
-			req.APIKey = cfg.Embedding.ResolvedAPIKey()
+			if p := cfg.Embedding.ActiveProfile(); p != nil && p.Type == "openai" {
+				req.APIKey = p.ResolvedAPIKey()
+			}
 		}
 		if req.APIKey == "" {
 			writeErr(w, http.StatusBadRequest, "api_key 不能为空（尚未保存过 key）")
@@ -1102,11 +1098,12 @@ func (h *Handler) apiSetupEmbedding(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, resp)
 	}
-	if err := setupx.SaveEmbedding(req.BaseURL, req.Model, req.APIKey); err != nil {
+	p := config.EmbeddingProfile{Name: "默认", Type: "openai", BaseURL: req.BaseURL, Model: req.Model, APIKey: req.APIKey}
+	if err := setupx.SaveEmbeddingProfile(p, true); err != nil {
 		result(err)
 		return
 	}
-	result(setupx.TestEmbedding(req.BaseURL, req.Model, req.APIKey))
+	result(setupx.TestEmbeddingProfile(p, 10*time.Second))
 }
 
 func (h *Handler) apiToggle(w http.ResponseWriter, r *http.Request) {
