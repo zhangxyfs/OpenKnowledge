@@ -115,8 +115,12 @@
    <details id="verNav" open>
     <summary data-i18n="c.ledger">版本档案</summary>
     <div class="group">
+      <div class="group-title">2.13.x</div>
+      <a href="#v2-13-0"><span><span class="latest-dot"></span>v2.13.0</span><span class="d">08-13</span></a>
+    </div>
+    <div class="group">
       <div class="group-title">2.12.x</div>
-      <a href="#v2-12-0"><span><span class="latest-dot"></span>v2.12.0</span><span class="d">08-12</span></a>
+      <a href="#v2-12-0"><span>v2.12.0</span><span class="d">08-12</span></a>
     </div>
     <div class="group">
       <div class="group-title">2.11.x</div>
@@ -178,8 +182,31 @@
       </div>
     </div>
 
+    <section class="ver" id="v2-13-0">
+      <div class="ver-head"><h2>v2.13.0</h2><span class="badge-latest" data-i18n="c.latest">最新</span><time>2026-08-13</time></div>
+      <div class="chg">
+        <span class="tag tag-new" data-i18n="t.new">新功能</span>
+        <ul>
+          <li data-i18n="c.2130.n1">新增 qoder 适配器（第八个 AI 助手集成，Qoder CN 终端 CLI）：合并写 <code>~/.qoder-cn/settings.json</code>（备份 + 幂等 + 第三方条目保留），hook 契约逐字兼容 Claude Code（注入 <code>hookSpecificOutput.additionalContext</code>、Stop <code>decision:block</code>），输出协议零改动复用；自动开启 <code>hooksConfig.enabled</code> 开关（Qoder 默认关闭——不开则 hooks 装好也静默不派发）；Windows 命令经 <code>ok-hook-*.cmd</code> 包装规避 <code>cmd /s</code> 引号剥离（exe 迁移自愈不重写配置）；技能零适配进 <code>~/.qoder-cn/skills</code></li>
+          <li data-i18n="c.2130.n2">新增 qoder-ide 适配器（第九个 AI 助手集成，Qoder CN IDE 灵码内核）：合并写 <code>~/.lingma/settings.json</code> + 技能进 <code>~/.lingma/skills</code>——IDE 与终端 CLI 是两套 hooks（IDE 读 ~/.lingma，不读 ~/.qoder-cn）；IDE 仅 5 事件且 Stop/PostToolUse 不可阻断，知识注入与触碰追踪可用、enforce/auto 自省降级；无 enabled 门，改配置需重启 IDE 生效</li>
+        </ul>
+      </div>
+      <div class="chg">
+        <span class="tag tag-improve" data-i18n="t.improve">改进</span>
+        <ul>
+          <li data-i18n="c.2130.i1">测试套件 Linux 可移植：agentx/setupx 测试夹具改平台双态（ToSlash 期望、.cmd 案例按平台期望、包装断言与 exe 迁移语义分叉），WSL（Ubuntu 22.04 + Go 1.25）Linux 全量 <code>go test ./...</code> 与 Windows 双平台回归绿</li>
+        </ul>
+      </div>
+      <div class="chg">
+        <span class="tag tag-note" data-i18n="t.note">说明</span>
+        <ul>
+          <li data-i18n="c.2130.s1">CLI 面经官方 hooks-reference 文档与 npm 包源码双向核实；IDE 面经官方 IDE hooks 文档核实。待实测：本机未装终端 CLI（qoderclicn），CLI 版本矩阵待补；IDE 侧 hooks 派发需重启 IDE 实测</li>
+        </ul>
+      </div>
+    </section>
+
     <section class="ver" id="v2-12-0">
-      <div class="ver-head"><h2>v2.12.0</h2><span class="badge-latest" data-i18n="c.latest">最新</span><time>2026-08-12</time></div>
+      <div class="ver-head"><h2>v2.12.0</h2><time>2026-08-12</time></div>
       <div class="chg">
         <span class="tag tag-new" data-i18n="t.new">新功能</span>
         <ul>
