@@ -58,7 +58,11 @@ func TestIsOKCodexHook(t *testing.T) {
 		{"相似前缀 my- 不误判", map[string]any{"type": "command", "command": `C:\x\my-ok-hook-prompt.cmd`}, false},
 		{"后缀 .bak 不误判", map[string]any{"type": "command", "command": `C:\x\ok-hook-prompt.cmd.bak`}, false},
 		{"裸文件名无分隔不命中", map[string]any{"type": "command", "command": `ok-hook-prompt.cmd`}, false},
-		{"旧 quoted 形态不再识别", map[string]any{"type": "command", "command": `"D:/x/ok.exe" hook prompt claude`}, false},
+		// 旧 quoted 形态（Fix D 前安装的条目）仍识别——重装/自愈迁移清理用，
+		// 不识别则旧组剥离不掉、与 .cmd 新组堆积重复。
+		{"旧 quoted 形态 prompt 迁移识别", map[string]any{"type": "command", "command": `"D:/x/ok.exe" hook prompt claude`}, true},
+		{"旧 quoted 形态 post-tool 迁移识别", map[string]any{"type": "command", "command": `"D:/x/ok.exe" hook post-tool claude`}, true},
+		{"旧 quoted 形态 stop 迁移识别", map[string]any{"type": "command", "command": `"D:/x/ok.exe" hook stop claude`}, true},
 	}
 	for _, c := range cases {
 		if got := isOKCodexHook(c.hook); got != c.want {
@@ -194,6 +198,67 @@ func TestCodexInstallIdempotent(t *testing.T) {
 		if len(groups) != 1 {
 			t.Fatalf("重复安装产生堆积: %s 组数 = %d, want 1", ev, len(groups))
 		}
+	}
+}
+
+// TestCodexInstallStripsLegacyForm 迁移集成测试：预置 Fix D（add5d38）前安装的
+// 旧 quoted 形态 ok 三事件组，InstallHooks 必须识别并剥离它们——否则旧组残留 +
+// 新 .cmd 组追加，每事件堆积两个 ok 组（prompt 重复注入、post-tool 重复追记）。
+func TestCodexInstallStripsLegacyForm(t *testing.T) {
+	home := isolateCodex(t)
+	hp := filepath.Join(home, "hooks.json")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	legacyGroup := func(matcher, okHook string) string {
+		return `{"matcher":"` + matcher + `","hooks":[{"type":"command","command":"\"D:/old/ok.exe\" hook ` + okHook + ` claude","timeout":20}]}`
+	}
+	preset := `{"hooks":{` +
+		`"UserPromptSubmit":[` + legacyGroup("*", "prompt") + `],` +
+		`"PostToolUse":[` + legacyGroup("apply_patch", "post-tool") + `],` +
+		`"Stop":[` + legacyGroup("*", "stop") + `]}}`
+	if err := os.WriteFile(hp, []byte(preset), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := codexAgent{}
+	if err := a.InstallHooks(codexTestExe()); err != nil {
+		t.Fatalf("InstallHooks: %v", err)
+	}
+	data, err := os.ReadFile(hp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("写回后 JSON 非法: %v", err)
+	}
+	events, _ := cfg["hooks"].(map[string]any)
+	wantCmd := map[string]string{
+		"UserPromptSubmit": filepath.Join(home, "ok-hook-prompt.cmd"),
+		"PostToolUse":      filepath.Join(home, "ok-hook-post-tool.cmd"),
+		"Stop":             filepath.Join(home, "ok-hook-stop.cmd"),
+	}
+	for ev, cmd := range wantCmd {
+		groups, _ := events[ev].([]any)
+		if len(groups) != 1 {
+			t.Fatalf("%s: 迁移后 ok 组数 = %d, want 1（旧 quoted 组应被剥离）", ev, len(groups))
+		}
+		gm, _ := groups[0].(map[string]any)
+		hooks, _ := gm["hooks"].([]any)
+		if len(hooks) != 1 {
+			t.Fatalf("%s: 组内 hooks 数 = %d, want 1", ev, len(hooks))
+		}
+		hm, _ := hooks[0].(map[string]any)
+		if c, _ := hm["command"].(string); c != cmd {
+			t.Errorf("%s: command = %q, want %q（.cmd 包装路径）", ev, c, cmd)
+		}
+	}
+	// 全文无旧 quoted 残留（exe 路径与 hook 后缀串均不应出现）
+	if s := string(data); strings.Contains(s, "D:/old") ||
+		strings.Contains(s, " hook prompt claude") ||
+		strings.Contains(s, " hook post-tool claude") ||
+		strings.Contains(s, " hook stop claude") {
+		t.Errorf("hooks.json 旧 quoted 形态残留:\n%s", s)
 	}
 }
 

@@ -119,10 +119,11 @@ func removeCodexWrappers() bool {
 }
 
 // isOKCodexHook 判定一条 hook 条目是否 ok 生成：type=command 且命令串形态匹配——
-// Windows 认包装文件裸路径（trim 后以 / 或 \ 分隔的 ok-hook-<okHook>.cmd 结尾，
-// 大小写不敏感，Equalfold 语意——cmd.exe 路径语义）；其他平台认后缀
-// " hook <prompt|post-tool|stop> claude"。不看 exe basename——改名/迁移/测试
-// 二进制都不影响识别。
+// Windows 认两种形态：包装文件裸路径（trim 后以 / 或 \ 分隔的 ok-hook-<okHook>.cmd
+// 结尾，大小写不敏感，Equalfold 语意——cmd.exe 路径语义，当前形态）与旧 quoted 后缀
+// " hook <prompt|post-tool|stop> claude"（Fix D 前安装的条目，识别以迁移清理——
+// 不识别则重装/自愈剥离不掉旧组，与 .cmd 新组堆积重复）；其他平台只认旧 quoted 后缀。
+// 不看 exe basename——改名/迁移/测试二进制都不影响识别。
 func isOKCodexHook(h map[string]any) bool {
 	typ, _ := h["type"].(string)
 	cmd, _ := h["command"].(string)
@@ -137,7 +138,7 @@ func isOKCodexHook(h map[string]any) bool {
 					return true
 				}
 			}
-			continue
+			// 不 continue——.cmd 判定落空后继续旧 quoted 后缀判定（迁移清理用）。
 		}
 		if strings.HasSuffix(cmd, " hook "+e.okHook+" claude") {
 			return true
