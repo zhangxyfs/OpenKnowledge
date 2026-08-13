@@ -90,11 +90,11 @@
           <div class="card-actions"><button id="btn-hooks" type="button" class="btn">写入 hooks 配置</button> <button id="btn-codex-help" type="button" class="btn hidden">信任门说明</button></div>
         </div>
         <div class="card hidden" id="codex-help-card">
-          <div class="card-head"><h3>Codex 信任门与特性开关</h3></div>
+          <div class="card-head"><h3>Codex 信任门与版本说明</h3></div>
           <div class="card-desc muted">
-            ① Codex 的 hooks 目前是 under-development 特性：ok 安装时已自动在 <code>~/.codex/config.toml</code> 写入 <code>[features] codex_hooks = true</code>，无需手动。<br>
-            ② Codex 按内容哈希信任 hooks：安装或更新后<strong>首次运行会提示审查信任</strong>；在 Codex 的 设置 → 编码 → 钩子 页面可查看并逐条开关。<br>
-            ③ ok 升级或 exe 迁移后会自愈重写 hooks.json，哈希变化会<strong>再次询问信任</strong>，属正常现象。<br>
+            ① Codex 0.118 把 hooks 列为实验特性（默认关闭）：ok 安装时已自动在 <code>~/.codex/config.toml</code> 开启并写入信任记录，<strong>无需手动确认信任</strong>；在 Codex 的 设置 → 编码 → 钩子 页面可随时查看或逐条关闭。<br>
+            ② Windows 下 hook 命令经 <code>ok-hook-*.cmd</code> 包装文件执行（规避 Codex 引号 bug），exe 迁移/升级后 ok 自愈不再失效。<br>
+            ③ <strong>版本注意</strong>：Codex 桌面端 26.707 及更早引擎尚不派发 hooks（属上游未接线，装好后等 app 更新即自动生效）；命令行使用请升级到 codex 0.147+（<code>npm i -g @openai/codex@latest</code>）。<br>
             ④ 手动修改 config.toml 后需重启 Codex 才能生效。
           </div>
         </div>
