@@ -161,9 +161,7 @@ func (m *Manager) Reconcile(desired *embed.BuiltinModel, now time.Time) {
 		m.failCount = 0
 	}
 	if desiredID == "" || !desired.Installed(m.ModelsDir) {
-		if LoadState() != nil {
-			m.Stop()
-		}
+		m.Stop()
 		ClearWant()
 		return
 	}

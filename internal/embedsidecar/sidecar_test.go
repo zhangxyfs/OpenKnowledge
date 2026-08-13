@@ -110,6 +110,27 @@ func TestReconcileLifecycle(t *testing.T) {
 	}
 }
 
+func TestReconcileStopsOrphanWithoutState(t *testing.T) {
+	mgr, model := setupEnv(t)
+	RequestStart()
+	mgr.Reconcile(&model, time.Now())
+	st := LoadState()
+	if st == nil || !st.Healthy() {
+		t.Fatal("前置：sidecar 应在线")
+	}
+	// 模拟 writeState 失败/丢失：state 缺失但进程活着
+	if err := os.Remove(statePath()); err != nil {
+		t.Fatal(err)
+	}
+	mgr.Reconcile(nil, time.Now())
+	if st.Healthy() {
+		t.Fatal("孤儿进程应被回收（无条件 Stop）")
+	}
+	if LoadState() != nil {
+		t.Fatal("state 应保持缺席")
+	}
+}
+
 func TestWantFlagRoundTrip(t *testing.T) {
 	t.Setenv("OK_HOME", t.TempDir())
 	if WantPending() {
