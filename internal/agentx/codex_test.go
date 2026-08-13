@@ -2,6 +2,7 @@ package agentx
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -483,5 +484,285 @@ func TestCodexInstallCreatesConfig(t *testing.T) {
 	text := string(data)
 	if !strings.Contains(text, "[features]") || !codexHooksFlagOn(text) {
 		t.Errorf("config.toml 缺少 [features] codex_hooks = true: %q", text)
+	}
+}
+
+// ---------- hooks.state 信任记录（Codex 信任门）----------
+
+func TestCodexTrustHash(t *testing.T) {
+	// 夹具值经 Codex 源码（hooks/src/engine/discovery.rs hook_hash →
+	// config/src/fingerprint.rs version_for_toml）与真实 config.toml 信任记录
+	// （含 .bak-openknowledge 里的 D:/software 旧记录）逐位双向验证：
+	// sha256:<hex(sorted-keys compact JSON of {event_name, hooks, matcher?})>，
+	// matcher 仅过滤型事件（PostToolUse）入哈希。
+	cases := []struct {
+		name    string
+		label   string
+		filters bool
+		matcher string
+		command string
+		timeout int
+		want    string
+	}{
+		{"prompt develop exe", "user_prompt_submit", false, "*", `"D:/develop/OpenKnowledge/dist/ok.exe" hook prompt claude`, 20, "sha256:e4b77161ebbc88a1b5f5fa2fde760033574935bcfa0ce4acf547f6b0ed38a4ad"},
+		{"prompt software exe", "user_prompt_submit", false, "*", `"D:/software/OpenKnowledge/ok.exe" hook prompt claude`, 20, "sha256:3e6553b430210b5fbf51d06dd7b2be42ad85d3112ab90234375f2b34ca9c160f"},
+		{"post-tool matcher 入哈希", "post_tool_use", true, "apply_patch", `"D:/software/OpenKnowledge/ok.exe" hook post-tool claude`, 20, "sha256:561c087a92ca0ef83ff19c802002dc06f7098559e1870f4b1bbee47b09df0197"},
+		{"stop matcher 不入哈希", "stop", false, "*", `"D:/software/OpenKnowledge/ok.exe" hook stop claude`, 20, "sha256:1c1f6a1484c19665eff535089027e6b4d4db870ee8acda5b5c03c4f434f03fed"},
+	}
+	for _, c := range cases {
+		if got := codexTrustHash(c.label, c.filters, c.matcher, c.command, c.timeout); got != c.want {
+			t.Errorf("%s: codexTrustHash() = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+func codexTrustTestEntries() [][2]string {
+	return [][2]string{
+		{`C:\codex\hooks.json:user_prompt_submit:0:0`, "sha256:aaa"},
+		{`C:\codex\hooks.json:post_tool_use:0:0`, "sha256:bbb"},
+		{`C:\codex\hooks.json:stop:0:0`, "sha256:ccc"},
+	}
+}
+
+func codexTrustBlock(key, hash string) string {
+	return "[hooks.state.'" + key + "']\ntrusted_hash = \"" + hash + "\"\nenabled = true\n"
+}
+
+func TestCodexTrustEdits(t *testing.T) {
+	entries := codexTrustTestEntries()
+	wantAll := codexTrustBlock(entries[0][0], entries[0][1]) +
+		codexTrustBlock(entries[1][0], entries[1][1]) +
+		codexTrustBlock(entries[2][0], entries[2][1])
+
+	// 空文本 → 文末追加三节
+	got, changed := codexTrustEdits("", entries)
+	if !changed || got != wantAll {
+		t.Errorf("空文本: codexTrustEdits = (%q, %v), want (%q, true)", got, changed, wantAll)
+	}
+	// 二次运行 → (原文, false)
+	again, changedAgain := codexTrustEdits(got, entries)
+	if changedAgain || again != got {
+		t.Errorf("幂等: 二次运行 = (%q, %v), want (原文, false)", again, changedAgain)
+	}
+
+	// 第三方 hooks.state 节逐字节保留，ok 节追加其后
+	third := "[hooks.state.'C:\\codex\\hooks.json:pre_tool_use:0:0']\ntrusted_hash = \"sha256:third\"\nenabled = false\n"
+	got, changed = codexTrustEdits(third, entries)
+	if !changed || got != third+wantAll {
+		t.Errorf("第三方节保留: got (%q, %v), want (%q, true)", got, changed, third+wantAll)
+	}
+
+	// 过期哈希替换、enabled 缺失补（紧跟 trusted_hash 行后）
+	stale := "[hooks.state.'" + entries[0][0] + "']\ntrusted_hash = \"sha256:old\"\n"
+	got, changed = codexTrustEdits(stale, entries)
+	want := codexTrustBlock(entries[0][0], entries[0][1]) +
+		codexTrustBlock(entries[1][0], entries[1][1]) +
+		codexTrustBlock(entries[2][0], entries[2][1])
+	if !changed || got != want {
+		t.Errorf("过期替换+补 enabled: got (%q, %v), want (%q, true)", got, changed, want)
+	}
+
+	// 节头带尾注释 → 识别为已存在，不重复追加；节内其他行不动
+	commented := "[hooks.state.'" + entries[0][0] + "'] # ok 的 prompt\ntrusted_hash = \"" + entries[0][1] + "\"\nenabled = true\n"
+	got, changed = codexTrustEdits(commented, entries)
+	want = commented + codexTrustBlock(entries[1][0], entries[1][1]) +
+		codexTrustBlock(entries[2][0], entries[2][1])
+	if !changed || got != want {
+		t.Errorf("尾注释节头: got (%q, %v), want (%q, true)", got, changed, want)
+	}
+}
+
+func TestCodexInstallWritesTrust(t *testing.T) {
+	t.Run("三节哈希与 codexTrustHash 重算一致", func(t *testing.T) {
+		home := isolateCodex(t)
+		if err := os.MkdirAll(home, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		a := codexAgent{}
+		if err := a.InstallHooks(codexTestExe()); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(codexConfigPath())
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := string(data)
+		cfg, err := loadCodexHooks()
+		if err != nil {
+			t.Fatal(err)
+		}
+		entries := codexTrustEntries(codexEventsOf(cfg), codexTestExe())
+		if len(entries) != 3 {
+			t.Fatalf("信任记录条数 = %d, want 3", len(entries))
+		}
+		if !codexTrustConsistent(text, entries) {
+			t.Errorf("config.toml 信任记录与重算不一致:\n%s", text)
+		}
+		for _, e := range entries {
+			if !strings.Contains(text, "[hooks.state.'"+e[0]+"']") {
+				t.Errorf("缺节 [hooks.state.'%s']", e[0])
+			}
+			// key 形态：hooks.json 路径 + label + 组索引 0 + hook 索引 0
+			if !strings.HasPrefix(e[0], codexHooksPath()+":") || !strings.HasSuffix(e[0], ":0:0") {
+				t.Errorf("节 key 形态异常: %s", e[0])
+			}
+		}
+	})
+	t.Run("预置第三方组时 ok 节索引顺移为 1", func(t *testing.T) {
+		home := isolateCodex(t)
+		hp := filepath.Join(home, "hooks.json")
+		if err := os.MkdirAll(home, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		preset := `{"hooks":{"UserPromptSubmit":[{"matcher":"*","hooks":[{"type":"command","command":"third-party"}]}]}}`
+		if err := os.WriteFile(hp, []byte(preset), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		a := codexAgent{}
+		if err := a.InstallHooks(codexTestExe()); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(codexConfigPath())
+		if err != nil {
+			t.Fatal(err)
+		}
+		key := fmt.Sprintf("%s:user_prompt_submit:1:0", codexHooksPath())
+		if !strings.Contains(string(data), "[hooks.state.'"+key+"']") {
+			t.Errorf("第三方组在前时 ok 节 key 应为 :1:0:\n%s", string(data))
+		}
+	})
+	t.Run("重复安装幂等", func(t *testing.T) {
+		home := isolateCodex(t)
+		if err := os.MkdirAll(home, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		a := codexAgent{}
+		if err := a.InstallHooks(codexTestExe()); err != nil {
+			t.Fatal(err)
+		}
+		before, err := os.ReadFile(codexConfigPath())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := a.InstallHooks(codexTestExe()); err != nil {
+			t.Fatal(err)
+		}
+		after, err := os.ReadFile(codexConfigPath())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(after) != string(before) {
+			t.Errorf("重复安装改动了 config.toml:\nbefore: %s\nafter: %s", string(before), string(after))
+		}
+	})
+}
+
+func TestCodexHooksInstalledTrust(t *testing.T) {
+	isolateCodex(t)
+	a := codexAgent{}
+	if err := a.InstallHooks(currentExe(t)); err != nil {
+		t.Fatal(err)
+	}
+	if !a.HooksInstalled() {
+		t.Fatal("安装后 HooksInstalled 应为 true")
+	}
+	// 篡改一条 trusted_hash → 信任过期（Codex 侧将静默跳过全部 hooks）→ false。
+	cp := codexConfigPath()
+	data, err := os.ReadFile(cp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := strings.Replace(string(data), `trusted_hash = "sha256:`, `trusted_hash = "sha256:0000`, 1)
+	if stale == string(data) {
+		t.Fatal("config.toml 中未找到 trusted_hash 行")
+	}
+	if err := os.WriteFile(cp, []byte(stale), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if a.HooksInstalled() {
+		t.Error("trusted_hash 过期后 HooksInstalled 应为 false")
+	}
+}
+
+func TestCodexEnsureHooksRestoresTrust(t *testing.T) {
+	isolateCodex(t)
+	a := codexAgent{}
+	if err := a.InstallHooks(currentExe(t)); err != nil {
+		t.Fatal(err)
+	}
+	// 破坏信任：删一条 enabled 行 + 篡改一条哈希（模拟 hooks.json 内容变化后信任过期）。
+	cp := codexConfigPath()
+	data, err := os.ReadFile(cp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	broken := strings.Replace(string(data), "enabled = true\n", "", 1)
+	broken = strings.Replace(broken, `trusted_hash = "sha256:`, `trusted_hash = "sha256:ffff`, 1)
+	if broken == string(data) {
+		t.Fatal("破坏未生效")
+	}
+	if err := os.WriteFile(cp, []byte(broken), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if a.HooksInstalled() {
+		t.Fatal("信任破坏后 HooksInstalled 应为 false")
+	}
+	if err := a.EnsureHooks(currentExe(t)); err != nil {
+		t.Fatal(err)
+	}
+	if !a.HooksInstalled() {
+		t.Error("EnsureHooks 自愈后 HooksInstalled 应为 true")
+	}
+	data, err = os.ReadFile(cp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := loadCodexHooks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !codexTrustConsistent(string(data), codexTrustEntries(codexEventsOf(cfg), currentExe(t))) {
+		t.Errorf("自愈后信任记录与 hooks.json 内容不一致:\n%s", string(data))
+	}
+}
+
+func TestCodexRemoveHooksCleansTrust(t *testing.T) {
+	home := isolateCodex(t)
+	hp := filepath.Join(home, "hooks.json")
+	cp := filepath.Join(home, "config.toml")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hp, []byte(`{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"third-party"}]}]}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	thirdKey := fmt.Sprintf("%s:pre_tool_use:0:0", codexHooksPath())
+	preset := "[hooks.state.'" + thirdKey + "']\ntrusted_hash = \"sha256:third\"\nenabled = true\n"
+	if err := os.WriteFile(cp, []byte(preset), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := codexAgent{}
+	if err := a.InstallHooks(codexTestExe()); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := a.RemoveHooks()
+	if err != nil || !removed {
+		t.Fatalf("RemoveHooks = (%v, %v), want (true, nil)", removed, err)
+	}
+	data, err := os.ReadFile(cp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	for _, label := range []string{"user_prompt_submit", "post_tool_use", "stop"} {
+		if strings.Contains(text, ":"+label+":") {
+			t.Errorf("ok 信任节 %s 未清理:\n%s", label, text)
+		}
+	}
+	if !strings.Contains(text, "[hooks.state.'"+thirdKey+"']") {
+		t.Error("第三方 hooks.state 节被误删")
+	}
+	if !strings.Contains(text, "[features]") || !codexHooksFlagOn(text) {
+		t.Error("[features] 特性开关不应随卸载关闭")
 	}
 }

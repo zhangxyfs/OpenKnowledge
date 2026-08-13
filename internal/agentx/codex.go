@@ -1,6 +1,8 @@
 package agentx
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -36,12 +38,14 @@ func codexConfigPath() string { return filepath.Join(CodexHome(), "config.toml")
 // 无 Write/Edit），不追 Bash——与 claude 不追 Bash 对齐。
 var codexHookEvents = []struct {
 	event   string // Codex 事件名（逐字沿用 Claude Code 命名）
+	label   string // snake 事件名（信任哈希 identity 与 hooks.state 节 key 用）
 	matcher string // 组级 matcher
 	okHook  string // ok hook 子命令
+	filters bool   // matcher 是否入信任哈希（Codex 仅过滤型事件入：PreToolUse/PostToolUse）
 }{
-	{"UserPromptSubmit", "*", "prompt"},
-	{"PostToolUse", "apply_patch", "post-tool"},
-	{"Stop", "*", "stop"},
+	{"UserPromptSubmit", "user_prompt_submit", "*", "prompt", false},
+	{"PostToolUse", "post_tool_use", "apply_patch", "post-tool", true},
+	{"Stop", "stop", "*", "stop", false},
 }
 
 // codexCommand 生成 hook 命令串（claudeCommand 同款形态）。
@@ -239,29 +243,62 @@ func writeCodexHooks(cfg map[string]any) error {
 	return os.WriteFile(path, append(data, '\n'), 0o644)
 }
 
-// isFeaturesHeader 判定 trim 后的行是否 [features] 段头：以 "[features]" 开头，
-// 且 "]" 之后剩余为空或以 "#" 开头（允许尾注释——"[features] # 我的特性" 漏判会
-// 导致 enable 时文末追加重复 [features] 表，TOML 硬错误）；"[features.xxx]" 子表
-// 前缀是 "[features." 而非 "[features]"，前缀规则天然排除。
-func isFeaturesHeader(trimmed string) bool {
-	if !strings.HasPrefix(trimmed, "[features]") {
+// isSectionHeader 判定 trim 后的行是否指定段头：以 header 开头，且其后剩余为空
+// 或以 "#" 开头（允许尾注释——"[features] # 我的特性" 漏判会导致 enable 时文末
+// 追加重复 [features] 表，TOML 硬错误）；"[features.xxx]" 子表前缀是 "[features."
+// 而非 "[features]"，前缀规则天然排除。
+func isSectionHeader(trimmed, header string) bool {
+	if !strings.HasPrefix(trimmed, header) {
 		return false
 	}
-	rest := strings.TrimSpace(trimmed[len("[features]"):])
+	rest := strings.TrimSpace(trimmed[len(header):])
 	return rest == "" || strings.HasPrefix(rest, "#")
 }
 
-// codexHooksKeyValue 判定 trim 后的行是否 codex_hooks 键行：键名紧跟 [ \t]*=
-// （词边界——"codex_hooks_extra = ..." 不命中）。命中返回 "=" 后 trim 过的值文本。
-func codexHooksKeyValue(trimmed string) (string, bool) {
-	if !strings.HasPrefix(trimmed, "codex_hooks") {
+// isFeaturesHeader 判定 trim 后的行是否 [features] 段头。
+func isFeaturesHeader(trimmed string) bool {
+	return isSectionHeader(trimmed, "[features]")
+}
+
+// tomlKeyValue 判定 trim 后的行是否指定键行：键名紧跟 [ \t]*=（词边界——
+// "codex_hooks_extra = ..." 不命中 codex_hooks）。命中返回 "=" 后 trim 过的值文本。
+func tomlKeyValue(trimmed, key string) (string, bool) {
+	if !strings.HasPrefix(trimmed, key) {
 		return "", false
 	}
-	rest := strings.TrimLeft(trimmed[len("codex_hooks"):], " \t")
+	rest := strings.TrimLeft(trimmed[len(key):], " \t")
 	if !strings.HasPrefix(rest, "=") {
 		return "", false
 	}
 	return strings.TrimSpace(rest[1:]), true
+}
+
+// codexHooksKeyValue 判定 trim 后的行是否 codex_hooks 键行。
+func codexHooksKeyValue(trimmed string) (string, bool) {
+	return tomlKeyValue(trimmed, "codex_hooks")
+}
+
+// findTomlSection 定位 lines 中 header 节（isSectionHeader 判定，容忍尾注释），
+// 返回节头行号与节末行号（下一节头行号；无则 len(lines)）。未找到返回 (-1, -1)。
+func findTomlSection(lines []string, header string) (int, int) {
+	start := -1
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "[") {
+			continue
+		}
+		if start < 0 {
+			if isSectionHeader(trimmed, header) {
+				start = i
+			}
+			continue
+		}
+		return start, i
+	}
+	if start < 0 {
+		return -1, -1
+	}
+	return start, len(lines)
 }
 
 // codexHooksFlagOn 报告 config.toml 文本的 [features] 段是否含 codex_hooks = true。
@@ -333,29 +370,282 @@ func codexEnableHooksFlag(text string) (string, bool) {
 	return text + "[features]\ncodex_hooks = true\n", true
 }
 
-// ensureCodexHooksFeature 确保 config.toml [features] 含 codex_hooks = true：
-// Codex hooks 是 under-development 特性、默认关闭——不开则全部 hooks 静默不派发。
-// 行级手术编辑，其余内容逐字节保留；写前 .bak-openknowledge 备份；返回是否改动。
-func ensureCodexHooksFeature() (bool, error) {
+// ensureCodexHooksConfig 单次读写应用两组行级手术：codex_hooks 特性开关（0.118 起
+// hooks 为 under-development、默认关闭，不开则装好也静默不派发）+ ok 信任记录
+// （hooks.state trusted_hash/enabled）。合并为一次读、一次备份、一次写——同一安装/
+// 自愈若拆两次写盘，第二次的备份会覆盖第一次的 .bak-openknowledge、丢掉操作前原文。
+// 行级手术编辑，其余内容逐字节保留；两组都无改动则不写盘。
+func ensureCodexHooksConfig(entries [][2]string) error {
 	data, err := os.ReadFile(codexConfigPath())
 	if err != nil && !os.IsNotExist(err) {
-		return false, fmt.Errorf("开启 codex_hooks 特性: %w", err)
+		return fmt.Errorf("写入 codex hooks 配置: %w", err)
 	}
-	text, changed := codexEnableHooksFlag(string(data))
-	if !changed {
-		return false, nil
+	text := string(data)
+	text, c1 := codexEnableHooksFlag(text)
+	text, c2 := codexTrustEdits(text, entries)
+	if !c1 && !c2 {
+		return nil
 	}
+	return writeCodexConfig(data, text, "写入 codex hooks 配置")
+}
+
+// writeCodexConfig 行级手术写盘纪律（ensureCodexHooksConfig / removeCodexTrust 共
+// 用）：原文非空时先写 .bak-openknowledge 备份，再整文件写回。
+func writeCodexConfig(orig []byte, text, op string) error {
 	path := codexConfigPath()
-	if len(data) > 0 {
-		_ = os.WriteFile(path+".bak-openknowledge", data, 0o644)
+	if len(orig) > 0 {
+		_ = os.WriteFile(path+".bak-openknowledge", orig, 0o644)
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return false, fmt.Errorf("开启 codex_hooks 特性: %w", err)
+		return fmt.Errorf("%s: %w", op, err)
 	}
 	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
-		return false, fmt.Errorf("开启 codex_hooks 特性: %w", err)
+		return fmt.Errorf("%s: %w", op, err)
 	}
-	return true, nil
+	return nil
+}
+
+// ---------- hooks.state 信任记录（Codex 信任门）----------
+//
+// Codex 对每条 hooks.json hook 计算内容哈希并与 config.toml
+// [hooks.state.'<hooks.json路径>:<label>:<组索引>:<hook索引>'] 节的 trusted_hash
+// 比对：不一致（Modified）或无记录（Untrusted）时静默跳过全部 hooks、无任何提示。
+// hooks.json 任何内容变化（exe 迁移/重装/自愈重写）都会使信任过期——因此 ok 在
+// 安装/自愈写 hooks.json 后必须同步重算并写入信任记录。
+// 哈希公式经 Codex 源码（hooks/src/engine/discovery.rs hook_hash →
+// config/src/fingerprint.rs version_for_toml）与真实信任记录逐位双向验证：
+// trusted_hash = "sha256:" + sha256hex(canonicalJSON(identity))，
+// identity = {"event_name":label,"hooks":[{async,command,timeout,type}]}
+// （matcher 仅过滤型事件 PostToolUse 入哈希，UserPromptSubmit/Stop 不入）。
+
+// codexTrustHash 按 Codex 公式计算一条 hook 的信任哈希。canonicalJSON =
+// sorted-keys compact JSON：Go map 的 encoding/json 默认即 sorted+compact，
+// 但须关 HTML 转义（serde_json 不转义 <>&），非 ASCII 直出 UTF-8 两侧一致。
+func codexTrustHash(label string, filters bool, matcher, command string, timeoutSec int) string {
+	hook := map[string]any{
+		"async":   false,
+		"command": command,
+		"timeout": timeoutSec,
+		"type":    "command",
+	}
+	identity := map[string]any{
+		"event_name": label,
+		"hooks":      []any{hook},
+	}
+	if filters {
+		identity["matcher"] = matcher
+	}
+	var buf strings.Builder
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(identity) // map[string]any 序列化不会失败
+	sum := sha256.Sum256([]byte(strings.TrimSuffix(buf.String(), "\n")))
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// codexTrustHeader 返回信任记录节头文本（key 含 Windows 反斜杠路径，单引号
+// literal 原样落盘）。
+func codexTrustHeader(key string) string { return "[hooks.state.'" + key + "']" }
+
+// codexTrustKeys 返回事件表里 ok 组对应的 hooks.state 节 key：ok 组在该事件数组中
+// 的实际下标（安装语义"先剥离再追加"⇒ ok 组恒为最后一组，第三方组存在时索引顺移），
+// hook 索引恒 0。一个事件存在多个 ok 组时逐组各出一 key（防御——正常安装恒单组）。
+func codexTrustKeys(events map[string]any) []string {
+	var keys []string
+	for _, e := range codexHookEvents {
+		groups, _ := events[e.event].([]any)
+		for i, g := range groups {
+			gm, _ := g.(map[string]any)
+			hooks, _ := gm["hooks"].([]any)
+			for _, h := range hooks {
+				if hm, _ := h.(map[string]any); hm != nil && isOKCodexHook(hm) {
+					keys = append(keys, fmt.Sprintf("%s:%s:%d:0", codexHooksPath(), e.label, i))
+					break
+				}
+			}
+		}
+	}
+	return keys
+}
+
+// codexTrustEntries 按 hooks.json 当前内容计算 ok 三条信任记录：节 key → trusted_hash。
+// command/timeout 以 codexOKGroup 实际写入值为准（codexCommand(exe, okHook) 与
+// HookTimeoutSec()）；某事件无 ok 组（未安装）时该事件跳过。
+func codexTrustEntries(events map[string]any, exe string) [][2]string {
+	var entries [][2]string
+	for _, e := range codexHookEvents {
+		groups, _ := events[e.event].([]any)
+		idx := -1
+		for i, g := range groups {
+			gm, _ := g.(map[string]any)
+			hooks, _ := gm["hooks"].([]any)
+			for _, h := range hooks {
+				if hm, _ := h.(map[string]any); hm != nil && isOKCodexHook(hm) {
+					idx = i
+				}
+			}
+		}
+		if idx < 0 {
+			continue
+		}
+		key := fmt.Sprintf("%s:%s:%d:0", codexHooksPath(), e.label, idx)
+		entries = append(entries, [2]string{
+			key,
+			codexTrustHash(e.label, e.filters, e.matcher, codexCommand(exe, e.okHook), HookTimeoutSec()),
+		})
+	}
+	return entries
+}
+
+// codexTrustEdits 行级手术写入信任记录：节存在→替换 trusted_hash 行、enabled = true
+// 缺失则补（紧跟 trusted_hash 行后，enabled = false 视同过期纠正为 true）；节不存在→
+// 文末追加三行块（节头+两行）。节内其他行与第三方 hooks.state 节逐字节保留。
+// 全部已是最新返回 (原文, false)。
+func codexTrustEdits(text string, entries [][2]string) (string, bool) {
+	changed := false
+	for _, e := range entries {
+		var c bool
+		text, c = upsertCodexTrustSection(text, e[0], e[1])
+		changed = changed || c
+	}
+	return text, changed
+}
+
+// upsertCodexTrustSection 确保 text 含 key 的信任节且内容最新，返回新文本与是否改动。
+func upsertCodexTrustSection(text, key, hash string) (string, bool) {
+	header := codexTrustHeader(key)
+	hashLine := `trusted_hash = "` + hash + `"`
+	lines := strings.Split(text, "\n")
+	secStart, secEnd := findTomlSection(lines, header)
+	if secStart < 0 {
+		if text != "" && !strings.HasSuffix(text, "\n") {
+			text += "\n"
+		}
+		return text + header + "\n" + hashLine + "\nenabled = true\n", true
+	}
+	// 节内定位 trusted_hash / enabled 键行（注释行跳过）。
+	hashIdx, enabledIdx := -1, -1
+	for i := secStart + 1; i < secEnd; i++ {
+		trimmed := strings.TrimSpace(lines[i])
+		if strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if _, ok := tomlKeyValue(trimmed, "trusted_hash"); ok && hashIdx < 0 {
+			hashIdx = i
+		}
+		if _, ok := tomlKeyValue(trimmed, "enabled"); ok && enabledIdx < 0 {
+			enabledIdx = i
+		}
+	}
+	changed := false
+	if hashIdx >= 0 {
+		if lines[hashIdx] != hashLine {
+			lines[hashIdx] = hashLine
+			changed = true
+		}
+	} else {
+		lines = append(lines, "")
+		copy(lines[secStart+2:], lines[secStart+1:])
+		lines[secStart+1] = hashLine
+		if enabledIdx > secStart {
+			enabledIdx++
+		}
+		hashIdx = secStart + 1
+		changed = true
+	}
+	if enabledIdx >= 0 {
+		if lines[enabledIdx] != "enabled = true" {
+			lines[enabledIdx] = "enabled = true"
+			changed = true
+		}
+	} else {
+		lines = append(lines, "")
+		copy(lines[hashIdx+2:], lines[hashIdx+1:])
+		lines[hashIdx+1] = "enabled = true"
+		changed = true
+	}
+	return strings.Join(lines, "\n"), changed
+}
+
+// codexTrustConsistent 报告 text 中 entries 各节的 trusted_hash 与 enabled 是否与
+// 期望一致：任一节缺失、哈希不符或 enabled 非 true → false（对应 Codex 侧
+// Modified/Untrusted/禁用——hooks 静默不派发）。
+func codexTrustConsistent(text string, entries [][2]string) bool {
+	if len(entries) == 0 {
+		return false
+	}
+	lines := strings.Split(text, "\n")
+	for _, e := range entries {
+		secStart, secEnd := findTomlSection(lines, codexTrustHeader(e[0]))
+		if secStart < 0 {
+			return false
+		}
+		hashOK, enabledOK := false, false
+		for i := secStart + 1; i < secEnd; i++ {
+			trimmed := strings.TrimSpace(lines[i])
+			if strings.HasPrefix(trimmed, "#") {
+				continue
+			}
+			if val, ok := tomlKeyValue(trimmed, "trusted_hash"); ok && val == `"`+e[1]+`"` {
+				hashOK = true
+			}
+			if val, ok := tomlKeyValue(trimmed, "enabled"); ok && val == "true" {
+				enabledOK = true
+			}
+		}
+		if !hashOK || !enabledOK {
+			return false
+		}
+	}
+	return true
+}
+
+// codexTrustRemoveEdits 整节移除 keys 对应的 hooks.state 节（节头到下一节头/文末），
+// 第三方节与其余内容逐字节保留。无匹配节返回 (原文, false)。
+func codexTrustRemoveEdits(text string, keys []string) (string, bool) {
+	if len(keys) == 0 {
+		return text, false
+	}
+	lines := strings.Split(text, "\n")
+	kept := make([]string, 0, len(lines))
+	dropping := false
+	changed := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "[") {
+			dropping = false
+			for _, k := range keys {
+				if isSectionHeader(trimmed, codexTrustHeader(k)) {
+					dropping = true
+					changed = true
+					break
+				}
+			}
+		}
+		if !dropping {
+			kept = append(kept, line)
+		}
+	}
+	if !changed {
+		return text, false
+	}
+	return strings.Join(kept, "\n"), true
+}
+
+// removeCodexTrust 整节移除 ok 的 hooks.state 信任节（卸载用）；无匹配节不写盘。
+func removeCodexTrust(keys []string) error {
+	data, err := os.ReadFile(codexConfigPath())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("移除 codex 信任记录: %w", err)
+	}
+	text, changed := codexTrustRemoveEdits(string(data), keys)
+	if !changed {
+		return nil
+	}
+	return writeCodexConfig(data, text, "移除 codex 信任记录")
 }
 
 func (codexAgent) InstallHooks(exe string) error {
@@ -372,16 +662,15 @@ func (codexAgent) InstallHooks(exe string) error {
 	if err := writeCodexHooks(cfg); err != nil {
 		return err
 	}
-	// Codex 0.118 起 hooks 为 under-development 特性、默认关闭——必须同步开启
-	// config.toml [features] codex_hooks，否则 hooks.json 装好也静默不派发。
-	if _, err := ensureCodexHooksFeature(); err != nil {
-		return err
-	}
-	return nil
+	// 同步落 config.toml 两项集成保障（单次读写）：codex_hooks 特性开关（0.118 起
+	// 默认关闭，不开则装好也静默不派发）+ hooks.state 信任记录（hooks.json 内容
+	// 变化 → 信任哈希过期 → Codex 静默跳过全部 hooks）。
+	return ensureCodexHooksConfig(codexTrustEntries(events, exe))
 }
 
-// RemoveHooks 只移除 hooks.json 里的 ok 条目；config.toml 的 codex_hooks
-// 特性开关单独存在无副作用（只是允许 Codex 派发 hooks），不随移除关闭。
+// RemoveHooks 移除 hooks.json 里的 ok 条目并连带清理 config.toml 里 ok 的
+// hooks.state 信任节（第三方节保留）；config.toml 的 codex_hooks 特性开关单独
+// 存在无副作用（只是允许 Codex 派发 hooks），不随移除关闭。
 func (codexAgent) RemoveHooks() (bool, error) {
 	if _, err := os.Stat(codexHooksPath()); os.IsNotExist(err) {
 		return false, nil
@@ -391,18 +680,24 @@ func (codexAgent) RemoveHooks() (bool, error) {
 		return false, err
 	}
 	events := codexEventsOf(cfg)
-	if events == nil || !stripOKCodexHooks(events) {
+	if events == nil || !hasOKCodexHook(events) {
 		return false, nil
 	}
+	trustKeys := codexTrustKeys(events) // 剥离前取 ok 组实际索引
+	stripOKCodexHooks(events)
 	if err := writeCodexHooks(cfg); err != nil {
 		return false, fmt.Errorf("移除 codex hooks: %w", err)
+	}
+	if err := removeCodexTrust(trustKeys); err != nil {
+		return false, err
 	}
 	return true, nil
 }
 
 // EnsureHooks 自愈：hooks.json 存在、曾安装过 ok hooks 且内容过期（exe 迁移、
 // 超时变更）时重写；从未安装（无任何 ok 条目）则 no-op——用户显式移除的集成
-// 不复活。codex_hooks 特性开关被关/缺失同样视为过期（曾安装过才走到这）：补开。
+// 不复活。codex_hooks 特性开关被关/缺失、hooks.state 信任记录过期/缺失同样视为
+// 过期（曾安装过才走到这）：按当前 hooks.json 内容重算补写。
 func (codexAgent) EnsureHooks(exe string) error {
 	if _, err := os.Stat(codexHooksPath()); err != nil {
 		return nil
@@ -426,9 +721,10 @@ func (codexAgent) EnsureHooks(exe string) error {
 			return err
 		}
 	}
-	// codex_hooks 特性开关被关/缺失视为过期（曾安装过才走到这）：补开。
-	_, err = ensureCodexHooksFeature()
-	return err
+	// codex_hooks 特性开关被关/缺失、hooks.state 信任记录过期/缺失均视为过期形态
+	// （曾安装过才走到这）：无论 hooks.json 本轮是否重写，都按当前内容重算补写
+	// （hooks.json 内容任何变化 → 信任哈希过期 → Codex 静默跳过全部 hooks）。
+	return ensureCodexHooksConfig(codexTrustEntries(events, exe))
 }
 
 func (codexAgent) HooksInstalled() bool {
@@ -455,5 +751,6 @@ func (codexAgent) HooksInstalled() bool {
 	if err != nil || !codexHooksFlagOn(string(data)) {
 		return false
 	}
-	return true
+	// 信任记录过期/缺失 = Codex 侧 Modified/Untrusted 静默跳过全部 hooks，视为未安装。
+	return codexTrustConsistent(string(data), codexTrustEntries(events, exe))
 }
