@@ -235,10 +235,16 @@ func (h *Handler) apiEmbeddingDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.dlMu.Lock()
-	if _, running := h.dl[req.ModelID]; running {
-		h.dlMu.Unlock()
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "state": "downloading"})
-		return
+	if old, ok := h.dl[req.ModelID]; ok {
+		old.mu.Lock()
+		st := old.State
+		old.mu.Unlock()
+		if st == "downloading" {
+			h.dlMu.Unlock()
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "state": "downloading"})
+			return
+		}
+		delete(h.dl, req.ModelID) // done/error 残留：清掉后落入新建
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	job := &dlJob{ModelID: req.ModelID, State: "downloading", Total: m.Size, cancel: cancel}
@@ -278,8 +284,15 @@ func (h *Handler) apiEmbeddingDownloadCancel(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	h.dlMu.Lock()
-	if job, ok := h.dl[req.ModelID]; ok && job.cancel != nil {
-		job.cancel()
+	if job, ok := h.dl[req.ModelID]; ok {
+		job.mu.Lock()
+		st := job.State
+		job.mu.Unlock()
+		if st == "downloading" && job.cancel != nil {
+			job.cancel()
+		} else {
+			delete(h.dl, req.ModelID) // 非 downloading（done/error 残留）：直接消除
+		}
 	}
 	h.dlMu.Unlock()
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})

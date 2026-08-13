@@ -130,6 +130,48 @@ func TestDownloadLifecycle(t *testing.T) {
 	}
 }
 
+// TestDownloadRetryAfterError：下载失败（sha 不符）后同一模型可重试成功（换好源）。
+func TestDownloadRetryAfterError(t *testing.T) {
+	h := newTestHandler(t)
+	content := []byte("0123456789")
+	bad := embed.BuiltinModel{ID: "fake-retry", Repo: "r/p", File: "m.gguf", Size: int64(len(content)), SHA256: strings.Repeat("0", 64), Pooling: "cls", Dim: 2}
+	embed.BuiltinModels = append(embed.BuiltinModels, bad)
+	t.Cleanup(func() { embed.BuiltinModels = embed.BuiltinModels[:len(embed.BuiltinModels)-1] })
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(content) }))
+	defer srv.Close()
+	// 第一次：sha256 不符 → error
+	embPost(t, h, "/api/setup/embedding/download", `{"model_id":"fake-retry","mirror":"`+srv.URL+`"}`)
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		st := embGet(t, h)["download"].(map[string]any)
+		if st["state"] == "error" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("未进入 error 态: %v", st)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	// 第二次：修正 sha（换条目）重试 → 应能重新下载而非谎报 downloading
+	good := embed.BuiltinModel{ID: "fake-retry", Repo: "r/p", File: "m.gguf", Size: int64(len(content)), SHA256: "84d89877f0d4041efb6bf91a16f0248f2fd573e6af05c19f96bedb9f882f7882", Pooling: "cls", Dim: 2}
+	embed.BuiltinModels[len(embed.BuiltinModels)-1] = good
+	embPost(t, h, "/api/setup/embedding/download", `{"model_id":"fake-retry","mirror":"`+srv.URL+`"}`)
+	deadline = time.Now().Add(10 * time.Second)
+	for {
+		st := embGet(t, h)["download"].(map[string]any)
+		if st["state"] == "done" {
+			break
+		}
+		if s, _ := st["state"].(string); s == "error" {
+			t.Fatalf("重试仍失败: %v", st["error"])
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("重试未完成: %v", st)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 func TestOllamaModelsProxy(t *testing.T) {
 	h := newTestHandler(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
