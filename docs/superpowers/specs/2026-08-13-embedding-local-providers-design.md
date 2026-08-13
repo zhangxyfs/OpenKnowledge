@@ -114,16 +114,20 @@ mirror = "hf-mirror"        # hf-mirror | huggingface | 自定义 base URL
 `/v1/embeddings` 端点已验证 OpenAI 兼容，输出 L2 归一化向量，支持数组
 批量输入。
 
-**模型清单**（烘焙进二进制，实现时钉死 repo/文件/sha256/维度）：
+**模型清单**（烘焙进二进制；每条含 id/repo/文件/size/sha256/维度/pooling/
+查询指令前缀，实现时钉死具体值）：
 
-| id | 模型 | 大小量级 | 维度 | 说明 |
-|---|---|---|---|---|
-| `bge-m3-q4_k_m` | BAAI/bge-m3 Q4_K_M | ~400MB | 1024 | **默认推荐**，中英双语强 |
-| `bge-m3-q8_0` | BAAI/bge-m3 Q8_0 | ~600MB | 1024 | 更准，体积换质量 |
-| `nomic-embed-q8` | nomic-embed-text v1.5 | ~150MB | 768 | 最小，英文为主 |
+| id | 模型 | 大小量级 | 维度 | pooling | 说明 |
+|---|---|---|---|---|---|
+| `qwen3-emb-0.6b-q8` | Qwen3-Embedding-0.6B Q8_0 | ~639MB | 1024 | last | **默认推荐**：官方 GGUF，中文+代码检索强；查询侧加 Instruct 前缀（+1~5%） |
+| `bge-m3-q4_k_m` | BAAI/bge-m3 Q4_K_M | ~400MB | 1024 | cls | 下载最小，中英双语成熟 |
+| `bge-m3-q8_0` | BAAI/bge-m3 Q8_0 | ~600MB | 1024 | cls | bge 质量档 |
+| `nomic-embed-q8` | nomic-embed-text v1.5 | ~150MB | 768 | mean | 最小，英文为主 |
 
-候选 repo（实现时验证钉死）：`gpustack/bge-m3-GGUF`（社区下载量最高）、
-`ggml-org/bge-m3-Q8_0-GGUF`（llama.cpp 官方 org）、nomic 官方 GGUF。
+已验证来源：`Qwen/Qwen3-Embedding-0.6B-GGUF`（官方，Q8_0=639MB）、
+`gpustack/bge-m3-GGUF`（社区下载量最高）、`ggml-org/bge-m3-Q8_0-GGUF`
+（llama.cpp 官方 org）、nomic 官方 GGUF。Qwen3-Embedding 4B/8B 不进内置
+清单（CPU 推理超出 hook 超时预算），需要大模型走 Ollama/自定义形态。
 
 **下载**：
 - 源：`hf-mirror`（`https://hf-mirror.com`，国内默认）| `huggingface` 官方 |
@@ -164,6 +168,11 @@ mirror = "hf-mirror"        # hf-mirror | huggingface | 自定义 base URL
 - **批量**：`embed.Client` 增加批量能力（`/v1/embeddings` 数组 input，三形态
   都支持），`ok index` 全量重建分批（如 32 条/批）显著提速内置/本地模型；
   增量 sync 仍单条。
+- **查询/文档双路径**：接口区分 EmbedQuery（检索侧）与 EmbedDocument（建
+  索引侧）。清单中 `query_instruct` 非空的模型（Qwen3-Embedding）仅查询侧
+  自动套 `Instruct: <检索指令>\nQuery: ` 前缀，文档侧原文嵌入；其余模型
+  两路径行为一致。pooling 按清单值传给 sidecar 启动参数（bge-m3=cls，
+  qwen3=last）。
 - 检索打分、分词、排除 mandatory/draft 等逻辑**不变**。
 
 ## 8. GUI 设计（视觉稿已确认）
