@@ -77,9 +77,23 @@ func (dshAgent) HooksInstalled() bool {
 		return false
 	}
 	content := string(data)
-	return strings.Contains(content, dshPluginMarker) &&
-		strings.Contains(content, "// fingerprint: "+dshTemplateFingerprint())
-	// Task 3 追加 patch 行判定
+	if !strings.Contains(content, dshPluginMarker) ||
+		!strings.Contains(content, "// fingerprint: "+dshTemplateFingerprint()) {
+		return false
+	}
+	// 旧 exe 路径视为过期（与 zcodeAgent 同款，以解析后的当前可执行文件为基准）
+	exe, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+	if content != renderDSHPlugin(exe) {
+		return false
+	}
+	patch, err := os.ReadFile(dshPatchPath())
+	return err == nil && strings.Contains(string(patch), "id: ok-hooks")
 }
 
 func (dshAgent) InstallHooks(exe string) error {
@@ -97,9 +111,85 @@ func (dshAgent) InstallHooks(exe string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(path, []byte(renderDSHPlugin(exe)), 0o644)
-	// Task 3 追加 patch 行 upsert
+	if err := os.WriteFile(path, []byte(renderDSHPlugin(exe)), 0o644); err != nil {
+		return err
+	}
+	// patch 行（标记块幂等 upsert；# 标记在 YAML 是合法注释；UpsertHooksBlock
+	// 的 StripLegacyOKHooks 只认 TOML [[hooks]] 表，对 YAML 是安全 no-op）
+	patch := dshPatchPath()
+	if data, err := os.ReadFile(patch); err == nil {
+		_ = os.WriteFile(patch+".bak-openknowledge", data, 0o644)
+	}
+	return UpsertHooksBlock(patch, dshPatchBlock())
 }
 
-func (dshAgent) RemoveHooks() (bool, error)   { return false, nil }   // Task 3 实现
-func (dshAgent) EnsureHooks(exe string) error { _ = exe; return nil } // Task 3 实现
+// removeDSHMarkerBlock 从 patch 内容移除 ok 标记块，返回 (新内容, 是否移除)。
+func removeDSHMarkerBlock(content string) (string, bool) {
+	i := strings.Index(content, MarkerBegin)
+	j := strings.Index(content, MarkerEnd)
+	if i < 0 || j <= i {
+		return content, false
+	}
+	tail := strings.TrimPrefix(content[j+len(MarkerEnd):], "\n")
+	head := strings.TrimRight(content[:i], "\n")
+	out := head
+	if strings.TrimSpace(tail) != "" {
+		if out != "" {
+			out += "\n"
+		}
+		out += "\n" + tail
+	}
+	out = strings.TrimLeft(out, "\n")
+	if out != "" && !strings.HasSuffix(out, "\n") {
+		out += "\n"
+	}
+	return out, true
+}
+
+func (dshAgent) RemoveHooks() (bool, error) {
+	removed := false
+	path := dshPluginPath()
+	data, err := os.ReadFile(path)
+	switch {
+	case os.IsNotExist(err):
+	case err != nil:
+		return false, err
+	case strings.Contains(string(data), dshPluginMarker):
+		if err := os.Remove(path); err != nil {
+			return false, fmt.Errorf("删除 dsh 插件: %w", err)
+		}
+		removed = true
+	}
+	patch := dshPatchPath()
+	data, err = os.ReadFile(patch)
+	switch {
+	case os.IsNotExist(err):
+	case err != nil:
+		return removed, err
+	default:
+		if out, ok := removeDSHMarkerBlock(string(data)); ok {
+			if err := os.WriteFile(patch, []byte(out), 0o644); err != nil {
+				return removed, fmt.Errorf("移除 patch 行: %w", err)
+			}
+			removed = true
+		}
+	}
+	return removed, nil
+}
+
+// EnsureHooks 自愈：仅在曾安装（patch 标记块存在或插件文件为自家）且内容过期
+// 时整体重写；从未安装 / 经 RemoveHooks 显式移除（两者均不在）不复活。
+func (dshAgent) EnsureHooks(exe string) error {
+	pluginData, pluginErr := os.ReadFile(dshPluginPath())
+	patchData, patchErr := os.ReadFile(dshPatchPath())
+	ours := (pluginErr == nil && strings.Contains(string(pluginData), dshPluginMarker)) ||
+		(patchErr == nil && strings.Contains(string(patchData), MarkerBegin))
+	if !ours {
+		return nil
+	}
+	if pluginErr == nil && string(pluginData) == renderDSHPlugin(exe) &&
+		patchErr == nil && strings.Contains(string(patchData), "id: ok-hooks") {
+		return nil
+	}
+	return dshAgent{}.InstallHooks(exe)
+}
