@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	_ "embed"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -49,10 +50,22 @@ func renderDSHPlugin(exe string) string {
 	return dshPluginMarker + "\n// fingerprint: " + dshTemplateFingerprint() + "\n" + body
 }
 
-// dshPatchBlock 家目录 patch 行：绝对路径挂载本地插件（cordis patch 的 name 字段
-// 接受绝对路径；YAML 单引号字符串 + 正斜杠，规避 Windows 反斜杠转义）。
+// dshPluginFileURL 插件绝对路径的 file:// URL 形态。实机验证（Task 6）：vendored
+// cordis loader 把 patch 的 name 直接交给 Node ESM 解析（vendor/loader/src/config/
+// tree.ts 的 import(name)），Windows 绝对路径（D:/...）报
+// ERR_UNSUPPORTED_ESM_URL_SCHEME，必须 file:/// URL；POSIX 绝对路径同样适用。
+func dshPluginFileURL() string {
+	p := filepath.ToSlash(dshPluginPath())
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	return (&url.URL{Scheme: "file", Path: p}).String()
+}
+
+// dshPatchBlock 家目录 patch 行：file:// URL 挂载本地插件（cordis patch 的 name
+// 字段直接进 Node ESM import；YAML 单引号字符串原样保留，规避转义）。
 func dshPatchBlock() string {
-	return "- insert:\n    - id: ok-hooks\n      name: '" + filepath.ToSlash(dshPluginPath()) + "'\n"
+	return "- insert:\n    - id: ok-hooks\n      name: '" + dshPluginFileURL() + "'\n"
 }
 
 // dshAgent DeepSeek Harness 适配器：hook 集成 = 本地 JS 插件 + 家目录 patch 行挂载；

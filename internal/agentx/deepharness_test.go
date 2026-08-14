@@ -121,8 +121,12 @@ func TestDSHInstallWritesPatchLine(t *testing.T) {
 	if !strings.Contains(patch, "id: ok-hooks") {
 		t.Fatalf("patch 应含 ok-hooks 行: %q", patch)
 	}
-	if !strings.Contains(patch, "name: '"+filepath.ToSlash(dshPluginPath())+"'") {
-		t.Fatalf("patch 应含插件绝对路径（正斜杠单引号）: %q", patch)
+	slash := filepath.ToSlash(dshPluginPath())
+	if !strings.HasPrefix(slash, "/") {
+		slash = "/" + slash
+	}
+	if !strings.Contains(patch, "name: 'file://"+slash+"'") {
+		t.Fatalf("patch 应含插件 file:// URL（单引号）: %q", patch)
 	}
 	if !(dshAgent{}).HooksInstalled() {
 		t.Fatal("安装后 HooksInstalled 应为真")
