@@ -46,7 +46,7 @@ OpenKnowledge 的 hooks 集成经 agentx 适配器注册表支持 9 个 agent。
 | `DisplayName()` | `"DeepSeek Harness"` |
 | `Detect()` | 配置根目录存在（与其他适配器一致） |
 | `HooksTarget()` | `<home>/plugins/openknowledge/index.js`（回显用） |
-| `InstallHooks(exe)` | ① 渲染模板（`{{EXE}}` 占位替换为 ok 绝对路径）整写插件文件（自有新文件整写）；② 往 `$DSH_HOME/cordis.patch.yml` 幂等插入挂载行 `- insert: [{ id: ok-hooks, name: <插件绝对路径>, config: { okExe: <exe> } }]`——先剥离自有条目再追加、写前 `.bak-openknowledge` 备份、保留第三方行；文件不存在则建最小骨架 |
+| `InstallHooks(exe)` | ① 渲染模板（`{{EXE}}` 占位替换为 ok 绝对路径）整写插件文件（自有新文件整写）；② 往 `$DSH_HOME/cordis.patch.yml` 幂等插入挂载行 `- insert: [{ id: ok-hooks, name: '<file:// URL 指向插件绝对路径>' }]`（无 config——exe 烘焙进 JS；file:// URL 系 Task 6 实测修正）——先剥离自有条目再追加、写前 `.bak-openknowledge` 备份、保留第三方行；文件不存在则建最小骨架 |
 | `HooksInstalled()` | 插件文件存在 + 头标记 + 指纹匹配，且 patch 行存在（exe 迁移由 `EnsureHooks` 渲染全文比对兜底重写） |
 | `RemoveHooks()` | 删自家插件文件 + 从 patch 剥离自家行（头标记/id `ok-hooks` 双重确认，绝不动第三方）；返回是否实际移除 |
 | `EnsureHooks(exe)` | 曾安装且指纹/patch 行过期才重写；显式移除不复活；fail-open（错误仅记日志） |
@@ -107,9 +107,11 @@ OpenKnowledge 的 hooks 集成经 agentx 适配器注册表支持 9 个 agent。
 
 1. ~~**沙箱继承**~~ → **设计消解**：插件在 DSH 宿主进程内运行，用 `node:child_process.execFile` 直拉子进程，不经 `ctx.shell` 沙箱执行器，`workspace-write` 沙箱不适用于插件子进程。
 2. ~~**`agent.steer()` 签名**~~ → 已确认：`steer(message: UserMessage): void`（`runtime-types.ts:133`）；阻断式 Stop 的官方桥译法即 `agent.steer(...)`（`hooks-claude-code/src/index.ts:270-277`）。
-3. **patch 行绝对路径挂载语法**：`- insert: [{ id, name }]` 列表形态已对照 `packages/bundle/base/cordis.patch.yml` 确认；Windows 路径用正斜杠 + YAML 单引号。**仍须** `dsh --dump-config` 实证行生效。
-4. **DSH 是否直接加载 `.js` ESM 插件文件**（无 package.json 的单文件是否可行，不行则补最小 `package.json`）——**仍须实测**。
+3. **patch 行绝对路径挂载语法** → **已实证**：`dsh --profile web --dump-config` / `--profile headless --dump-config` 均解析出 `id: ok-hooks` + `name: file:///...` 行。**重要修正**：vendored cordis loader 把 `name` 直接交给 Node ESM `import()`（`vendor/loader/src/config/tree.ts:155-159`），Windows 盘符绝对路径（`D:/...`）报 `ERR_UNSUPPORTED_ESM_URL_SCHEME`——已改为 `file:///` URL 挂载（commit c53bc09）。
+4. **DSH 是否直接加载 `.js` ESM 插件文件** → **已实证**：无 package.json 的单文件 `.js` 可加载；`import('file:///.../index.js')` 直接返回 `{ name:'openknowledge', apply:fn }`，`dsh web` 启动 20s 无 import 错误。
 5. DSH 为 developer preview，事件 API 可能破坏性变更——插件订阅处做存在性守卫，升级报错不炸宿主。
+
+**端到端会话级验证（2026-08-14，keyless 真实 DSH 会话）:** 插件经真实会话触发 `tools/post-execute`（`tool=Write/Edit`）与 prompt 事件，均到达 `ok.exe` 并落 `~/.openknowledge/ok.log`（`22:02:48 post-tool skip: tool=Write ...`、`22:06:57 prompt embed identity ...` 等）；`post-tool skip` 因路径在注册项目之外属正确语义。`agent/turn-stopping`（stop 闭环）因无真实 key 未在无头会话中实证，留待用户真实 DSH 会话终验。
 
 另核实：写盘工具名 `write`/`edit`、参数键 `file_path`（`tool-fs/src/write.ts:51`），与 Claude 方言一致；`UserMessage` 为纯数据（`message.ts:192`），插件用 `node:crypto` 自造，无需依赖 `@deepseek-ai/*` 包。
 
