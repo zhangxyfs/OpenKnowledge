@@ -701,7 +701,7 @@ func removeDSHMarkerBlock(content string) (string, bool) {
 	return UpsertHooksBlock(patch, dshPatchBlock())
 ```
 
-`HooksInstalled` 改为:
+`HooksInstalled` 改为（**勘误**：brief 原版缺 exe 时效判定，与 `TestDSHEnsureHooks` 自相矛盾；实现者按 zcode/claude/codex 惯例补 `os.Executable()`+`EvalSymlinks` 基准的全文比对，评审已核验批准——以下为落地版）:
 
 ```go
 func (dshAgent) HooksInstalled() bool {
@@ -712,6 +712,17 @@ func (dshAgent) HooksInstalled() bool {
 	content := string(data)
 	if !strings.Contains(content, dshPluginMarker) ||
 		!strings.Contains(content, "// fingerprint: "+dshTemplateFingerprint()) {
+		return false
+	}
+	// 旧 exe 路径视为过期（与 zcodeAgent 同款，以解析后的当前可执行文件为基准）
+	exe, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+	if content != renderDSHPlugin(exe) {
 		return false
 	}
 	patch, err := os.ReadFile(dshPatchPath())
