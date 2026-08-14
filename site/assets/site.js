@@ -22,7 +22,7 @@
     'meta.title.i': 'OpenKnowledge — Project knowledge base for AI coding assistants',
     'i.tagline': 'A <b>project knowledge base</b> for AI coding assistants — knowledge is isolated per project and injected into the AI&#39;s context through each assistant&#39;s hooks/extensions, and it can enforce workflow rules like "no code change without a changelog entry".',
     'i.src': 'Source',
-    'i.hint': 'Auto-detects your OS · <a href="https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge/releases/download/v2.14.0/OpenKnowledgeSetup-2.14.0.exe">Windows</a> / <a href="https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge/releases/download/v2.14.0/openknowledge_2.14.0_amd64.deb">Linux .deb</a> / <a href="https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge/releases/download/v2.14.0/openknowledge_2.14.0_linux_amd64.tar.gz">Linux .tar.gz</a> · <a href="https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge/releases" target="_blank" rel="noopener">All releases</a>',
+    'i.hint': 'Auto-detects your OS · <a href="https://github.com/zhangxyfs/OpenKnowledge/releases/download/v2.14.0/OpenKnowledgeSetup-2.14.0.exe">Windows</a> / <a href="https://github.com/zhangxyfs/OpenKnowledge/releases/download/v2.14.0/openknowledge_2.14.0_amd64.deb">Linux .deb</a> / <a href="https://github.com/zhangxyfs/OpenKnowledge/releases/download/v2.14.0/openknowledge_2.14.0_linux_amd64.tar.gz">Linux .tar.gz</a> · <a href="https://github.com/zhangxyfs/OpenKnowledge/releases" target="_blank" rel="noopener">All releases</a>',
     'i.feat.h': 'Features',
     'i.feat.sub': 'Single-binary Go CLI (ok) with zero runtime dependencies',
     'i.f1t': 'Base injection',
@@ -54,7 +54,7 @@
     'i.mbh': 'Manual build',
     'i.mbp': 'Requires Go ≥ 1.25.',
     'i.mbpre': '<code>go build -o ok.exe ./cmd/ok   <span class="c"># Windows</span>\ngo build -o ok ./cmd/ok       <span class="c"># Linux/macOS</span>\n./ok setup                    <span class="c"># first-run wizard (idempotent)</span></code>',
-    'i.foot': '<a href="https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge" target="_blank" rel="noopener">Source</a>· <a href="https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge/releases" target="_blank" rel="noopener">Releases</a>· <a href="https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge/src/branch/master/docs/ARCHITECTURE.md" target="_blank" rel="noopener">Architecture</a>',
+    'i.foot': '<a href="https://github.com/zhangxyfs/OpenKnowledge" target="_blank" rel="noopener">Source</a>· <a href="https://github.com/zhangxyfs/OpenKnowledge/releases" target="_blank" rel="noopener">Releases</a>· <a href="https://github.com/zhangxyfs/OpenKnowledge/blob/master/docs/ARCHITECTURE.md" target="_blank" rel="noopener">Architecture</a>',
 
     /* ── 文档页 ── */
     'meta.title.d': 'Docs — OpenKnowledge',
@@ -116,12 +116,12 @@
     'd.s8l1': '<b>Keyword channel</b>: FTS5 full-text index + BM25 scoring, weighted across title/tags/summary/body; Chinese uses bigram tokenization, zero dependencies',
     'd.s8l2': '<b>Semantic channel</b>: OpenAI-compatible embeddings + cosine similarity, recalling entries that "ask differently but mean the same"',
     'd.s8l3': '<b>Drafts stay out of both channels</b>: excluded from FTS and vectors until approved',
-    'd.s8tail': '~30ms per query over 10k entries; when the embedding service is down it degrades to keyword-only retrieval and injection never goes missing. Implementation details in <a href="https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge/src/branch/master/docs/ARCHITECTURE.md" target="_blank" rel="noopener">ARCHITECTURE §17</a>.',
+    'd.s8tail': '~30ms per query over 10k entries; when the embedding service is down it degrades to keyword-only retrieval and injection never goes missing. Implementation details in <a href="https://github.com/zhangxyfs/OpenKnowledge/blob/master/docs/ARCHITECTURE.md" target="_blank" rel="noopener">ARCHITECTURE §17</a>.',
     'd.s9h': 'How it works',
     'd.s9p': 'Using Kimi Code as the example, the assistant calls <code>ok</code> at three moments (other agents trigger the equivalents through their own adapters):',
     'd.s9tbl': '<table class="doc"><tr><th>Hook</th><th>When it runs</th><th>Effect</th></tr><tr><td><code>UserPromptSubmit</code></td><td>Every user message, before the model call</td><td>First question: mandatory entries + index; every question: retrieval injection</td></tr><tr><td><code>PostToolUse</code></td><td>After the AI successfully writes/edits a file</td><td>Records the touched file into session state</td></tr><tr><td><code>Stop</code></td><td>When the AI&#39;s turn is about to end</td><td>Code changed without changelog → exit 2 block (at most once per rule per session)</td></tr></table>',
     'd.s9note': '<b>Note</b>All hook paths are fail-open: any internal error is only logged (<code>~/.openknowledge/ok.log</code>) and never disrupts the session.',
-    'd.foot': '<a href="index.html">Home</a>· <a href="changelog.html">Changelog</a>· <a href="https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge" target="_blank" rel="noopener">Source</a>',
+    'd.foot': '<a href="index.html">Home</a>· <a href="changelog.html">Changelog</a>· <a href="https://github.com/zhangxyfs/OpenKnowledge" target="_blank" rel="noopener">Source</a>',
 
     /* ── 更新日志页 ── */
     'meta.title.c': 'Changelog — OpenKnowledge',
@@ -197,8 +197,8 @@
     'c.223.f2': 'The installer stops the daemon before copying files, avoiding ok.exe being locked during upgrades',
     'c.223.i1': 'Leaner hook injection: default budget 1500→800, top_n 3→2; retrieval hits inject summary + file path instead of full text (mandatory entries still inject full text)',
     'c.older.t': 'Earlier',
-    'c.older.l': 'v1.x early development logs live as dated files in the repo&#39;s <a href="https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge/src/branch/master/docs/changelogs/" target="_blank" rel="noopener">docs/changelogs/</a>',
-    'c.foot': '<a href="index.html">Home</a>· <a href="docs.html">Docs</a>· <a href="https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge" target="_blank" rel="noopener">Source</a>'
+    'c.older.l': 'v1.x early development logs live as dated files in the repo&#39;s <a href="https://github.com/zhangxyfs/OpenKnowledge/blob/master/docs/changelogs/" target="_blank" rel="noopener">docs/changelogs/</a>',
+    'c.foot': '<a href="index.html">Home</a>· <a href="docs.html">Docs</a>· <a href="https://github.com/zhangxyfs/OpenKnowledge" target="_blank" rel="noopener">Source</a>'
   };
 
   var root = document.documentElement;

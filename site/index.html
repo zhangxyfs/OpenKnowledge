@@ -103,8 +103,8 @@
         <svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z"/></svg>
         <svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M19.1 4.9l-1.8 1.8M6.7 17.3l-1.8 1.8"/></svg>
       </button>
-      <a class="icon-btn repo-btn" href="https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge" target="_blank" rel="noopener" aria-label="源码仓库 / Repository" title="源码仓库">
-        <img class="gitea-logo" src="assets/gitea.svg" alt="Gitea"><span>Gitea</span>
+      <a class="icon-btn repo-btn" href="https://github.com/zhangxyfs/OpenKnowledge" target="_blank" rel="noopener" aria-label="源码仓库 / Repository" title="源码仓库">
+        <span>GitHub</span>
       </a>
     </div>
   </div>
@@ -123,14 +123,14 @@
     <img alt="license" src="https://img.shields.io/badge/license-MIT-green">
   </div>
   <div class="cta">
-    <a class="btn btn-primary" id="dl-btn" href="https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge/releases" target="_blank" rel="noopener">下载安装包</a>
-    <a class="btn btn-ghost" href="https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge" target="_blank" rel="noopener" data-i18n="i.src">源码仓库</a>
+    <a class="btn btn-primary" id="dl-btn" href="https://github.com/zhangxyfs/OpenKnowledge/releases" target="_blank" rel="noopener">下载安装包</a>
+    <a class="btn btn-ghost" href="https://github.com/zhangxyfs/OpenKnowledge" target="_blank" rel="noopener" data-i18n="i.src">源码仓库</a>
   </div>
   <p class="dl-hint" id="dl-hint" data-i18n="i.hint">自动识别系统并匹配安装包 ·
-    <a href="https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge/releases/download/v2.14.0/OpenKnowledgeSetup-2.14.0.exe">Windows</a> /
-    <a href="https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge/releases/download/v2.14.0/openknowledge_2.14.0_amd64.deb">Linux .deb</a> /
-    <a href="https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge/releases/download/v2.14.0/openknowledge_2.14.0_linux_amd64.tar.gz">Linux .tar.gz</a> ·
-    <a href="https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge/releases" target="_blank" rel="noopener">全部版本</a></p>
+    <a href="https://github.com/zhangxyfs/OpenKnowledge/releases/download/v2.14.0/OpenKnowledgeSetup-2.14.0.exe">Windows</a> /
+    <a href="https://github.com/zhangxyfs/OpenKnowledge/releases/download/v2.14.0/openknowledge_2.14.0_amd64.deb">Linux .deb</a> /
+    <a href="https://github.com/zhangxyfs/OpenKnowledge/releases/download/v2.14.0/openknowledge_2.14.0_linux_amd64.tar.gz">Linux .tar.gz</a> ·
+    <a href="https://github.com/zhangxyfs/OpenKnowledge/releases" target="_blank" rel="noopener">全部版本</a></p>
 </header>
 
 <section id="features">
@@ -223,9 +223,9 @@ go build -o ok ./cmd/ok       <span class="c"># Linux/macOS</span>
 <footer>
   <div class="wrap">
     <div data-i18n="i.foot">
-      <a href="https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge" target="_blank" rel="noopener">源码仓库</a>·
-      <a href="https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge/releases" target="_blank" rel="noopener">Releases</a>·
-      <a href="https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge/src/branch/master/docs/ARCHITECTURE.md" target="_blank" rel="noopener">架构文档</a>
+      <a href="https://github.com/zhangxyfs/OpenKnowledge" target="_blank" rel="noopener">源码仓库</a>·
+      <a href="https://github.com/zhangxyfs/OpenKnowledge/releases" target="_blank" rel="noopener">Releases</a>·
+      <a href="https://github.com/zhangxyfs/OpenKnowledge/blob/master/docs/ARCHITECTURE.md" target="_blank" rel="noopener">架构文档</a>
     </div>
     <div class="copy">© 2026 ZXY · MIT License</div>
   </div>
@@ -236,7 +236,7 @@ go build -o ok ./cmd/ok       <span class="c"># Linux/macOS</span>
 // 版本号与直链写死在页面里（发版时由 scripts/sync-version.sh 同步），不做运行时 API 请求。
 // OKUpdateDownload 由 site.js 在每次语言切换后调用，保证按钮文案跟随语言。
 var VER = 'v2.14.0';
-var BASE = 'https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge/releases/download/' + VER + '/';
+var BASE = 'https://github.com/zhangxyfs/OpenKnowledge/releases/download/' + VER + '/';
 var LINKS = {
   win: BASE + 'OpenKnowledgeSetup-' + VER.slice(1) + '.exe',
   deb: BASE + 'openknowledge_' + VER.slice(1) + '_amd64.deb'
