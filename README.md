@@ -41,7 +41,7 @@
 | **检索注入** | 每次提问按关键词 + 向量语义混合检索，把最相关的知识条目注入上下文（如"git 提交规范"） |
 | **语义检索三种形态** | 线上 OpenAI 兼容 / 本机 Ollama / 内置 llama.cpp 本地模型（离线可用，知识不出本机），GUI 弹窗统一管理 |
 | **强制检查** | 跟踪 AI 改过的文件；回合结束时发现改了代码却没写变更日志，就阻断并要求补齐（同会话同规则只阻断一次） |
-| **多 Agent 支持** | Kimi Code、Pi、ZCode、Reasonix、opencode、Claude Code/CodePilot、Codex、Qoder CN 共用同一套知识库（可扩展适配器架构）——kimi 走 TOML hooks 标记块，pi 走 TypeScript 扩展，zcode 走 Claude JSON 协议，reasonix 走 Extension Protocol sidecar，opencode 走 TypeScript 插件 hooks，claude 走 ~/.claude/settings.json 合并写（Claude Code / CodePilot 等兼容宿主共用），codex 走 ~/.codex/hooks.json 合并写（hook 契约兼容 Claude，技能零适配共享 ~/.agents/skills），qoder 走 ~/.qoder-cn/settings.json 合并写（hook 契约兼容 Claude + hooksConfig.enabled 开关，技能零适配进 ~/.qoder-cn/skills；覆盖终端 CLI），qoder-ide 走 ~/.lingma/settings.json 合并写（Qoder CN IDE 灵码内核：注入+触碰追踪可用，Stop 不可阻断致 enforce 降级；技能进 ~/.lingma/skills；改配置需重启 IDE 生效） |
+| **多 Agent 支持** | Kimi Code、Pi、ZCode、Reasonix、opencode、Claude Code/CodePilot、Codex、Qoder CN、DeepSeek Harness 共用同一套知识库（可扩展适配器架构）——kimi 走 TOML hooks 标记块，pi 走 TypeScript 扩展，zcode 走 Claude JSON 协议，reasonix 走 Extension Protocol sidecar，opencode 走 TypeScript 插件 hooks，claude 走 ~/.claude/settings.json 合并写（Claude Code / CodePilot 等兼容宿主共用），codex 走 ~/.codex/hooks.json 合并写（hook 契约兼容 Claude，技能零适配共享 ~/.agents/skills），qoder 走 ~/.qoder-cn/settings.json 合并写（hook 契约兼容 Claude + hooksConfig.enabled 开关，技能零适配进 ~/.qoder-cn/skills；覆盖终端 CLI），qoder-ide 走 ~/.lingma/settings.json 合并写（Qoder CN IDE 灵码内核：注入+触碰追踪可用，Stop 不可阻断致 enforce 降级；技能进 ~/.lingma/skills；改配置需重启 IDE 生效），dsh 走本地 JS 插件（家目录 cordis.patch.yml 绝对路径挂载，技能共享 ~/.agents/skills） |
 | **一键引导** | `ok setup` 自动完成 hooks 配置、技能安装与 embedding 配置 |
 | **随时开关** | `ok off` 全局停用，`ok on` 一键恢复 |
 | **Web GUI 与常驻 Daemon** | 双击 exe 或 `ok gui` 打开管理界面；全系统仅一个常驻 `ok.exe daemon` 进程（登录自启），统一承载 GUI 与各 agent 的 hook 请求——毫秒级转发，多会话不再起多个进程 |
@@ -94,8 +94,8 @@ go build -o ok ./cmd/ok            # Linux/macOS
 
 `ok setup` 会依次完成三件事：
 
-1. **写入 hooks 配置**——覆盖全部已检测的 AI 助手：kimi 是 `~/.kimi-code/config.toml` 的 3 条 hook 标记块（幂等，自动备份；已存在的 ok hooks 会被检测并覆盖更新 exe 路径，不重复堆积），pi 是 TypeScript 扩展，zcode 是 `config.json` 合并写，opencode 是 `~/.config/opencode/plugins/` 的 TypeScript 插件，claude 是 `~/.claude/settings.json` 的 hooks 合并写，codex 是 `~/.codex/hooks.json` 的 hooks 合并写（ok 自动开启特性开关并写入信任记录，exe 迁移自愈不破信任；桌面端 26.707 与 CLI 0.147+ 均实证可用），qoder 是 `~/.qoder-cn/settings.json` 的 hooks 合并写（ok 自动开启 hooksConfig.enabled 开关——默认关闭时装好也静默不派发；Windows 命令走 .cmd 包装规避 cmd /s 引号剥离），qoder-ide 是 `~/.lingma/settings.json` 的 hooks 合并写（Qoder CN IDE 灵码内核：Stop 不可阻断致 enforce 降级，改配置需重启 IDE 生效）；`ok setup --agent <id>` 可只装指定 agent
-2. **安装六个技能**——`openknowledge-init / on / off / propose / capture / wiki`，写入各 agent 的技能目录（kimi/pi/opencode/codex 共享 `~/.agents/skills/`，zcode 为 `~/.zcode/skills`，claude 为 `~/.claude/skills`，qoder 为 `~/.qoder-cn/skills`，qoder-ide 为 `~/.lingma/skills`）
+1. **写入 hooks 配置**——覆盖全部已检测的 AI 助手：kimi 是 `~/.kimi-code/config.toml` 的 3 条 hook 标记块（幂等，自动备份；已存在的 ok hooks 会被检测并覆盖更新 exe 路径，不重复堆积），pi 是 TypeScript 扩展，zcode 是 `config.json` 合并写，opencode 是 `~/.config/opencode/plugins/` 的 TypeScript 插件，claude 是 `~/.claude/settings.json` 的 hooks 合并写，codex 是 `~/.codex/hooks.json` 的 hooks 合并写（ok 自动开启特性开关并写入信任记录，exe 迁移自愈不破信任；桌面端 26.707 与 CLI 0.147+ 均实证可用），qoder 是 `~/.qoder-cn/settings.json` 的 hooks 合并写（ok 自动开启 hooksConfig.enabled 开关——默认关闭时装好也静默不派发；Windows 命令走 .cmd 包装规避 cmd /s 引号剥离），qoder-ide 是 `~/.lingma/settings.json` 的 hooks 合并写（Qoder CN IDE 灵码内核：Stop 不可阻断致 enforce 降级，改配置需重启 IDE 生效），dsh 是 `<dsh home>/plugins/openknowledge/index.js` 本地 JS 插件 + 家目录 `cordis.patch.yml` 标记块挂载；`ok setup --agent <id>` 可只装指定 agent
+2. **安装六个技能**——`openknowledge-init / on / off / propose / capture / wiki`，写入各 agent 的技能目录（kimi/pi/opencode/codex/dsh 共享 `~/.agents/skills/`，zcode 为 `~/.zcode/skills`，claude 为 `~/.claude/skills`，qoder 为 `~/.qoder-cn/skills`，qoder-ide 为 `~/.lingma/skills`）
 3. **配置 embedding**——三选一：线上 OpenAI 兼容服务（base_url / model / API key，key 可留空）、本机 Ollama（免 key，自动探测模型列表）、内置本地模型（选模型后自动下载，完全离线；回车跳过则只用关键词检索），写入全局配置并当场验证连通性
 
 ## 快速开始

@@ -530,13 +530,13 @@ type Agent interface {
     RemoveHooks() (bool, error)   // 返回是否真的移除了内容
     EnsureHooks(exe string) error // hook 入口自愈；错误由调用方 fail-open 处理
     HooksTarget() string          // hook 写入目标的展示路径
-    SkillsDir() string            // 技能目录（kimi/pi/reasonix/opencode/codex 共享 SkillsHome；zcode 为 ~/.zcode/skills；claude 为 ~/.claude/skills；qoder 为 ~/.qoder-cn/skills；qoder-ide 为 ~/.lingma/skills）
+    SkillsDir() string            // 技能目录（kimi/pi/reasonix/opencode/codex/dsh 共享 SkillsHome；zcode 为 ~/.zcode/skills；claude 为 ~/.claude/skills；qoder 为 ~/.qoder-cn/skills；qoder-ide 为 ~/.lingma/skills）
 }
 ```
 
-注册表：`Register` / `All` / `Find(id)` / `Detected()`（本机已安装的 agent）。技能安装目标为**已检测 agent 的 SkillsDir 并集**（`setupx.SkillDirs()`，kimi/pi/reasonix/opencode/codex 共享 `SkillsHome()`（`OK_SKILLS_HOME` 优先，默认 `~/.agents/skills`），zcode 独立目录（`~/.zcode/skills`），claude 独立目录（`~/.claude/skills`），qoder 独立目录（`~/.qoder-cn/skills`），qoder-ide 独立目录（`~/.lingma/skills`））；卸载按全部注册 agent 的并集清理（`setupx.AllSkillDirs()`）。
+注册表：`Register` / `All` / `Find(id)` / `Detected()`（本机已安装的 agent）。技能安装目标为**已检测 agent 的 SkillsDir 并集**（`setupx.SkillDirs()`，kimi/pi/reasonix/opencode/codex/dsh 共享 `SkillsHome()`（`OK_SKILLS_HOME` 优先，默认 `~/.agents/skills`），zcode 独立目录（`~/.zcode/skills`），claude 独立目录（`~/.claude/skills`），qoder 独立目录（`~/.qoder-cn/skills`），qoder-ide 独立目录（`~/.lingma/skills`））；卸载按全部注册 agent 的并集清理（`setupx.AllSkillDirs()`）。
 
-九种注入形态：
+十种注入形态：
 
 | agent | 注入形态 | 写入目标 | "已安装且为当前版本"判定 |
 |-------|----------|----------|--------------------------|
@@ -549,6 +549,7 @@ type Agent interface {
 | codex | 合并写 JSON 配置（hooks.json 三事件组，Windows 为 .cmd 包装裸路径，其他平台 quoted shell 串）+ config.toml 特性开关与信任记录 | `~/.codex/hooks.json`（`OK_CODEX_HOME` 优先，ok 自留测试口；`CODEX_HOME` 次之） | 三事件的 ok hook 均为当前 exe + `claude` 参数 + 当前 timeout（秒） |
 | qoder | 合并写 JSON 配置（settings.json `hooks` 三事件组，Windows 为 .cmd 包装裸路径，其他平台 quoted shell 串）+ 顶层 `hooksConfig.enabled` 开关 | `~/.qoder-cn/settings.json`（`OK_QODER_HOME` 优先，ok 自留测试口；`QODERCN_CONFIG_DIR` 次之） | 三事件的 ok hook 均为当前 exe + `claude` 参数 + 当前 timeout（秒）+ `hooksConfig.enabled` 为 true |
 | qoder-ide | 合并写 JSON 配置（settings.json `hooks` 三事件组，Windows 为 .cmd 包装裸路径，其他平台 quoted shell 串；无 enabled 门） | `~/.lingma/settings.json`（`OK_QODER_IDE_HOME` 优先，ok 自留测试口） | 三事件的 ok hook 均为当前 exe + `claude` 参数 + 当前 timeout（秒） |
+| dsh | 本地 JS 插件（家目录 `cordis.patch.yml` 绝对路径挂载） | `<dsh home>/plugins/openknowledge/index.js` + `<dsh home>/cordis.patch.yml` 标记块（`OK_DSH_HOME` 优先，ok 自留测试口；`DSH_HOME` 次之） | 插件头标记 + `// fingerprint:` 行与当前模板指纹一致、内容等于当前 exe 渲染，且 patch 含 `id: ok-hooks` |
 
 zcode 适配器（`zcode.go`）：ZCode 的 hook 输入契约是 Claude 风格 snake_case，与 `hook.ParseEvent` 天然兼容；但**输出侧要求 stdout 为协议 JSON**（纯文本只当诊断不进上下文），故 hook 命令带第三参数 `claude`——`HandlePrompt` 把注入包成 `{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":...}}`，`HandleStop` 阻断改写 stdout `{"decision":"block","reason":...}` + exit 0（kimi/pi 的 stderr + exit 2 语义不变）；daemon 转发经 `?format=` query 透传。配置合并写保留未知字段与用户自有 hook（ok 条目按 `args:["hook",<事件>,...]` 识别，与 exe 路径无关），写前备份 `.bak-openknowledge`；`hooks.enabled` 置 true（ZCode 要求显式开启）。自愈语义：曾装过且内容过期才重写，从未安装不复活。技能进 `~/.zcode/skills`（ZCode 不自动读 `~/.agents/skills`）。
 
@@ -573,6 +574,8 @@ pi 事件 → ok hook 映射：
 reasonix 适配器（`reasonix.go`）：不写 settings.json hook（其 UserPromptSubmit 不注入 stdout），改为安装 Extension Protocol 插件包——`plugins/openknowledge/reasonix-plugin.json`（runtime.command 直指 ok.exe，`args=["extension-serve"]`，`required=false`，sidecar 崩溃宿主降级不阻断）+ `plugin-packages.json` 信任门登记（备份 + temp+rename 原子写）。sidecar（`ok extension-serve`，`internal/rxext`）拦截 input.receive（检索注入 + enforce 三档：mixed 默认 = auto 自省软提醒/规则硬阻断，soft = 全软提示，hard = 全硬阻断；软路径把提醒与注入合并为一个 `<ok-context>` 块，block 优先于注入）与 tool.after（写工具成功执行才记 touched）；注入/检查核心与 hook 子命令共用 `internal/hook/core.go`（`InjectForPrompt`/`TrackTouched`/`CheckStop`），各 hook 子命令系 agent 语义一致。拦截器 fail-open：panic/错误一律 Continue。技能目录共享 SkillsHome（机制零改动）。SDK 为 `internal/rxext/sdk` vendor 快照。自愈语义同 zcode：曾登记且内容过期才重写，从未登记不复活；卸载清理插件目录与信任门登记两点位。
 
 opencode 适配器（`opencode.go` + 内嵌模板 `opencode_plugin.ts`）：opencode 无 hooks 配置字段，其 hooks 形态是"插件文件返回 hooks 对象"——对每个配置目录 glob `{plugin,plugins}/*.{ts,js}` 单文件直接 import（Bun 原生跑 TS，免 package.json）。安装/幂等/自愈机制与 pi 同款（头标记 + 模板 sha256 前 12 位指纹 + 外部文件先备份 `.bak-openknowledge`；曾安装且过期才重写，显式移除不复活）。插件三钩子：`chat.message` ≈ UserPromptSubmit（`ok hook prompt` 纯文本 stdout 以 `synthetic:true` text part push 进 `output.parts` 注入——parts 按引用传入且 hook 后继续使用并持久化；自建 part 的 id 必须 `prt` 前缀，PartID schema 强制，否则 prompt_async 校验 Die 卡死会话）；`tool.execute.after` ≈ PostToolUse（`write`/`edit` 取 `args.filePath`，`apply_patch` 从 `patchText` 解析 `*** Add/Update/Delete File:` 行——gpt 系新模型 apply_patch 与 write/edit 互斥，必须覆盖；相对路径按 directory 绝对化后逐路径调 `ok hook post-tool`）；`event: session.idle` ≈ Stop（exit 2 + stderr 时经 SDK `client.session.promptAsync` 把 reason 作为用户消息补发回该会话，驱动当场自省——idle 无法拒绝停止，与 pi 的 `sendMessage(triggerTurn)` 同构；防重靠 ok 侧 `CheckStop` 的 LastExtractReminder/MarkBlocked 语义，插件侧与 pi 一致不计数）。子进程走 `node:child_process` execFile（内建 timeout 10s/5s/5s + windowsHide；Node/Bun 双运行时兼容——桌面端服务器跑在 Electron/Node 里，`"bun"` 模块导入会让插件整个加载失败，v2.11.0 修复实报），全程 fail-open。技能共享 SkillsHome（opencode 原生扫描 `~/.agents/skills`，机制零改动）。
+
+dsh 适配器（`deepharness.go` + 内嵌模板 `dsh_plugin.js`）：DeepSeek Harness 无插件目录自动扫描，其 hooks 形态是"本地 JS 插件 + 家目录级 `cordis.patch.yml` 绝对路径挂载"——patch 行 `- insert: [{id: ok-hooks, name: '<插件绝对路径>'}]`（cordis patch 的 name 字段接受绝对路径；YAML 单引号 + 正斜杠，规避 Windows 反斜杠转义；家目录级 patch 层所有 profile 共享）。安装/幂等/自愈机制与 pi/opencode 同款（头标记 + 模板 sha256 前 12 位指纹 + 外部文件先备份 `.bak-openknowledge`；曾安装且过期才重写，显式移除不复活），patch 行复用 kimi 的 `UpsertHooksBlock` 标记块管理（`#` 标记在 YAML 是合法注释；`StripLegacyOKHooks` 只认 TOML `[[hooks]]` 表，对 YAML 是安全 no-op）。插件三事件：`agent/pre-step` ≈ UserPromptSubmit（`ok hook prompt` stdout 注入 messages）；`tools/post-execute` ≈ PostToolUse（`write`/`edit` 追踪）；`agent/turn-stopping` ≈ Stop（exit 2 + stderr 时经 `agent.steer()` 把 reason 作为用户消息补发续跑，与 pi 的 `sendMessage(triggerTurn)` 同构）。子进程走 `node:child_process` execFile 直 exec（无 shell 层，天然免疫 Windows pwsh 引号问题），全程 fail-open。技能共享 SkillsHome（DSH 原生扫描 `~/.agents/skills`，机制零改动）。`DSHHome()` 优先级：`OK_DSH_HOME` > `DSH_HOME`（官方重定位）> `~/.dsh`。
 
 ### 9.3 embedding 服务三形态（OpenAI 兼容协议统一）
 
@@ -977,6 +980,7 @@ os.ReadDir(knowledge/)                # 只拿文件名，不读内容
 | `KIMI_CODE_HOME` | kimi 配置目录（`ok setup` 写 hooks 时定位 config.toml） |
 | `OK_SKILLS_HOME` | 技能安装目录（默认 `~/.agents/skills`） |
 | `PI_CODING_AGENT_DIR` | pi 配置根目录（默认 `~/.pi/agent`；`ok setup` 写扩展时定位 extensions/） |
+| `OK_DSH_HOME` | dsh 家目录测试隔离口（默认 `~/.dsh`；`DSH_HOME` 为官方重定位变量，次之） |
 | `api_key_env` 指向的变量 | embedding key 的环境变量通道（如 `OPENAI_API_KEY`） |
 
 ### 18.4 hooks 配置（由 `ok setup` 维护）
