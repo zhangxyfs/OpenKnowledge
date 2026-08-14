@@ -481,6 +481,7 @@ main {
 .emb-tag { background: #e0e7ff; color: #3730a3; border-radius: 4px; padding: 1px 6px; font-size: 12px; }
 .emb-tag.local { background: #dcfce7; color: #166534; }
 .emb-form { flex: 1; padding: 14px 18px; min-width: 0; }
+.emb-form select:disabled { background: #f3f4f6; color: #6b7280; }
 .emb-row { display: block; font-size: 12px; color: var(--muted); margin-bottom: 10px; }
 .emb-row input, .emb-row select { display: block; width: 100%; margin-top: 3px; }
 .emb-note { font-size: 12px; margin: 6px 0; }

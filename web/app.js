@@ -987,10 +987,11 @@
 
   // ---------- embedding 配置弹窗 ----------
 
-  var embState = { data: null, sel: -1, pollTimer: null };
+  var embState = { data: null, sel: -1, pollTimer: null, draft: false };
 
   function embOpen() {
     $("emb-modal").classList.remove("hidden");
+    embState.draft = false; // 每次打开重置草稿态
     embRefresh();
   }
   function embClose() {
@@ -1030,9 +1031,30 @@
       tag.textContent = p.type === "builtin" ? "内置" : p.type === "ollama" ? "Ollama" : "自定义";
       right.appendChild(nm); right.appendChild(tag);
       item.appendChild(dot); item.appendChild(right);
-      item.onclick = function () { embState.sel = i; embRenderList(); embRenderForm(); };
+      item.onclick = function () { embState.sel = i; embState.draft = false; embMsg(""); embRenderList(); embRenderForm(); };
       box.appendChild(item);
     });
+    // 草稿临时条目（添加后未保存）：createElement/textContent 构建，不拼 innerHTML
+    if (embState.draft) {
+      var draft = document.createElement("div");
+      draft.className = "emb-item" + (embState.sel === -1 ? " active" : "");
+      var ddot = document.createElement("span");
+      ddot.className = "emb-dot off";
+      ddot.title = "使用中";
+      var dright = document.createElement("div");
+      var dnm = document.createElement("div");
+      dnm.className = "emb-item-name";
+      dnm.id = "emb-draft-name";
+      dnm.textContent = $("emb-f-name").value.trim() || "自定义";
+      var dtag = document.createElement("span");
+      dtag.id = "emb-draft-tag";
+      dtag.className = "emb-tag";
+      dtag.textContent = "自定义";
+      dright.appendChild(dnm); dright.appendChild(dtag);
+      draft.appendChild(ddot); draft.appendChild(dright);
+      draft.onclick = function () { embState.sel = -1; embRenderList(); embRenderForm(); };
+      box.appendChild(draft);
+    }
   }
   function embCur() {
     var d = embState.data;
@@ -1041,7 +1063,13 @@
   function embRenderForm() {
     var p = embCur(), d = embState.data;
     $("emb-f-name").value = p ? p.name : "";
-    $("emb-f-type").value = p ? p.type : "builtin";
+    $("emb-f-type").value = p ? p.type : "openai"; // 新建默认自定义
+    $("emb-f-type").disabled = !embState.draft; // 类型保存后锁定，仅草稿可改
+    // 草稿态：名称徽标随表单重填同步（embRenderList 先于本函数，读到的是旧值）
+    if (embState.draft) {
+      var dn = document.getElementById("emb-draft-name");
+      if (dn) dn.textContent = $("emb-f-name").value.trim() || "自定义";
+    }
     // 内置模型下拉
     var biSel = $("emb-f-bi-model");
     biSel.innerHTML = "";
@@ -1073,6 +1101,14 @@
     $("emb-fs-ollama").classList.toggle("hidden", t !== "ollama");
     $("emb-fs-openai").classList.toggle("hidden", t !== "openai");
     if (t === "ollama") embLoadOllamaModels();
+    // 草稿态：类型徽标实时联动
+    if (embState.draft) {
+      var dt = document.getElementById("emb-draft-tag");
+      if (dt) {
+        dt.textContent = t === "builtin" ? "内置" : t === "ollama" ? "Ollama" : "自定义";
+        dt.className = "emb-tag" + (t === "builtin" ? " local" : "");
+      }
+    }
   }
   function embLoadOllamaModels() {
     var base = $("emb-f-ol-url").value.trim() || "http://localhost:11434";
@@ -1178,12 +1214,19 @@
   $("emb-f-type").onchange = embTypeSwitch;
   $("emb-f-bi-model").onchange = embRenderBiStatus;
   $("emb-f-ol-url").onchange = embLoadOllamaModels;
-  $("emb-add").onclick = function () { embState.sel = -1; embRenderList(); embRenderForm(); $("emb-f-name").focus(); };
+  $("emb-add").onclick = function () { embState.sel = -1; embState.draft = true; embRenderList(); embRenderForm(); $("emb-f-name").focus(); };
+  $("emb-f-name").oninput = function () {
+    if (embState.draft) {
+      var el = document.getElementById("emb-draft-name");
+      if (el) el.textContent = this.value.trim() || "自定义";
+    }
+  };
   $("emb-save").onclick = function () {
     var body = embCollect();
     if (!body.name) { embMsg("名称不能为空", "err"); return; }
     api("/api/setup/embedding/profile", { method: "POST", body: body }).then(function () {
       embMsg("已保存", "ok");
+      embState.draft = false;
       embRefresh(true, body.name);
       refreshStatus();
     }).catch(function (e) { embMsg(e.message || String(e), "err"); });
@@ -1195,15 +1238,16 @@
       return api("/api/setup/embedding/active", { method: "POST", body: { name: body.name } });
     }).then(function () {
       embMsg("已设为使用中", "ok");
+      embState.draft = false;
       embRefresh(true, body.name);
       refreshStatus();
     }).catch(function (e) { embMsg(e.message || String(e), "err"); });
   };
   $("emb-test").onclick = function () {
-    var p = embCur();
-    if (!p) { embMsg("先保存再测试", "err"); return; }
+    var body = embCollect(); // 按表单当前内容测，不要求先保存
+    if (!body.name) { embMsg("先填写名称", "err"); return; }
     embMsg("测试中…");
-    api("/api/setup/embedding/test", { method: "POST", body: { name: p.name } }).then(function (r) {
+    api("/api/setup/embedding/test", { method: "POST", body: body }).then(function (r) {
       embMsg(r.ok ? "✓ 可用" : "✗ " + (r.error || "失败"), r.ok ? "ok" : "err");
     }).catch(function (e) { embMsg(e.message || String(e), "err"); });
   };
