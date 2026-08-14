@@ -13,6 +13,7 @@ import (
 
 	"openknowledge/internal/config"
 	"openknowledge/internal/embed"
+	"openknowledge/internal/embedsidecar"
 	"openknowledge/internal/index"
 	"openknowledge/internal/store"
 )
@@ -21,6 +22,17 @@ func newTestHandler(t *testing.T) *Handler {
 	t.Helper()
 	t.Setenv("OK_HOME", t.TempDir())
 	return NewHandler(t.TempDir(), "tok", nil)
+}
+
+// writeModelsDir 预写全局配置 [embedding] models_dir（TOML 字面量字符串，Windows 路径免转义）。
+// 默认模型目录已改为 <exe 所在目录>/models，依赖 OK_HOME/models 的用例须显式配置。
+func writeModelsDir(t *testing.T, dir string) {
+	t.Helper()
+	err := os.WriteFile(filepath.Join(os.Getenv("OK_HOME"), "config.toml"),
+		[]byte("[embedding]\nmodels_dir = '"+dir+"'\n"), 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func embGet(t *testing.T, h *Handler) map[string]any {
@@ -83,6 +95,8 @@ func TestProfileSaveActivateDeleteCycle(t *testing.T) {
 
 func TestActivateBuiltinRequiresDownload(t *testing.T) {
 	h := newTestHandler(t)
+	modelsDir := filepath.Join(os.Getenv("OK_HOME"), "models")
+	writeModelsDir(t, modelsDir)
 	m := embed.BuiltinModel{ID: "fake-g", File: "f.gguf", Size: 4, Pooling: "cls", Dim: 2}
 	embed.BuiltinModels = append(embed.BuiltinModels, m)
 	t.Cleanup(func() { embed.BuiltinModels = embed.BuiltinModels[:len(embed.BuiltinModels)-1] })
@@ -92,8 +106,8 @@ func TestActivateBuiltinRequiresDownload(t *testing.T) {
 		t.Fatal("未下载应 400")
 	}
 	// 落盘模型后可激活
-	os.MkdirAll(filepath.Join(os.Getenv("OK_HOME"), "models"), 0o755)
-	os.WriteFile(m.InstalledPath(filepath.Join(os.Getenv("OK_HOME"), "models")), []byte("fake"), 0o644)
+	os.MkdirAll(modelsDir, 0o755)
+	os.WriteFile(m.InstalledPath(modelsDir), []byte("fake"), 0o644)
 	if w := embPost(t, h, "/api/setup/embedding/active", `{"name":"内"}`); w.Code != 200 {
 		t.Fatal(w.Body)
 	}
@@ -101,6 +115,8 @@ func TestActivateBuiltinRequiresDownload(t *testing.T) {
 
 func TestDownloadLifecycle(t *testing.T) {
 	h := newTestHandler(t)
+	modelsDir := filepath.Join(os.Getenv("OK_HOME"), "models")
+	writeModelsDir(t, modelsDir)
 	content := []byte("0123456789")
 	sum := "84d89877f0d4041efb6bf91a16f0248f2fd573e6af05c19f96bedb9f882f7882" // sha256("0123456789")
 	m := embed.BuiltinModel{ID: "fake-dl", Repo: "r/p", File: "m.gguf", Size: int64(len(content)), SHA256: sum, Pooling: "cls", Dim: 2}
@@ -128,7 +144,7 @@ func TestDownloadLifecycle(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	if !m.Installed(filepath.Join(os.Getenv("OK_HOME"), "models")) {
+	if !m.Installed(modelsDir) {
 		t.Fatal("模型应已落盘")
 	}
 }
@@ -136,6 +152,7 @@ func TestDownloadLifecycle(t *testing.T) {
 // TestDownloadRetryAfterError：下载失败（sha 不符）后同一模型可重试成功（换好源）。
 func TestDownloadRetryAfterError(t *testing.T) {
 	h := newTestHandler(t)
+	writeModelsDir(t, filepath.Join(os.Getenv("OK_HOME"), "models"))
 	content := []byte("0123456789")
 	bad := embed.BuiltinModel{ID: "fake-retry", Repo: "r/p", File: "m.gguf", Size: int64(len(content)), SHA256: strings.Repeat("0", 64), Pooling: "cls", Dim: 2}
 	embed.BuiltinModels = append(embed.BuiltinModels, bad)
@@ -314,6 +331,77 @@ func TestEmbeddingTestNameRequired(t *testing.T) {
 	w := embPost(t, h, "/api/setup/embedding/test", `{"type":"openai","base_url":"http://h/v1","model":"m"}`)
 	if w.Code != 400 {
 		t.Fatalf("空名称应 400: %d", w.Code)
+	}
+}
+
+// TestModelsDirEndpoints：GET 暴露 models_dir/models_dir_default；POST models-dir
+// 合法路径 200 且配置落盘（目录曾不存在则创建）、坏路径（父级是文件）400 且配置不变、
+// 空串恢复默认；open-models-dir 经 openFolder 接缝收到生效目录。
+func TestModelsDirEndpoints(t *testing.T) {
+	h := newTestHandler(t)
+	home := os.Getenv("OK_HOME")
+
+	// GET：未配置时两键均为默认（<exe 所在目录>/models）
+	st := embGet(t, h)
+	def := embedsidecar.DefaultModelsDir()
+	if st["models_dir"] != def || st["models_dir_default"] != def {
+		t.Fatalf("默认键: %v %v", st["models_dir"], st["models_dir_default"])
+	}
+
+	// POST 合法路径（尚不存在 → 应创建）→ 200 + 配置落盘 + GET 生效值跟随
+	dir := filepath.Join(home, "custom-models")
+	body, _ := json.Marshal(map[string]string{"path": dir})
+	if w := embPost(t, h, "/api/setup/embedding/models-dir", string(body)); w.Code != 200 {
+		t.Fatal(w.Body)
+	}
+	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+		t.Fatal("目录应已创建")
+	}
+	cfg, err := config.LoadMerged("", filepath.Join(home, "config.toml"))
+	if err != nil || cfg.Embedding.ModelsDir != dir {
+		t.Fatalf("配置落盘: %q %v", cfg.Embedding.ModelsDir, err)
+	}
+	if st := embGet(t, h); st["models_dir"] != dir {
+		t.Fatalf("GET 生效值: %v", st["models_dir"])
+	}
+
+	// open-models-dir：接缝记录收到的目录（生效值 = 刚配置的目录）
+	var got string
+	old := openFolder
+	openFolder = func(d string) error { got = d; return nil }
+	t.Cleanup(func() { openFolder = old })
+	if w := embPost(t, h, "/api/setup/embedding/open-models-dir", ""); w.Code != 200 {
+		t.Fatal(w.Body)
+	}
+	if got != dir {
+		t.Fatalf("openFolder 收到 %q, want %q", got, dir)
+	}
+
+	// POST 坏路径（父级是文件，MkdirAll 必败）→ 400 且配置保持旧值
+	f, err := os.Create(filepath.Join(home, "afile"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+	badBody, _ := json.Marshal(map[string]string{"path": filepath.Join(f.Name(), "x")})
+	if w := embPost(t, h, "/api/setup/embedding/models-dir", string(badBody)); w.Code != 400 {
+		t.Fatalf("坏路径应 400: %d %s", w.Code, w.Body)
+	}
+	cfg, _ = config.LoadMerged("", filepath.Join(home, "config.toml"))
+	if cfg.Embedding.ModelsDir != dir {
+		t.Fatal("400 不应改配置")
+	}
+
+	// 空串 = 恢复默认
+	if w := embPost(t, h, "/api/setup/embedding/models-dir", `{"path":""}`); w.Code != 200 {
+		t.Fatal(w.Body)
+	}
+	cfg, _ = config.LoadMerged("", filepath.Join(home, "config.toml"))
+	if cfg.Embedding.ModelsDir != "" {
+		t.Fatal("空串应清默认")
+	}
+	if st := embGet(t, h); st["models_dir"] != def {
+		t.Fatal("恢复后 GET 应回默认")
 	}
 }
 

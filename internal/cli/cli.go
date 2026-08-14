@@ -485,7 +485,7 @@ func Doctor(args []string, stdout, stderr io.Writer) int {
 				if _, err := embedsidecar.RuntimeServerPath(embedsidecar.DefaultRuntimeDir()); err != nil {
 					fmt.Fprintf(stdout, "[%s] 内置 runtime 缺失（仅安装版可用）\n", p.Name)
 				} else if m := embed.FindBuiltinModel(prof.Model); m == nil ||
-					!m.Installed(filepath.Join(registry.Home(), "models")) {
+					!m.Installed(embedsidecar.ModelsDir(pc.Config)) {
 					fmt.Fprintf(stdout, "[%s] 模型未下载（GUI 或 ok setup 下载）\n", p.Name)
 				} else {
 					fmt.Fprintf(stdout, "[%s] 内置 embedding sidecar 未就绪（确认 daemon 运行中）\n", p.Name)

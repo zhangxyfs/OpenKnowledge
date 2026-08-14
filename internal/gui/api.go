@@ -83,6 +83,8 @@ func NewHandler(webDir, token string, beats chan<- struct{}) *Handler {
 	api("POST /api/setup/embedding/test", h.apiEmbeddingTest)
 	api("POST /api/setup/embedding/download", h.apiEmbeddingDownload)
 	api("POST /api/setup/embedding/download/cancel", h.apiEmbeddingDownloadCancel)
+	api("POST /api/setup/embedding/models-dir", h.apiEmbeddingModelsDirSet)
+	api("POST /api/setup/embedding/open-models-dir", h.apiEmbeddingOpenModelsDir)
 	api("GET /api/setup/embedding/ollama-models", h.apiOllamaModels)
 	api("POST /api/reasonix/enforce-mode", h.apiReasonixEnforceMode)
 	api("POST /api/toggle", h.apiToggle)

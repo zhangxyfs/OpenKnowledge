@@ -32,6 +32,7 @@ func sidecarJanitor(mgr *embedsidecar.Manager) {
 		if err != nil {
 			continue
 		}
+		mgr.ModelsDir = embedsidecar.ModelsDir(cfg) // 模型目录可配：每轮按当前配置刷新
 		mgr.Reconcile(desiredBuiltinModel(cfg), time.Now())
 	}
 }

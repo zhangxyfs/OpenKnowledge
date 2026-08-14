@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
@@ -60,7 +61,7 @@ func TestJanitorStartsSidecar(t *testing.T) {
 	oldSC := embedsidecar.ServerCommand
 	embedsidecar.ServerCommand = helperServerCommand
 	t.Cleanup(func() { embedsidecar.ServerCommand = oldSC })
-	cfgText := "[embedding]\nactive = \"内\"\n[[embedding.profiles]]\nname = \"内\"\ntype = \"builtin\"\nmodel = \"fake-j\"\n"
+	cfgText := fmt.Sprintf("[embedding]\nactive = \"内\"\nmodels_dir = '%s'\n[[embedding.profiles]]\nname = \"内\"\ntype = \"builtin\"\nmodel = \"fake-j\"\n", modelsDir)
 	os.WriteFile(filepath.Join(home, "config.toml"), []byte(cfgText), 0o600)
 
 	mgr := &embedsidecar.Manager{RuntimeDir: rtDir, ModelsDir: modelsDir, HealthTimeout: 10 * time.Second, IdleTimeout: time.Hour}

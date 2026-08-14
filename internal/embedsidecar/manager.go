@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"openknowledge/internal/config"
 	"openknowledge/internal/embed"
 )
 
@@ -40,6 +41,26 @@ func DefaultRuntimeDir() string {
 		exe = r
 	}
 	return filepath.Join(filepath.Dir(exe), "runtime")
+}
+
+// DefaultModelsDir 返回 <exe 所在目录>/models（安装版即安装目录下）。
+func DefaultModelsDir() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	if r, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = r
+	}
+	return filepath.Join(filepath.Dir(exe), "models")
+}
+
+// ModelsDir 解析生效的模型目录：配置优先，空则默认。
+func ModelsDir(cfg config.Config) string {
+	if cfg.Embedding.ModelsDir != "" {
+		return cfg.Embedding.ModelsDir
+	}
+	return DefaultModelsDir()
 }
 
 // Manager 托管 sidecar 生命周期。仅 daemon 持有。

@@ -7,13 +7,11 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"time"
 
 	"openknowledge/internal/daemonx"
 	"openknowledge/internal/embedsidecar"
 	"openknowledge/internal/gui"
-	"openknowledge/internal/registry"
 	"openknowledge/internal/tray"
 	"openknowledge/internal/version"
 )
@@ -117,7 +115,7 @@ func Run(webDir string, stdout, stderr io.Writer) int {
 	// daemon 退出时回收（sidecar 绝不留孤儿进程）
 	sidecarMgr := &embedsidecar.Manager{
 		RuntimeDir:    embedsidecar.DefaultRuntimeDir(),
-		ModelsDir:     filepath.Join(registry.Home(), "models"),
+		ModelsDir:     embedsidecar.DefaultModelsDir(), // janitor 每轮按配置刷新（models_dir 可配）
 		HealthTimeout: 90 * time.Second,
 		IdleTimeout:   10 * time.Minute,
 	}

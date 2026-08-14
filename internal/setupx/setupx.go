@@ -172,6 +172,18 @@ func DeleteEmbeddingProfile(name string) error {
 	return saveGlobalConfig(cfg)
 }
 
+// SaveEmbeddingModelsDir 把内置模型目录写入全局配置 [embedding] models_dir；
+// 空串 = 恢复默认（<ok.exe 所在目录>/models）。调用方负责校验/创建目录。
+func SaveEmbeddingModelsDir(path string) error {
+	globalPath := filepath.Join(registry.Home(), "config.toml")
+	cfg, err := config.LoadMerged("", globalPath)
+	if err != nil {
+		return fmt.Errorf("全局配置读取失败: %w", err)
+	}
+	cfg.Embedding.ModelsDir = path
+	return saveGlobalConfig(cfg)
+}
+
 // TestEmbeddingProfile 以 timeout 做 profile 连通性检查。
 // builtin：检查 runtime/模型文件，sidecar 未就绪时写 want 并返回"启动中"提示性错误。
 func TestEmbeddingProfile(p config.EmbeddingProfile, timeout time.Duration) error {
@@ -183,14 +195,18 @@ func TestEmbeddingProfile(p config.EmbeddingProfile, timeout time.Duration) erro
 		if _, err := embedsidecar.RuntimeServerPath(embedsidecar.DefaultRuntimeDir()); err != nil {
 			return err
 		}
-		if !m.Installed(filepath.Join(registry.Home(), "models")) {
+		cfg, err := config.LoadMerged("", filepath.Join(registry.Home(), "config.toml"))
+		if err != nil {
+			return fmt.Errorf("全局配置读取失败: %w", err)
+		}
+		if !m.Installed(embedsidecar.ModelsDir(cfg)) {
 			return errors.New("模型未下载（先在配置弹窗或 ok setup 中下载）")
 		}
 		c := embedx.ClientForProfile(p, timeout)
 		if c == nil {
 			return errors.New("sidecar 未就绪——已请求 daemon 拉起，稍后自动生效（数秒到一分钟）")
 		}
-		_, err := c.EmbedQuery(context.Background(), "ping")
+		_, err = c.EmbedQuery(context.Background(), "ping")
 		return err
 	}
 	c := embedx.ClientForProfile(p, timeout)

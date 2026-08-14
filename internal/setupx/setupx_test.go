@@ -183,6 +183,31 @@ func TestEmbeddingProfileSaveActivateDelete(t *testing.T) {
 	}
 }
 
+// SaveEmbeddingModelsDir 写读回环；空串清回默认（omitempty，落盘不再出现该键）。
+func TestSaveEmbeddingModelsDir(t *testing.T) {
+	t.Setenv("OK_HOME", t.TempDir())
+	globalPath := filepath.Join(os.Getenv("OK_HOME"), "config.toml")
+	dir := filepath.Join(t.TempDir(), "models")
+	if err := SaveEmbeddingModelsDir(dir); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadMerged("", globalPath)
+	if err != nil || cfg.Embedding.ModelsDir != dir {
+		t.Fatalf("写入: %q %v", cfg.Embedding.ModelsDir, err)
+	}
+	if err := SaveEmbeddingModelsDir(""); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _ = config.LoadMerged("", globalPath)
+	if cfg.Embedding.ModelsDir != "" {
+		t.Fatalf("空串应清除: %q", cfg.Embedding.ModelsDir)
+	}
+	data, _ := os.ReadFile(globalPath)
+	if strings.Contains(string(data), "models_dir") {
+		t.Fatal("清除后不应残留 models_dir 键")
+	}
+}
+
 // ListOllamaModels 解析 {base}/api/tags 的模型名列表。
 func TestListOllamaModels(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

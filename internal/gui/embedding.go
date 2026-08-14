@@ -4,7 +4,10 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -56,7 +59,7 @@ func (h *Handler) apiEmbeddingGet(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	modelsDir := filepath.Join(registry.Home(), "models")
+	modelsDir := embedsidecar.ModelsDir(cfg)
 	builtinModels := make([]map[string]any, 0, len(embed.BuiltinModels))
 	for _, m := range embed.BuiltinModels {
 		builtinModels = append(builtinModels, map[string]any{
@@ -100,13 +103,15 @@ func (h *Handler) apiEmbeddingGet(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"active":            cfg.Embedding.Active,
-		"runtime_available": rtErr == nil,
-		"builtin_models":    builtinModels,
-		"download":          h.dlSnapshot(),
-		"profiles":          profiles,
-		"active_identity":   activeIdentity,
-		"index_model":       indexModel,
+		"active":             cfg.Embedding.Active,
+		"runtime_available":  rtErr == nil,
+		"builtin_models":     builtinModels,
+		"download":           h.dlSnapshot(),
+		"profiles":           profiles,
+		"active_identity":    activeIdentity,
+		"index_model":        indexModel,
+		"models_dir":         modelsDir,
+		"models_dir_default": embedsidecar.DefaultModelsDir(),
 	})
 }
 
@@ -179,7 +184,7 @@ func (h *Handler) apiEmbeddingActive(w http.ResponseWriter, r *http.Request) {
 		}
 		if target.Type == "builtin" {
 			m := embed.FindBuiltinModel(target.Model)
-			if m == nil || !m.Installed(filepath.Join(registry.Home(), "models")) {
+			if m == nil || !m.Installed(embedsidecar.ModelsDir(cfg)) {
 				writeErr(w, http.StatusBadRequest, "模型未下载，请先下载")
 				return
 			}
@@ -268,7 +273,12 @@ func (h *Handler) apiEmbeddingDownload(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "未知内置模型: "+req.ModelID)
 		return
 	}
-	modelsDir := filepath.Join(registry.Home(), "models")
+	cfg, err := config.LoadMerged("", filepath.Join(registry.Home(), "config.toml"))
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	modelsDir := embedsidecar.ModelsDir(cfg)
 	if m.Installed(modelsDir) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "state": "done"})
 		return
@@ -334,6 +344,61 @@ func (h *Handler) apiEmbeddingDownloadCancel(w http.ResponseWriter, r *http.Requ
 		}
 	}
 	h.dlMu.Unlock()
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// apiEmbeddingModelsDirSet：设置内置模型目录（body {path}；空串=恢复默认）。
+// 非空先 MkdirAll 校验（失败 400 报原因），成功即创建并写全局配置 [embedding] models_dir。
+// 已有模型文件不随迁——前端提示"状态按新目录判定"。
+func (h *Handler) apiEmbeddingModelsDirSet(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Path string `json:"path"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	p := strings.TrimSpace(req.Path)
+	if p != "" {
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			writeErr(w, http.StatusBadRequest, "目录不可用: "+err.Error())
+			return
+		}
+	}
+	if err := setupx.SaveEmbeddingModelsDir(p); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// openFolder 打开系统文件管理器；测试可替换。
+var openFolder = func(dir string) error {
+	if runtime.GOOS == "windows" {
+		return exec.Command("explorer.exe", dir).Start()
+	}
+	return exec.Command("xdg-open", dir).Start()
+}
+
+// apiEmbeddingOpenModelsDir：系统文件管理器打开生效的模型目录（不存在先创建）。
+func (h *Handler) apiEmbeddingOpenModelsDir(w http.ResponseWriter, r *http.Request) {
+	cfg, err := config.LoadMerged("", filepath.Join(registry.Home(), "config.toml"))
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	dir := embedsidecar.ModelsDir(cfg)
+	if dir == "" {
+		writeErr(w, http.StatusInternalServerError, "无法解析模型目录")
+		return
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		writeErr(w, http.StatusInternalServerError, "目录创建失败: "+err.Error())
+		return
+	}
+	if err := openFolder(dir); err != nil {
+		writeErr(w, http.StatusInternalServerError, "打开文件夹失败: "+err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 

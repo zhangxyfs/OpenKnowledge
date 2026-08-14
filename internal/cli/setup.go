@@ -217,7 +217,12 @@ func setupEmbeddingBuiltin(r *bufio.Reader, stdout io.Writer) {
 	if strings.TrimSpace(ms) == "2" {
 		mirror = "huggingface"
 	}
-	modelsDir := filepath.Join(registry.Home(), "models")
+	cfg, err := config.LoadMerged("", filepath.Join(registry.Home(), "config.toml"))
+	if err != nil {
+		fmt.Fprintf(stdout, "全局配置读取失败：%v\n", err)
+		return
+	}
+	modelsDir := embedsidecar.ModelsDir(cfg)
 	if !m.Installed(modelsDir) {
 		fmt.Fprintf(stdout, "开始下载 %s …\n", m.File)
 		err := embed.Download(context.Background(), nil, m, mirror, modelsDir, func(done, total int64) {

@@ -253,10 +253,12 @@ func TestSetupEmbeddingMenuBuiltin(t *testing.T) {
 	m := embed.BuiltinModel{ID: "fake-cli", File: "f.gguf", Size: 4, Pooling: "cls", Dim: 2}
 	embed.BuiltinModels = append(embed.BuiltinModels, m)
 	t.Cleanup(func() { embed.BuiltinModels = embed.BuiltinModels[:len(embed.BuiltinModels)-1] })
-	// 预置已下载模型（跳过真实下载）
+	// 预置已下载模型（跳过真实下载）；默认模型目录已改为 <exe 所在目录>/models，
+	// 这里经全局配置 models_dir 指回 OK_HOME/models（TOML 字面量字符串免转义）。
 	modelsDir := filepath.Join(home, "models")
 	os.MkdirAll(modelsDir, 0o755)
 	os.WriteFile(m.InstalledPath(modelsDir), []byte("fake"), 0o644)
+	os.WriteFile(filepath.Join(home, "config.toml"), []byte("[embedding]\nmodels_dir = '"+modelsDir+"'\n"), 0o600)
 	// 假 runtime：测试二进制所在目录建 runtime/llama-server[.exe]
 	exe, _ := os.Executable()
 	rtDir := filepath.Join(filepath.Dir(exe), "runtime")
