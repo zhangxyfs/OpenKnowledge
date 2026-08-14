@@ -3,6 +3,7 @@ package gui
 import (
 	"context"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"openknowledge/internal/config"
 	"openknowledge/internal/embed"
 	"openknowledge/internal/embedsidecar"
+	"openknowledge/internal/index"
 	"openknowledge/internal/registry"
 	"openknowledge/internal/setupx"
 )
@@ -45,8 +47,10 @@ func (h *Handler) dlSnapshot() *dlJob {
 	return &dlJob{ModelID: pick.ModelID, State: pick.State, Done: pick.Done, Total: pick.Total, Err: pick.Err}
 }
 
-// apiEmbeddingGet：弹窗全量状态。
-func (h *Handler) apiEmbeddingGet(w http.ResponseWriter, _ *http.Request) {
+// apiEmbeddingGet：弹窗全量状态。带 ?project= 时附 index_model（该项目 kb.db
+// 记录的建索引模型身份）与 active_identity（使用中 profile 身份）——前端据此在
+// 换模型时显示"需 ok index 重建"警示条；kb.db 缺失/打开失败一律 fail-open 为空串。
+func (h *Handler) apiEmbeddingGet(w http.ResponseWriter, r *http.Request) {
 	cfg, err := config.LoadMerged("", filepath.Join(registry.Home(), "config.toml"))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
@@ -75,12 +79,34 @@ func (h *Handler) apiEmbeddingGet(w http.ResponseWriter, _ *http.Request) {
 		profiles = append(profiles, item)
 	}
 	_, rtErr := embedsidecar.RuntimeServerPath(embedsidecar.DefaultRuntimeDir())
+	activeIdentity := ""
+	if p := cfg.Embedding.ActiveProfile(); p != nil {
+		activeIdentity = p.ModelIdentity()
+	}
+	indexModel := ""
+	if name := r.URL.Query().Get("project"); name != "" {
+		st := resolveProject(w, name)
+		if st == nil {
+			return // 错误响应已写（缺参 400 / 未注册 404）
+		}
+		// kb.db 不存在时先 stat 判空：GET 不应顺手建库
+		if _, err := os.Stat(st.KbPath()); err == nil {
+			if db, err := index.Open(st.KbPath()); err == nil {
+				if m, _, err := db.EmbeddingMeta(); err == nil {
+					indexModel = m
+				}
+				_ = db.Close()
+			}
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"active":            cfg.Embedding.Active,
 		"runtime_available": rtErr == nil,
 		"builtin_models":    builtinModels,
 		"download":          h.dlSnapshot(),
 		"profiles":          profiles,
+		"active_identity":   activeIdentity,
+		"index_model":       indexModel,
 	})
 }
 

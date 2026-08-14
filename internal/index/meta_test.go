@@ -101,3 +101,62 @@ func TestSyncIdentityMismatchSkipsVectors(t *testing.T) {
 		t.Fatal("重建后 meta 应更新")
 	}
 }
+
+// TestSyncLegacyVectorsWithoutMetaBlocked：≤2.13 旧库（有向量、无 meta 身份记录）
+// 升级后首次 Sync 必须阻断向量写——哪怕 client 身份与当年相同——待 ok index
+// 显式 ClearVectors 后全量重建，杜绝身份不明的旧向量与新向量静默混合。
+func TestSyncLegacyVectorsWithoutMetaBlocked(t *testing.T) {
+	dir := t.TempDir()
+	writeEntries(t, dir, 3)
+	db, _ := Open(filepath.Join(dir, "kb.db"))
+	defer db.Close()
+	f1 := &batchFake{identity: "openai:m1@h"}
+	if err := db.Sync(dir, f1); err != nil {
+		t.Fatal(err)
+	}
+	vecCount := func() int {
+		var n int
+		if err := db.sql.QueryRow(`SELECT COUNT(*) FROM vectors`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if n := vecCount(); n != 3 {
+		t.Fatalf("前置应有 3 条向量: %d", n)
+	}
+	// 模拟 ≤2.13 旧库：有向量但无 meta 身份记录（直接 SQL 删 meta 行）
+	if _, err := db.sql.Exec(`DELETE FROM meta`); err != nil {
+		t.Fatal(err)
+	}
+	// 新增一条条目制造 embedding 需求（否则热路径无待算向量，断言失去意义）
+	if err := os.WriteFile(filepath.Join(dir, "e003.md"),
+		[]byte("---\ntitle: 条目3\ntype: note\n---\n正文3"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// 同身份 client 也被阻断（升级后首次使用即应阻断，不静默沿用旧向量）
+	f2 := &batchFake{identity: "openai:m1@h"}
+	if err := db.Sync(dir, f2); err != nil {
+		t.Fatal(err)
+	}
+	if len(f2.batches) != 0 {
+		t.Fatalf("旧库无身份记录应阻断向量写: %v", f2.batches)
+	}
+	// 换身份 client 同样阻断，且向量数不变
+	f3 := &batchFake{identity: "builtin:qwen3-emb-0.6b-q8"}
+	if err := db.Sync(dir, f3); err != nil {
+		t.Fatal(err)
+	}
+	if len(f3.batches) != 0 || vecCount() != 3 {
+		t.Fatalf("阻断期向量数不应变: batches=%v n=%d", f3.batches, vecCount())
+	}
+	// ClearVectors 后恢复全量重建（4 条全量重算）
+	if err := db.ClearVectors(); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Sync(dir, f3); err != nil {
+		t.Fatal(err)
+	}
+	if len(f3.batches) != 1 || f3.batches[0] != 4 {
+		t.Fatalf("清向量后应全量重建: %v", f3.batches)
+	}
+}

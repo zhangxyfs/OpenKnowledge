@@ -131,6 +131,38 @@ func TestReconcileStopsOrphanWithoutState(t *testing.T) {
 	}
 }
 
+// TestReconcileDetectsCrash：sidecar 进程崩溃（state 残留但 /health 不通）时，
+// 第一轮 Reconcile 仅计数，连续第二轮判定死亡并回收；want 门控下下轮自然重拉。
+func TestReconcileDetectsCrash(t *testing.T) {
+	mgr, model := setupEnv(t)
+	mgr.IdleTimeout = time.Hour // 排除空闲回收干扰，只观察崩溃检测路径
+	RequestStart()
+	mgr.Reconcile(&model, time.Now())
+	if LoadState() == nil {
+		t.Fatal("前置：sidecar 应在线")
+	}
+	// 模拟崩溃：直接杀进程，state 文件残留
+	if err := mgr.cmd.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	mgr.Reconcile(&model, now) // streak=1：仅计数，state 仍在
+	if LoadState() == nil {
+		t.Fatal("第一轮不健康应仅计数，不应立即回收")
+	}
+	mgr.Reconcile(&model, now) // streak=2：判死回收
+	if LoadState() != nil {
+		t.Fatal("连续两轮不健康应判死回收")
+	}
+	// want/激活门控下轮自然重拉（failCount 未达上限）
+	RequestStart()
+	mgr.Reconcile(&model, now)
+	st := LoadState()
+	if st == nil || !st.Healthy() {
+		t.Fatal("重拉后应恢复在线")
+	}
+}
+
 func TestWantFlagRoundTrip(t *testing.T) {
 	t.Setenv("OK_HOME", t.TempDir())
 	if WantPending() {

@@ -48,6 +48,8 @@
 
 ## 安装
 
+安装包体积约 50MB 级——内含 llama.cpp CPU runtime（内置 embedding 本地模型推理用）；模型本身不随包分发，首次启用内置模型时按需下载。
+
 ### 方式 A：Windows 安装程序（推荐给最终用户）
 
 直接运行发布产物 `OpenKnowledgeSetup-<版本>.exe`——无需安装 Go、无需任何构建步骤。默认安装到 `%LOCALAPPDATA%\Programs\OpenKnowledge`（免管理员权限），可选桌面快捷方式 / 加入 PATH / 安装后自动运行首次引导。卸载默认保留知识库数据（交互卸载时可选删除，静默卸载一律保留）。

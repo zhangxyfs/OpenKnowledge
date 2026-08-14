@@ -47,6 +47,39 @@ func TestClientOllamaAppendsV1(t *testing.T) {
 	}
 }
 
+// TestClientForIndexTimeoutFloor：索引/重建路径超时下限 120s（批量重建不被
+// 查询侧 5s 预算撞断）；用户配置高于下限时保留原值。
+func TestClientForIndexTimeoutFloor(t *testing.T) {
+	cfg := config.Config{Embedding: config.Embedding{
+		Active: "a", TimeoutSec: 5,
+		Profiles: []config.EmbeddingProfile{{Name: "a", Type: "openai", BaseURL: "http://h/v1", Model: "m", APIKey: "k"}},
+	}}
+	oc, ok := ClientForIndex(cfg).(*embed.OpenAIClient)
+	if !ok || oc.Timeout != 120*time.Second {
+		t.Fatalf("索引路径超时下限应为 120s: %+v", oc)
+	}
+	cfg.Embedding.TimeoutSec = 300
+	oc = ClientForIndex(cfg).(*embed.OpenAIClient)
+	if oc.Timeout != 300*time.Second {
+		t.Fatalf("高于下限应保留: %v", oc.Timeout)
+	}
+	if ClientForIndex(config.Config{}) != nil {
+		t.Fatal("未配置应为 nil")
+	}
+}
+
+// TestClientOllamaStripsDuplicateV1：用户把 base_url 填成 …/v1（带或不带尾斜杠）
+// 时不再拼出 …/v1/v1（404 根因）。
+func TestClientOllamaStripsDuplicateV1(t *testing.T) {
+	for _, base := range []string{"http://localhost:11434/v1", "http://localhost:11434/v1/", "http://localhost:11434", "http://localhost:11434/"} {
+		p := config.EmbeddingProfile{Name: "o", Type: "ollama", BaseURL: base, Model: "bge-m3"}
+		oc := ClientForProfile(p, time.Second).(*embed.OpenAIClient)
+		if oc.BaseURL != "http://localhost:11434/v1" {
+			t.Fatalf("%s → %s", base, oc.BaseURL)
+		}
+	}
+}
+
 func TestClientMissingFieldsNil(t *testing.T) {
 	if ClientForProfile(config.EmbeddingProfile{Name: "x", Type: "openai"}, time.Second) != nil {
 		t.Fatal("缺 base_url/model 应为 nil")

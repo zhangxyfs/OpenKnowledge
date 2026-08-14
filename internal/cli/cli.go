@@ -17,6 +17,7 @@ import (
 	"openknowledge/internal/agentx"
 	"openknowledge/internal/config"
 	"openknowledge/internal/embed"
+	"openknowledge/internal/embedsidecar"
 	"openknowledge/internal/embedx"
 	"openknowledge/internal/entry"
 	"openknowledge/internal/index"
@@ -259,7 +260,7 @@ func afterAdd(pc *project.Context, stdout, stderr io.Writer) int {
 	}
 	defer db.Close()
 	var client embed.Client
-	if c := embeddingClient(pc); c != nil {
+	if c := embeddingClientForIndex(pc); c != nil {
 		client = c
 	}
 	if err := db.Sync(pc.Store.KnowledgeDir(), client); err != nil {
@@ -284,7 +285,7 @@ func afterAdd(pc *project.Context, stdout, stderr io.Writer) int {
 		}
 	}
 	if client == nil {
-		fmt.Fprintln(stdout, "INDEX 已更新；未配置 embedding API key，向量跳过（稍后运行 ok index）")
+		fmt.Fprintln(stdout, "INDEX 已更新；embedding 未配置或暂不可用，向量跳过（稍后运行 ok index）")
 		return 0
 	}
 	fmt.Fprintln(stdout, "INDEX 与向量已更新")
@@ -294,6 +295,11 @@ func afterAdd(pc *project.Context, stdout, stderr io.Writer) int {
 // embeddingClient 配置齐全时返回客户端，否则返回 nil（构造收口在 embedx）。
 func embeddingClient(pc *project.Context) embed.Client {
 	return embedx.Client(pc.Config)
+}
+
+// embeddingClientForIndex 是索引/重建路径的构造（超时下限 120s，见 embedx.ClientForIndex）。
+func embeddingClientForIndex(pc *project.Context) embed.Client {
+	return embedx.ClientForIndex(pc.Config)
 }
 
 // Search: ok search <查询>
@@ -360,15 +366,24 @@ func Index(args []string, stdout, stderr io.Writer) int {
 	}
 	defer db.Close()
 	var client embed.Client
-	if c := embeddingClient(pc); c != nil {
+	if c := embeddingClientForIndex(pc); c != nil {
 		client = c
 	}
 	if client != nil && client.ModelIdentity() != "" {
-		if m, _, err := db.EmbeddingMeta(); err == nil && m != "" && m != client.ModelIdentity() {
-			fmt.Fprintf(stdout, "embedding 模型已切换（%s → %s），重建全部向量…\n", m, client.ModelIdentity())
-			if err := db.ClearVectors(); err != nil {
-				fmt.Fprintln(stderr, err)
-				return 1
+		m, _, err := db.EmbeddingMeta()
+		if err == nil {
+			hasVec, _ := db.HasVectors()
+			switch {
+			case m != "" && m != client.ModelIdentity():
+				fmt.Fprintf(stdout, "embedding 模型已切换（%s → %s），重建全部向量…\n", m, client.ModelIdentity())
+			case m == "" && hasVec:
+				fmt.Fprintln(stdout, "历史向量无模型身份记录，按当前模型全量重建…")
+			}
+			if (m != "" && m != client.ModelIdentity()) || (m == "" && hasVec) {
+				if err := db.ClearVectors(); err != nil {
+					fmt.Fprintln(stderr, err)
+					return 1
+				}
 			}
 		}
 	}
@@ -388,7 +403,7 @@ func Index(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	if client == nil {
-		fmt.Fprintf(stderr, "INDEX 已重建（%d 条）；未配置 embedding API key，跳过向量重建\n", n)
+		fmt.Fprintf(stderr, "INDEX 已重建（%d 条）；embedding 未配置或暂不可用，跳过向量重建\n", n)
 		return 1
 	}
 	fmt.Fprintf(stdout, "INDEX 已重建；索引共 %d 条（embedding：%s）\n", n, client.ModelIdentity())
@@ -467,7 +482,14 @@ func Doctor(args []string, stdout, stderr io.Writer) int {
 			case prof == nil:
 				fmt.Fprintf(stdout, "[%s] 未配置 embedding（仅关键词检索可用）\n", p.Name)
 			case prof.Type == "builtin":
-				fmt.Fprintf(stdout, "[%s] 内置 embedding sidecar 未就绪（确认 daemon 运行中，或模型未下载）\n", p.Name)
+				if _, err := embedsidecar.RuntimeServerPath(embedsidecar.DefaultRuntimeDir()); err != nil {
+					fmt.Fprintf(stdout, "[%s] 内置 runtime 缺失（仅安装版可用）\n", p.Name)
+				} else if m := embed.FindBuiltinModel(prof.Model); m == nil ||
+					!m.Installed(filepath.Join(registry.Home(), "models")) {
+					fmt.Fprintf(stdout, "[%s] 模型未下载（GUI 或 ok setup 下载）\n", p.Name)
+				} else {
+					fmt.Fprintf(stdout, "[%s] 内置 embedding sidecar 未就绪（确认 daemon 运行中）\n", p.Name)
+				}
 			default:
 				fmt.Fprintf(stdout, "[%s] embedding profile 不完整（重跑 ok setup 或在 GUI 配置）\n", p.Name)
 			}

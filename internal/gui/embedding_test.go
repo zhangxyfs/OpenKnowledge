@@ -12,6 +12,8 @@ import (
 
 	"openknowledge/internal/config"
 	"openknowledge/internal/embed"
+	"openknowledge/internal/index"
+	"openknowledge/internal/store"
 )
 
 func newTestHandler(t *testing.T) *Handler {
@@ -169,6 +171,65 @@ func TestDownloadRetryAfterError(t *testing.T) {
 			t.Fatalf("重试未完成: %v", st)
 		}
 		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// TestEmbeddingGetIndexModel：?project= 时响应带 index_model（该项目 kb.db 的
+// embedding_model）与 active_identity（使用中 profile 身份），供弹窗换模型警示条；
+// 无 project / kb.db 缺失一律 fail-open 为空串。
+func TestEmbeddingGetIndexModel(t *testing.T) {
+	h := newTestHandler(t)
+	home := os.Getenv("OK_HOME")
+	mkProject(t, home, "demo")
+	st := store.New(filepath.Join(home, "projects", "demo"))
+	db, err := index.Open(st.KbPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetMeta("embedding_model", "builtin:qwen3-emb-0.6b-q8"); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	embPost(t, h, "/api/setup/embedding/profile",
+		`{"name":"a","type":"openai","base_url":"http://h/v1","model":"m","api_key":"k"}`)
+	embPost(t, h, "/api/setup/embedding/active", `{"name":"a"}`)
+
+	req := httptest.NewRequest("GET", "/api/setup/embedding?project=demo", nil)
+	req.Header.Set("X-Ok-Token", "tok")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+	var out map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &out)
+	if out["active_identity"] != "openai:m@http://h/v1" {
+		t.Fatalf("active_identity: %v", out["active_identity"])
+	}
+	if out["index_model"] != "builtin:qwen3-emb-0.6b-q8" {
+		t.Fatalf("index_model: %v", out["index_model"])
+	}
+	// 无 project 参数 → index_model 空（fail-open），active_identity 仍给出
+	out = embGet(t, h)
+	if out["index_model"] != "" || out["active_identity"] != "openai:m@http://h/v1" {
+		t.Fatalf("无项目时应 fail-open: %v %v", out["index_model"], out["active_identity"])
+	}
+	// 项目无 kb.db → index_model 空（不报错、不建库）
+	mkProject(t, home, "empty")
+	req = httptest.NewRequest("GET", "/api/setup/embedding?project=empty", nil)
+	req.Header.Set("X-Ok-Token", "tok")
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+	out = map[string]any{}
+	_ = json.Unmarshal(w.Body.Bytes(), &out)
+	if out["index_model"] != "" {
+		t.Fatalf("kb.db 缺失应 fail-open: %v", out["index_model"])
+	}
+	if _, err := os.Stat(filepath.Join(home, "projects", "empty", "kb.db")); !os.IsNotExist(err) {
+		t.Fatal("GET 不应创建 kb.db")
 	}
 }
 

@@ -129,10 +129,19 @@ func (db *DB) Sync(dir string, client embed.Client) error {
 
 	// 模型身份闸：client 身份与索引 meta 不符时跳过全部向量写（INDEX/FTS 照常），
 	// 杜绝新旧模型向量混合；由 ok index 显式 ClearVectors 后全量重建。
+	// meta 空但有向量 = ≤2.13 历史库（向量身份不明），同样阻断待重建。
 	embedBlocked := client == nil
 	if client != nil && client.ModelIdentity() != "" {
-		if m, _, err := db.EmbeddingMeta(); err == nil && m != "" && m != client.ModelIdentity() {
-			embedBlocked = true
+		m, _, err := db.EmbeddingMeta()
+		if err == nil {
+			switch {
+			case m != "" && m != client.ModelIdentity():
+				embedBlocked = true // 身份不符
+			case m == "":
+				if hv, herr := db.HasVectors(); herr == nil && hv {
+					embedBlocked = true // 历史向量无身份记录（≤2.13 库），阻断待 ok index 重建
+				}
+			}
 		}
 	}
 	type pendingEmbed struct{ name, text string }

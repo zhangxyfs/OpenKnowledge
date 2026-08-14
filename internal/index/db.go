@@ -150,6 +150,13 @@ func (db *DB) EmbeddingMeta() (string, int, error) {
 	return model, dim, nil
 }
 
+// HasVectors 报告 vectors 表是否非空（历史向量无身份记录判定用）。
+func (db *DB) HasVectors() (bool, error) {
+	var n int
+	err := db.sql.QueryRow(`SELECT COUNT(*) FROM vectors LIMIT 1`).Scan(&n)
+	return n > 0, err
+}
+
 // ClearVectors 清空向量表并复位 embedding 身份 meta（模型切换后的全量重建前置）。
 func (db *DB) ClearVectors() error {
 	if _, err := db.sql.Exec(`DELETE FROM vectors`); err != nil {

@@ -110,6 +110,27 @@ func TestProposeSkillTemplateHasClassification(t *testing.T) {
 	}
 }
 
+// TestSaveEmbeddingProfilePreservesAPIKeyEnv：与 api_key 留空保留旧值同理，
+// api_key_env 留空也应保留旧值（否则同名覆盖保存会静默丢掉 env 引用）。
+func TestSaveEmbeddingProfilePreservesAPIKeyEnv(t *testing.T) {
+	t.Setenv("OK_HOME", t.TempDir())
+	globalPath := filepath.Join(os.Getenv("OK_HOME"), "config.toml")
+	p := config.EmbeddingProfile{Name: "默认", Type: "openai", BaseURL: "http://h/v1", Model: "m1", APIKeyEnv: "OK_EMBED_KEY"}
+	if err := SaveEmbeddingProfile(p, true); err != nil {
+		t.Fatal(err)
+	}
+	// 同名覆盖：key 与 env 均留空 → 两者都应保留旧值
+	p2 := config.EmbeddingProfile{Name: "默认", Type: "openai", BaseURL: "http://h/v1", Model: "m2"}
+	if err := SaveEmbeddingProfile(p2, false); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _ := config.LoadMerged("", globalPath)
+	ap := cfg.Embedding.ActiveProfile()
+	if ap == nil || ap.APIKeyEnv != "OK_EMBED_KEY" || ap.Model != "m2" {
+		t.Fatalf("同名覆盖应保留旧 api_key_env: %+v", cfg.Embedding)
+	}
+}
+
 func TestEmbeddingProfileSaveActivateDelete(t *testing.T) {
 	t.Setenv("OK_HOME", t.TempDir())
 	globalPath := filepath.Join(os.Getenv("OK_HOME"), "config.toml")

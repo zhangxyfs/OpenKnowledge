@@ -719,13 +719,13 @@ func (h *Handler) apiSearch(w http.ResponseWriter, r *http.Request) {
 // ---------- 草稿批准与捕获模式 ----------
 
 // embeddingClientFor 按合并配置构建 embedding 客户端；未配置返回 nil。
-// 构造收口在 embedx，供 approve 批准草稿时补算向量。
+// 构造收口在 embedx，供 approve 批准草稿时补算向量（索引路径：超时下限 120s）。
 func embeddingClientFor(st *store.Store) embed.Client {
 	cfg, err := config.LoadMerged(st.ConfigPath(), filepath.Join(registry.Home(), "config.toml"))
 	if err != nil {
 		return nil
 	}
-	return embedx.Client(cfg)
+	return embedx.ClientForIndex(cfg)
 }
 
 // syncApprove 批准后的索引同步：带 embedding 客户端算向量，失败降级为只同步

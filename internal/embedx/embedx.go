@@ -24,6 +24,20 @@ func Client(cfg config.Config) embed.Client {
 	return ClientForProfile(*p, time.Duration(cfg.Embedding.TimeoutSec)*time.Second)
 }
 
+// ClientForIndex 是索引/重建路径的构造：与 Client 同语义，但超时下限 120s
+// （hook 查询路径仍用 Client 的短超时，两者预算语义不互相污染）。
+func ClientForIndex(cfg config.Config) embed.Client {
+	p := cfg.Embedding.ActiveProfile()
+	if p == nil {
+		return nil
+	}
+	sec := cfg.Embedding.TimeoutSec
+	if sec < 120 {
+		sec = 120
+	}
+	return ClientForProfile(*p, time.Duration(sec)*time.Second)
+}
+
 // ClientForProfile 构造单个 profile 的客户端。
 // openai/ollama 要求 base_url 与 model 非空（key 可空——本地兼容服务常无 key）。
 func ClientForProfile(p config.EmbeddingProfile, timeout time.Duration) embed.Client {
@@ -33,7 +47,8 @@ func ClientForProfile(p config.EmbeddingProfile, timeout time.Duration) embed.Cl
 			return nil
 		}
 		return &embed.OpenAIClient{
-			BaseURL:  strings.TrimRight(p.BaseURL, "/") + "/v1",
+			// 用户填 …/v1 时先去重再补，避免 …/v1/v1 404
+			BaseURL:  strings.TrimSuffix(strings.TrimRight(p.BaseURL, "/"), "/v1") + "/v1",
 			Model:    p.Model,
 			Timeout:  timeout,
 			Identity: p.ModelIdentity(),
@@ -105,13 +120,20 @@ func (s sidecarClient) EmbedDocuments(ctx context.Context, texts []string) ([][]
 
 // QueryVec 判定 queryVec 能否进入语义通道：索引的模型身份与当前客户端不符
 // （或维度不符）时返回 nil + 中文提示（调用方决定展示层级：CLI stderr / hook 日志）。
-// 无 meta 记录（从未算过向量）或旧式客户端（身份空）不拦截。
+// 无 meta 记录且无向量（从未算过向量）或旧式客户端（身份空）不拦截；
+// meta 空但有向量 = ≤2.13 历史索引，身份不明，拦截并提示 ok index 重建。
 func QueryVec(db *index.DB, client embed.Client, queryVec []float32) ([]float32, string) {
 	if client == nil || len(queryVec) == 0 || client.ModelIdentity() == "" {
 		return queryVec, ""
 	}
 	model, dim, err := db.EmbeddingMeta()
-	if err != nil || model == "" {
+	if err != nil {
+		return queryVec, ""
+	}
+	if model == "" {
+		if hv, herr := db.HasVectors(); herr == nil && hv {
+			return nil, "历史向量无模型身份记录（≤2.13 索引），本次退化为关键词检索；运行 ok index 重建后恢复"
+		}
 		return queryVec, ""
 	}
 	if model != client.ModelIdentity() || (dim > 0 && dim != len(queryVec)) {

@@ -101,7 +101,7 @@ func saveGlobalConfig(cfg config.Config) error {
 }
 
 // SaveEmbeddingProfile 保存（同名覆盖）一个 profile 到全局配置；activate 时
-// 同时置为使用中。api_key 留空 = 保留同名旧 key（GUI 密文不回传语义）。
+// 同时置为使用中。api_key/api_key_env 留空 = 保留同名旧值（GUI 密文不回传语义）。
 func SaveEmbeddingProfile(p config.EmbeddingProfile, activate bool) error {
 	globalPath := filepath.Join(registry.Home(), "config.toml")
 	cfg, err := config.LoadMerged("", globalPath)
@@ -112,6 +112,9 @@ func SaveEmbeddingProfile(p config.EmbeddingProfile, activate bool) error {
 		if cfg.Embedding.Profiles[i].Name == p.Name {
 			if p.APIKey == "" {
 				p.APIKey = cfg.Embedding.Profiles[i].APIKey
+			}
+			if p.APIKeyEnv == "" {
+				p.APIKeyEnv = cfg.Embedding.Profiles[i].APIKeyEnv
 			}
 			cfg.Embedding.Profiles[i] = p
 			if activate {

@@ -998,7 +998,8 @@
     if (embState.pollTimer) { clearTimeout(embState.pollTimer); embState.pollTimer = null; }
   }
   function embRefresh(keepSel, selectName) {
-    api("/api/setup/embedding").then(function (d) {
+    var embProject = state.project || (state.status && state.status.projects && state.status.projects[0] && state.status.projects[0].name) || "";
+    api("/api/setup/embedding?project=" + encodeURIComponent(embProject)).then(function (d) {
       embState.data = d;
       if (selectName != null) {
         embState.sel = d.profiles.findIndex(function (p) { return p.name === selectName; });
@@ -1058,6 +1059,13 @@
     $("emb-f-api-key").placeholder = p && p.has_key ? "已保存（留空保持不变）" : "api_key";
     embTypeSwitch();
     embRenderBiStatus();
+    var d0 = embState.data || {};
+    var warnEl = $("emb-warn");
+    if (d0.active_identity && d0.index_model && d0.active_identity !== d0.index_model) {
+      warnEl.textContent = "⚠ 使用中模型（" + d0.active_identity + "）与当前项目索引（" + d0.index_model + "）不符——切换后请运行 ok index 重建";
+    } else {
+      warnEl.textContent = "";
+    }
   }
   function embTypeSwitch() {
     var t = $("emb-f-type").value;

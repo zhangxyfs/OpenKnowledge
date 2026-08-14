@@ -49,6 +49,8 @@
 
 ## Installation
 
+Installer packages are ~50MB — they bundle the llama.cpp CPU runtime (used by the built-in on-device embedding model); models are not bundled and are downloaded on first activation.
+
 ### Option A: Windows installer (recommended for end users)
 
 Just run the released `OpenKnowledgeSetup-<version>.exe` — no Go toolchain, no build steps. Installs to `%LOCALAPPDATA%\Programs\OpenKnowledge` by default (no admin rights needed), with optional desktop shortcut / PATH entry / first-run wizard. Uninstall keeps knowledge-base data by default (interactive uninstall offers deletion; silent uninstall always keeps it).

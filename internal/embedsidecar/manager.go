@@ -49,10 +49,11 @@ type Manager struct {
 	HealthTimeout time.Duration // Ensure 就绪等待上限（建议 90s）
 	IdleTimeout   time.Duration // 空闲回收阈值（建议 10min）
 
-	mu          sync.Mutex
-	cmd         *exec.Cmd
-	lastDesired string
-	failCount   int
+	mu              sync.Mutex
+	cmd             *exec.Cmd
+	lastDesired     string
+	failCount       int
+	unhealthyStreak int
 }
 
 // Ensure 保证 model 对应 sidecar 在线（幂等）；返回可用 State。
@@ -148,8 +149,8 @@ func (m *Manager) stopLocked() {
 
 // Reconcile 调和一次：desired=期望模型（nil=不需要 sidecar）。
 // 拉起条件：desired 就绪 且（激活刚变化 或 want 标记 pending）；
-// 停止条件：不需要/未就绪/模型切换/空闲超时。连续 3 次拉起失败进入
-// 冷却（直到 desired 变化重试）。
+// 停止条件：不需要/未就绪/模型切换/空闲超时/连续两轮不健康（进程崩溃）。
+// 连续 3 次拉起失败进入冷却（直到 desired 变化重试）。
 func (m *Manager) Reconcile(desired *embed.BuiltinModel, now time.Time) {
 	desiredID := ""
 	if desired != nil {
@@ -179,6 +180,15 @@ func (m *Manager) Reconcile(desired *embed.BuiltinModel, now time.Time) {
 			}
 		}
 		return
+	}
+	if !st.Healthy() {
+		m.unhealthyStreak++
+		if m.unhealthyStreak >= 2 {
+			m.Stop() // 连续两轮（≥10s）不健康判定死亡；want/激活门控下轮自然重拉
+			return
+		}
+	} else {
+		m.unhealthyStreak = 0
 	}
 	if now.Sub(st.LastUsed) > m.IdleTimeout {
 		m.Stop()
