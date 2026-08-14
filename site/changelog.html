@@ -115,8 +115,12 @@
    <details id="verNav" open>
     <summary data-i18n="c.ledger">版本档案</summary>
     <div class="group">
+      <div class="group-title">2.15.x</div>
+      <a href="#v2-15-0"><span><span class="latest-dot"></span>v2.15.0</span><span class="d">08-14</span></a>
+    </div>
+    <div class="group">
       <div class="group-title">2.14.x</div>
-      <a href="#v2-14-0"><span><span class="latest-dot"></span>v2.14.0</span><span class="d">08-14</span></a>
+      <a href="#v2-14-0"><span>v2.14.0</span><span class="d">08-14</span></a>
     </div>
     <div class="group">
       <div class="group-title">2.13.x</div>
@@ -182,12 +186,34 @@
       <h1 data-i18n="c.h1">更新日志</h1>
       <p class="lede" data-i18n="c.lede">OpenKnowledge 的版本发布记录。日期为 2026 年。</p>
       <div class="cta">
-        <a class="btn btn-primary" href="https://github.com/zhangxyfs/OpenKnowledge/releases" target="_blank" rel="noopener" data-i18n="c.cta">下载最新版 v2.14.0</a>
+        <a class="btn btn-primary" href="https://github.com/zhangxyfs/OpenKnowledge/releases" target="_blank" rel="noopener" data-i18n="c.cta">下载最新版 v2.15.0</a>
       </div>
     </div>
 
+    <section class="ver" id="v2-15-0">
+      <div class="ver-head"><h2>v2.15.0</h2><span class="badge-latest" data-i18n="c.latest">最新</span><time>2026-08-14</time></div>
+      <div class="chg">
+        <span class="tag tag-new" data-i18n="t.new">新功能</span>
+        <ul>
+          <li data-i18n="c.2150.n1">新增 dsh 适配器（第十个 AI 助手集成，DeepSeek Harness）：本地 JS 插件写入 <code>$DSH_HOME/plugins/openknowledge/index.js</code>（头标记 + 指纹管理）+ 家目录级 <code>$DSH_HOME/cordis.patch.yml</code> 标记块挂载（<code>file://</code> URL，所有 profile 共享）；三事件直订 Cordis 总线——<code>agent/pre-step</code> 注入 / <code>tools/post-execute</code> 追踪 write|edit / <code>agent/turn-stopping</code> 经 <code>agent.steer()</code> 续跑；子进程 <code>execFile</code> 直 exec（无 shell 层）；技能零适配（原生扫描 <code>~/.agents/skills</code>）</li>
+        </ul>
+      </div>
+      <div class="chg">
+        <span class="tag tag-improve" data-i18n="t.improve">改进</span>
+        <ul>
+          <li data-i18n="c.2150.i1">测试全仓 7 个注册表遍历测试文件补 <code>OK_DSH_HOME</code> 隔离（20 处），GUI agent 计数 9→10；全仓 <code>go test ./...</code> 26 包绿</li>
+        </ul>
+      </div>
+      <div class="chg">
+        <span class="tag tag-note" data-i18n="t.note">说明</span>
+        <ul>
+          <li data-i18n="c.2150.s1">DeepSeek Harness 为 developer preview，可能有破坏性变更；本地插件必须 <code>file:///</code> URL 挂载（vendored cordis loader 直接 <code>import(name)</code>，Windows 盘符绝对路径报 <code>ERR_UNSUPPORTED_ESM_URL_SCHEME</code>）；真实 DeepSeek API 会话已端到端验证 prompt（注入）/ post-tool（触碰追踪）/ stop（<code>stop_count</code> 递增）三事件，turn-stopping 续跑因默认 <code>turn_interval=5</code> 节流未在首轮触发</li>
+        </ul>
+      </div>
+    </section>
+
     <section class="ver" id="v2-14-0">
-      <div class="ver-head"><h2>v2.14.0</h2><span class="badge-latest" data-i18n="c.latest">最新</span><time>2026-08-14</time></div>
+      <div class="ver-head"><h2>v2.14.0</h2><time>2026-08-14</time></div>
       <div class="chg">
         <span class="tag tag-new" data-i18n="t.new">新功能</span>
         <ul>

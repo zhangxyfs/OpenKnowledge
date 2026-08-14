@@ -117,7 +117,7 @@
     并能强制执行「改代码必须写变更日志」这类工作流规则。
   </p>
   <div class="badges">
-    <img alt="version" src="https://img.shields.io/badge/version-2.14.0-2563eb">
+    <img alt="version" src="https://img.shields.io/badge/version-2.15.0-2563eb">
     <img alt="go" src="https://img.shields.io/badge/go-%3E%3D1.25-00ADD8">
     <img alt="platform" src="https://img.shields.io/badge/platform-windows%20%7C%20linux-0078d6">
     <img alt="license" src="https://img.shields.io/badge/license-MIT-green">
@@ -127,9 +127,9 @@
     <a class="btn btn-ghost" href="https://github.com/zhangxyfs/OpenKnowledge" target="_blank" rel="noopener" data-i18n="i.src">源码仓库</a>
   </div>
   <p class="dl-hint" id="dl-hint" data-i18n="i.hint">自动识别系统并匹配安装包 ·
-    <a href="https://github.com/zhangxyfs/OpenKnowledge/releases/download/v2.14.0/OpenKnowledgeSetup-2.14.0.exe">Windows</a> /
-    <a href="https://github.com/zhangxyfs/OpenKnowledge/releases/download/v2.14.0/openknowledge_2.14.0_amd64.deb">Linux .deb</a> /
-    <a href="https://github.com/zhangxyfs/OpenKnowledge/releases/download/v2.14.0/openknowledge_2.14.0_linux_amd64.tar.gz">Linux .tar.gz</a> ·
+    <a href="https://github.com/zhangxyfs/OpenKnowledge/releases/download/v2.15.0/OpenKnowledgeSetup-2.15.0.exe">Windows</a> /
+    <a href="https://github.com/zhangxyfs/OpenKnowledge/releases/download/v2.15.0/openknowledge_2.15.0_amd64.deb">Linux .deb</a> /
+    <a href="https://github.com/zhangxyfs/OpenKnowledge/releases/download/v2.15.0/openknowledge_2.15.0_linux_amd64.tar.gz">Linux .tar.gz</a> ·
     <a href="https://github.com/zhangxyfs/OpenKnowledge/releases" target="_blank" rel="noopener">全部版本</a></p>
 </header>
 
@@ -196,7 +196,7 @@
         <h3><span data-i18n="i.w1h">Windows 安装程序</span><span class="tag" data-i18n="i.w1tag">推荐</span></h3>
         <p data-i18n="i.w1p">无需 Go 环境，默认装到 <code>%LOCALAPPDATA%\Programs\OpenKnowledge</code>（免管理员），卸载默认保留知识库数据。</p>
         <pre data-i18n="i.w1pre"><code><span class="c"># 从 Releases 下载后双击运行</span>
-OpenKnowledgeSetup-2.14.0.exe</code></pre>
+OpenKnowledgeSetup-2.15.0.exe</code></pre>
       </div>
       <div class="install-card">
         <h3 data-i18n="i.lxh">Linux（amd64）</h3>
@@ -235,7 +235,7 @@ go build -o ok ./cmd/ok       <span class="c"># Linux/macOS</span>
 // 智能下载：识别访客系统，把主按钮指向最新 Release 的对应资产。
 // 版本号与直链写死在页面里（发版时由 scripts/sync-version.sh 同步），不做运行时 API 请求。
 // OKUpdateDownload 由 site.js 在每次语言切换后调用，保证按钮文案跟随语言。
-var VER = 'v2.14.0';
+var VER = 'v2.15.0';
 var BASE = 'https://github.com/zhangxyfs/OpenKnowledge/releases/download/' + VER + '/';
 var LINKS = {
   win: BASE + 'OpenKnowledgeSetup-' + VER.slice(1) + '.exe',
