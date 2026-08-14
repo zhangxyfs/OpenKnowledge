@@ -295,6 +295,8 @@ API 一览：
 | POST | `/api/setup/embedding/test` | 单 profile 连通性验证（`{"ok":bool,"error":…}`） |
 | POST | `/api/setup/embedding/download` | 下载内置模型（断点续传 + sha256 校验；前端轮询进度） |
 | POST | `/api/setup/embedding/download/cancel` | 取消下载（保留 `.part` 供续传） |
+| POST | `/api/setup/embedding/models-dir` | `{"path"}` 设置内置模型目录（空串=恢复默认 `<安装目录>/models`；非空先 MkdirAll 校验/创建，失败 400） |
+| POST | `/api/setup/embedding/open-models-dir` | 系统文件管理器打开生效的模型目录（不存在先创建） |
 | GET | `/api/setup/embedding/ollama-models` | 探测 Ollama `/api/tags` 模型列表 |
 | POST | `/api/reasonix/enforce-mode` | `{"mode":"mixed"\|"soft"\|"hard"}` 写 reasonix 强制检查档位（落盘即生效，sidecar 实时读） |
 | POST | `/api/toggle` | `{"on":bool}` 全局开关（等价 `ok on`/`ok off`） |
@@ -482,7 +484,7 @@ hook prompt（基础注入之后）
 ├── registry.toml           # 项目注册表：[[project]] name + paths
 ├── config.toml             # 全局配置：[[embedding.profiles]]/inject/retrieve 默认值
 ├── hooks-disabled          # 全局开关标志文件（存在即全部静默）
-├── models/                 # 内置 embedding 模型（GGUF，约 146MB–639MB/档，sha256 钉死校验）
+├── models/                 # 内置 embedding 模型旧默认位置（GGUF，约 146MB–639MB/档，sha256 钉死校验）；现默认 <安装目录>/models（[embedding] models_dir 可配）
 ├── embed-sidecar.json      # 内置 sidecar 状态（pid/port/model_id/last_used；hook/cli 只读发现）
 ├── embed-sidecar.want      # want 拉起标记（hook/cli 写，daemon 调和时见到拉起后清除）
 ├── embed-sidecar.log       # llama-server stdout/stderr
@@ -655,7 +657,7 @@ bash scripts/build-linux.sh   # Linux 发布：tar + deb（含 runtime/）
 
 无构建标签、无代码生成、无资源嵌入；`go.mod` 声明 `go 1.25.0`。GUI 的 web 资源不内嵌，由 `dist/web/` 随二进制分发。应用版本号由 build-dist.sh 用 sed 从 `installer/openknowledge.iss` 的 `#define AppVersion` 提取，经 `-ldflags -X openknowledge/internal/version.Version=<版本>` 注入 `internal/version.Version`（事实源只有 .iss 一处；裸 `go build` 为 `dev`）。
 
-**runtime 随包分发（内置 embedding 推理运行时）**：`build.py`/`build-linux.sh` 从 llama.cpp release 下载预编译 `llama-server`（版本钉死 b10405 CPU 版，win `bin-win-cpu-x64` zip / linux `bin-ubuntu-x64` tar；`LLAMA_CPP_BASE_URL` 可换源）到 `dist/runtime/`，iss 装到 `{app}\runtime`、linux 包装进 tar/deb 同目录——安装包体积因此约 50MB 级。运行时定位 `<exe 所在目录>/runtime/llama-server`，缺失则内置形态不可用（裸 exe 便携形态）并在 GUI/CLI/doctor 明确提示。**模型不随包分发**：首次启用内置形态时按清单从镜像源下载（默认 hf-mirror，约 146MB–639MB/档，断点续传 + sha256 校验）到 `<数据根>/models/`（~/.openknowledge/models/）。
+**runtime 随包分发（内置 embedding 推理运行时）**：`build.py`/`build-linux.sh` 从 llama.cpp release 下载预编译 `llama-server`（版本钉死 b10405 CPU 版，win `bin-win-cpu-x64` zip / linux `bin-ubuntu-x64` tar；`LLAMA_CPP_BASE_URL` 可换源）到 `dist/runtime/`，iss 装到 `{app}\runtime`、linux 包装进 tar/deb 同目录——安装包体积因此约 50MB 级。运行时定位 `<exe 所在目录>/runtime/llama-server`，缺失则内置形态不可用（裸 exe 便携形态）并在 GUI/CLI/doctor 明确提示。**模型不随包分发**：首次启用内置形态时按清单从镜像源下载（默认 hf-mirror，约 146MB–639MB/档，断点续传 + sha256 校验）默认下载到 `<安装目录>/models/`（`[embedding] models_dir` 可改；GUI 配置弹窗可直接修改并打开文件夹，已有模型文件不随迁）。
 
 ### 12.2 常用开发命令
 

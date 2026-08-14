@@ -132,7 +132,8 @@ query_prefix/doc_prefix，实现时钉死具体值）：
 **下载**：
 - 源：`hf-mirror`（`https://hf-mirror.com`，国内默认）| `huggingface` 官方 |
   自定义 base URL；URL 模板 `<mirror>/<repo>/resolve/main/<file>`。
-- 行为：下载到 `~/.openknowledge/models/<id>.gguf.part`，完成后校验
+- 行为：默认下载到 `<安装目录>/models/<id>.gguf.part`（`[embedding] models_dir`
+  可改，GUI 弹窗可直接修改/打开文件夹；已有模型文件不随迁），完成后校验
   size + sha256，原子改名；支持断点续传（HTTP Range）；GUI/CLI 可取消，
   `.part` 保留供续传；进度经 GUI API 轮询展示。
 - 下载中/未下载的内置 profile 可保存，但"设为使用中"与"测试"要求模型就绪。

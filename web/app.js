@@ -1084,6 +1084,8 @@
     });
     if (p && p.type === "builtin") biSel.value = p.model;
     $("emb-f-bi-mirror").value = (p && p.mirror) || "hf-mirror";
+    $("emb-f-bi-dir").value = d.models_dir || "";
+    $("emb-f-bi-dir").placeholder = d.models_dir_default || "";
     $("emb-f-ol-url").value = p && p.type === "ollama" ? p.base_url : "http://localhost:11434";
     $("emb-f-base-url").value = p && p.type === "openai" ? p.base_url : "";
     $("emb-f-model").value = p && p.type === "openai" ? p.model : "";
@@ -1218,6 +1220,20 @@
   $("emb-f-type").onchange = embTypeSwitch;
   $("emb-f-bi-model").onchange = embRenderBiStatus;
   $("emb-f-ol-url").onchange = embLoadOllamaModels;
+  // 模型目录：失焦/回车自动保存（空串=恢复默认）；已有模型文件不随迁
+  $("emb-f-bi-dir").onchange = function () {
+    api("/api/setup/embedding/models-dir", { method: "POST", body: { path: this.value.trim() } }).then(function () {
+      embMsg("模型目录已更新（已有模型文件不随迁，状态按新目录判定）", "ok");
+      embRefresh(true);
+    }).catch(function (e) {
+      embMsg(e.message || String(e), "err");
+      embRefresh(true); // 回显旧值
+    });
+  };
+  $("emb-bi-opendir").onclick = function () {
+    api("/api/setup/embedding/open-models-dir", { method: "POST" })
+      .catch(function (e) { embMsg(e.message || String(e), "err"); });
+  };
   $("emb-add").onclick = function () { embState.sel = -1; embState.draft = true; embMsg(""); embRenderList(); embRenderForm(); $("emb-f-name").focus(); };
   $("emb-f-name").oninput = function () {
     if (embState.draft) {
