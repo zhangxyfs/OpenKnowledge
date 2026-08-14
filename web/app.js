@@ -1007,9 +1007,13 @@
       } else if (!keepSel) {
         embState.sel = d.active ? d.profiles.findIndex(function (p) { return p.name === d.active; }) : -1;
       }
-      if (embState.sel < 0 && d.profiles.length > 0) embState.sel = 0;
+      if (!embState.draft && embState.sel < 0 && d.profiles.length > 0) embState.sel = 0;
       embRenderList();
-      embRenderForm();
+      if (keepSel && embState.draft) {
+        embRenderBiStatus(); // 草稿进行中只刷新下载状态区，不重填表单（评审修复）
+      } else {
+        embRenderForm();
+      }
       embSchedulePoll();
     });
   }
@@ -1040,7 +1044,7 @@
       draft.className = "emb-item" + (embState.sel === -1 ? " active" : "");
       var ddot = document.createElement("span");
       ddot.className = "emb-dot off";
-      ddot.title = "使用中";
+      ddot.title = "未保存";
       var dright = document.createElement("div");
       var dnm = document.createElement("div");
       dnm.className = "emb-item-name";
@@ -1052,7 +1056,7 @@
       dtag.textContent = "自定义";
       dright.appendChild(dnm); dright.appendChild(dtag);
       draft.appendChild(ddot); draft.appendChild(dright);
-      draft.onclick = function () { embState.sel = -1; embRenderList(); embRenderForm(); };
+      draft.onclick = function () { embState.sel = -1; embMsg(""); embRenderList(); embRenderForm(); };
       box.appendChild(draft);
     }
   }
@@ -1214,7 +1218,7 @@
   $("emb-f-type").onchange = embTypeSwitch;
   $("emb-f-bi-model").onchange = embRenderBiStatus;
   $("emb-f-ol-url").onchange = embLoadOllamaModels;
-  $("emb-add").onclick = function () { embState.sel = -1; embState.draft = true; embRenderList(); embRenderForm(); $("emb-f-name").focus(); };
+  $("emb-add").onclick = function () { embState.sel = -1; embState.draft = true; embMsg(""); embRenderList(); embRenderForm(); $("emb-f-name").focus(); };
   $("emb-f-name").oninput = function () {
     if (embState.draft) {
       var el = document.getElementById("emb-draft-name");
