@@ -210,31 +210,44 @@ func (h *Handler) apiEmbeddingDelete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-// apiEmbeddingTest：对指定已保存 profile 做连通性/就绪检查。
+// apiEmbeddingTest：按表单当前内容做连通性/就绪检查（不要求先保存）。
+// api_key 留空且存在同名已保存 profile 时回退用其 ResolvedAPIKey()
+//（"留空=用已保存"语义，与保存一致）；builtin 分支照旧忽略 base_url/key。
 func (h *Handler) apiEmbeddingTest(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name string `json:"name"`
+		Name    string `json:"name"`
+		Type    string `json:"type"`
+		BaseURL string `json:"base_url"`
+		Model   string `json:"model"`
+		APIKey  string `json:"api_key"`
+		Mirror  string `json:"mirror"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	cfg, err := config.LoadMerged("", filepath.Join(registry.Home(), "config.toml"))
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+	if req.Name == "" {
+		writeErr(w, http.StatusBadRequest, "名称不能为空")
 		return
 	}
-	var target *config.EmbeddingProfile
-	for i := range cfg.Embedding.Profiles {
-		if cfg.Embedding.Profiles[i].Name == req.Name {
-			target = &cfg.Embedding.Profiles[i]
+	p := config.EmbeddingProfile{
+		Name: req.Name, Type: req.Type, BaseURL: req.BaseURL,
+		Model: req.Model, APIKey: req.APIKey, Mirror: req.Mirror,
+	}
+	if p.APIKey == "" {
+		cfg, err := config.LoadMerged("", filepath.Join(registry.Home(), "config.toml"))
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		for _, saved := range cfg.Embedding.Profiles {
+			if saved.Name == p.Name {
+				p.APIKey = saved.ResolvedAPIKey()
+				break
+			}
 		}
 	}
-	if target == nil {
-		writeErr(w, http.StatusBadRequest, "profile 不存在: "+req.Name)
-		return
-	}
 	resp := map[string]any{"ok": true, "error": ""}
-	if err := setupx.TestEmbeddingProfile(*target, 10*time.Second); err != nil {
+	if err := setupx.TestEmbeddingProfile(p, 10*time.Second); err != nil {
 		resp["ok"] = false
 		resp["error"] = err.Error()
 	}

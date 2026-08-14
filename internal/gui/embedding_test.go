@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -230,6 +231,89 @@ func TestEmbeddingGetIndexModel(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(home, "projects", "empty", "kb.db")); !os.IsNotExist(err) {
 		t.Fatal("GET 不应创建 kb.db")
+	}
+}
+
+// fakeEmbeddingsServer 返回 OpenAI 兼容 /v1/embeddings 假服务；hits 记录收到的请求。
+func fakeEmbeddingsServer(t *testing.T, hits *[]*http.Request) *httptest.Server {
+	t.Helper()
+	var mu sync.Mutex
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		*hits = append(*hits, r.Clone(r.Context()))
+		mu.Unlock()
+		if r.URL.Path != "/v1/embeddings" {
+			t.Errorf("path=%s", r.URL.Path)
+		}
+		w.Write([]byte(`{"data":[{"embedding":[1.0,0.0],"index":0}]}`))
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// TestEmbeddingTestFormWins：测试按表单当前内容走——保存 profile 用 base_url=A，
+// 表单改 base_url=B 测试应命中 B 而非 A。
+func TestEmbeddingTestFormWins(t *testing.T) {
+	h := newTestHandler(t)
+	var hitsA, hitsB []*http.Request
+	srvA := fakeEmbeddingsServer(t, &hitsA)
+	srvB := fakeEmbeddingsServer(t, &hitsB)
+	embPost(t, h, "/api/setup/embedding/profile",
+		`{"name":"a","type":"openai","base_url":"`+srvA.URL+`/v1","model":"m","api_key":"k"}`)
+	w := embPost(t, h, "/api/setup/embedding/test",
+		`{"name":"a","type":"openai","base_url":"`+srvB.URL+`/v1","model":"m2","api_key":"k2"}`)
+	if w.Code != 200 {
+		t.Fatal(w.Body)
+	}
+	var out map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &out)
+	if out["ok"] != true {
+		t.Fatalf("应可用: %v", out)
+	}
+	if len(hitsB) != 1 {
+		t.Fatalf("应命中 B: %d", len(hitsB))
+	}
+	if len(hitsA) != 0 {
+		t.Fatalf("不应命中 A: %d", len(hitsA))
+	}
+	if got := hitsB[0].Header.Get("Authorization"); got != "Bearer k2" {
+		t.Fatalf("表单 key 应优先: %q", got)
+	}
+}
+
+// TestEmbeddingTestKeyFallback：api_key 留空 + 同名已保存 profile 带 key →
+// 回退用已保存 key（"留空=用已保存"语义）。
+func TestEmbeddingTestKeyFallback(t *testing.T) {
+	h := newTestHandler(t)
+	var hits []*http.Request
+	srv := fakeEmbeddingsServer(t, &hits)
+	embPost(t, h, "/api/setup/embedding/profile",
+		`{"name":"a","type":"openai","base_url":"`+srv.URL+`/v1","model":"m","api_key":"saved-k"}`)
+	// 表单改 model、api_key 留空
+	w := embPost(t, h, "/api/setup/embedding/test",
+		`{"name":"a","type":"openai","base_url":"`+srv.URL+`/v1","model":"m2"}`)
+	if w.Code != 200 {
+		t.Fatal(w.Body)
+	}
+	var out map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &out)
+	if out["ok"] != true {
+		t.Fatalf("应可用: %v", out)
+	}
+	if len(hits) != 1 {
+		t.Fatalf("应命中假服务: %d", len(hits))
+	}
+	if got := hits[0].Header.Get("Authorization"); got != "Bearer saved-k" {
+		t.Fatalf("应回退已保存 key: %q", got)
+	}
+}
+
+// TestEmbeddingTestNameRequired：名称必填（前端先拦，后端兜底）。
+func TestEmbeddingTestNameRequired(t *testing.T) {
+	h := newTestHandler(t)
+	w := embPost(t, h, "/api/setup/embedding/test", `{"type":"openai","base_url":"http://h/v1","model":"m"}`)
+	if w.Code != 400 {
+		t.Fatalf("空名称应 400: %d", w.Code)
 	}
 }
 
