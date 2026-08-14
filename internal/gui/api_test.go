@@ -38,6 +38,7 @@ func newEnv(t *testing.T) (*Handler, string, string) {
 	t.Setenv("OK_QODER_HOME", filepath.Join(t.TempDir(), "nonexistent-qoder"))
 	t.Setenv("OK_QODER_IDE_HOME", filepath.Join(t.TempDir(), "nonexistent-qoder-ide"))
 	t.Setenv("OK_REASONIX_HOME", filepath.Join(t.TempDir(), "nonexistent-reasonix"))
+	t.Setenv("OK_DSH_HOME", filepath.Join(t.TempDir(), "nonexistent-dsh"))
 	webDir := t.TempDir()
 	files := map[string]string{
 		"index.html":  "<html>token={{TOKEN}}</html>",
@@ -152,8 +153,8 @@ func TestStatusEmptyRegistry(t *testing.T) {
 	if len(res.Projects) != 0 {
 		t.Fatalf("expected empty projects, got %v", res.Projects)
 	}
-	if len(res.Agents) != 9 {
-		t.Fatalf("expected 9 agents, got %d: %s", len(res.Agents), data)
+	if len(res.Agents) != 10 {
+		t.Fatalf("expected 10 agents, got %d: %s", len(res.Agents), data)
 	}
 	if res.SkillsInstalled || res.EmbeddingConfigured || res.Disabled {
 		t.Fatalf("expected flags false, got %+v", res)

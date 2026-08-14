@@ -24,6 +24,7 @@ func TestInstallSkills(t *testing.T) {
 	t.Setenv("OK_QODER_HOME", filepath.Join(t.TempDir(), "nonexistent-qoder"))
 	t.Setenv("OK_QODER_IDE_HOME", filepath.Join(t.TempDir(), "nonexistent-qoder-ide"))
 	t.Setenv("OK_REASONIX_HOME", filepath.Join(t.TempDir(), "nonexistent-reasonix"))
+	t.Setenv("OK_DSH_HOME", filepath.Join(t.TempDir(), "nonexistent-dsh"))
 	if err := InstallSkills(`D:\bin\ok.exe`); err != nil {
 		t.Fatal(err)
 	}
@@ -49,6 +50,7 @@ func TestInstallWikiSkillContent(t *testing.T) {
 	t.Setenv("OK_QODER_HOME", filepath.Join(t.TempDir(), "nonexistent-qoder"))
 	t.Setenv("OK_QODER_IDE_HOME", filepath.Join(t.TempDir(), "nonexistent-qoder-ide"))
 	t.Setenv("OK_REASONIX_HOME", filepath.Join(t.TempDir(), "nonexistent-reasonix"))
+	t.Setenv("OK_DSH_HOME", filepath.Join(t.TempDir(), "nonexistent-dsh"))
 	if err := InstallSkills(`D:\bin\ok.exe`); err != nil {
 		t.Fatal(err)
 	}

@@ -30,6 +30,7 @@ func setupUninstallEnv(t *testing.T) (kimiHome, okHome string) {
 	t.Setenv("OK_QODER_HOME", filepath.Join(t.TempDir(), "nonexistent-qoder"))
 	t.Setenv("OK_QODER_IDE_HOME", filepath.Join(t.TempDir(), "nonexistent-qoder-ide"))
 	t.Setenv("OK_REASONIX_HOME", filepath.Join(t.TempDir(), "nonexistent-reasonix"))
+	t.Setenv("OK_DSH_HOME", filepath.Join(t.TempDir(), "nonexistent-dsh"))
 
 	// kimi config：用户内容 + 标记块 + 用户内容
 	kimiCfg := "default_model = \"kimi\"\n\n" + agentx.MarkerBegin + "\n[[hooks]]\nevent = \"Stop\"\n" + agentx.MarkerEnd + "\n\n[providers]\n"
