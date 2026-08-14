@@ -71,7 +71,35 @@ func (dshAgent) Detect() bool {
 	return err == nil && info.IsDir()
 }
 
-func (dshAgent) HooksInstalled() bool          { return false }            // Task 3 实现
-func (dshAgent) InstallHooks(exe string) error { _ = exe; return nil }     // Task 2/3 实现
-func (dshAgent) RemoveHooks() (bool, error)    { return false, nil }       // Task 3 实现
-func (dshAgent) EnsureHooks(exe string) error  { _ = exe; return nil }     // Task 3 实现
+func (dshAgent) HooksInstalled() bool {
+	data, err := os.ReadFile(dshPluginPath())
+	if err != nil {
+		return false
+	}
+	content := string(data)
+	return strings.Contains(content, dshPluginMarker) &&
+		strings.Contains(content, "// fingerprint: "+dshTemplateFingerprint())
+	// Task 3 追加 patch 行判定
+}
+
+func (dshAgent) InstallHooks(exe string) error {
+	// 插件文件（自有新文件整写；既有文件非自家则先备份）
+	path := dshPluginPath()
+	if data, err := os.ReadFile(path); err == nil {
+		if !strings.Contains(string(data), dshPluginMarker) {
+			if err := os.WriteFile(path+".bak-openknowledge", data, 0o644); err != nil {
+				return fmt.Errorf("备份既有插件失败: %w", err)
+			}
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("读取既有插件失败: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(renderDSHPlugin(exe)), 0o644)
+	// Task 3 追加 patch 行 upsert
+}
+
+func (dshAgent) RemoveHooks() (bool, error)   { return false, nil }   // Task 3 实现
+func (dshAgent) EnsureHooks(exe string) error { _ = exe; return nil } // Task 3 实现
