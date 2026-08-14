@@ -115,8 +115,12 @@
    <details id="verNav" open>
     <summary data-i18n="c.ledger">版本档案</summary>
     <div class="group">
+      <div class="group-title">2.14.x</div>
+      <a href="#v2-14-0"><span><span class="latest-dot"></span>v2.14.0</span><span class="d">08-14</span></a>
+    </div>
+    <div class="group">
       <div class="group-title">2.13.x</div>
-      <a href="#v2-13-0"><span><span class="latest-dot"></span>v2.13.0</span><span class="d">08-13</span></a>
+      <a href="#v2-13-0"><span>v2.13.0</span><span class="d">08-13</span></a>
     </div>
     <div class="group">
       <div class="group-title">2.12.x</div>
@@ -178,12 +182,38 @@
       <h1 data-i18n="c.h1">更新日志</h1>
       <p class="lede" data-i18n="c.lede">OpenKnowledge 的版本发布记录。日期为 2026 年。</p>
       <div class="cta">
-        <a class="btn btn-primary" href="https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge/releases" target="_blank" rel="noopener" data-i18n="c.cta">下载最新版 v2.13.0</a>
+        <a class="btn btn-primary" href="https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge/releases" target="_blank" rel="noopener" data-i18n="c.cta">下载最新版 v2.14.0</a>
       </div>
     </div>
 
+    <section class="ver" id="v2-14-0">
+      <div class="ver-head"><h2>v2.14.0</h2><span class="badge-latest" data-i18n="c.latest">最新</span><time>2026-08-14</time></div>
+      <div class="chg">
+        <span class="tag tag-new" data-i18n="t.new">新功能</span>
+        <ul>
+          <li data-i18n="c.2140.n1">embedding 多服务配置（多 profile + "使用中"切换）三形态：自定义（OpenAI 兼容，key 可留空适配无鉴权服务）/ Ollama（本机或局域网，免 key，模型列表自动探测）/ 内置本地模型；旧平铺配置自动迁移为"默认"profile，无需手动干预</li>
+          <li data-i18n="c.2140.n2">内置 llama.cpp 本地模型（<b>完全离线、知识不出本机</b>）：llama-server sidecar 由 daemon 托管（want 拉起 / 空闲 10 分钟回收 / 崩溃有界重启 / 退出回收）；模型 GGUF 按清单下载——默认 Qwen3-Embedding-0.6B（639MB，中文+代码强），另有 bge-m3 双档与 nomic 迷你档，repo/size/sha256 钉死校验、默认 hf-mirror 国内镜像、断点续传；运行时随安装包分发（llama.cpp b10405 CPU 版，Windows + Linux）；模型目录默认 <code>&lt;安装目录&gt;/models</code>、可配置、弹窗可直接打开文件夹</li>
+          <li data-i18n="c.2140.n3">GUI 配置弹窗：引导页卡片显示使用中服务单行摘要；"配置…"弹窗左列表右表单（类型创建后锁定、下载进度条、显式"设为使用中"、测试按表单当前内容且 api_key 留空回退已保存）</li>
+          <li data-i18n="c.2140.n4">CLI：<code>ok setup</code> embedding 步骤三选一（线上/Ollama/内置，含模型选择与下载进度）；<code>ok doctor</code> 细分内置形态检查（runtime/模型文件/sidecar 状态）</li>
+        </ul>
+      </div>
+      <div class="chg">
+        <span class="tag tag-improve" data-i18n="t.improve">改进</span>
+        <ul>
+          <li data-i18n="c.2140.i1">模型身份管理：kb.db meta 记录建索引的模型身份与维度，切换后语义通道显式跳过并提示 <code>ok index</code>（替代以往维度不等静默归零）；<code>ok index</code> 检测切换自动清向量全量批量重建（32/批）；身份不符时 Sync 阻断向量写，杜绝混合模型向量</li>
+          <li data-i18n="c.2140.i2">embed 接口拆查询/文档双路径（Qwen3 查询侧 Instruct 前缀、nomic 双侧前缀）并支持批量请求；索引/重建路径超时与 hook 查询路径解耦（下限 120s）</li>
+        </ul>
+      </div>
+      <div class="chg">
+        <span class="tag tag-note" data-i18n="t.note">说明</span>
+        <ul>
+          <li data-i18n="c.2140.s1">迁移：≤2.13 配置自动迁移为 profile；历史向量（无身份记录）首次检索会提示并需一次 <code>ok index</code> 全量重建。安装包体积约 50MB 级（含 llama.cpp CPU runtime；模型不随包，首次启用下载，约 146MB–639MB/档）。内置形态仅安装版可用（裸 exe 无 runtime）；断网物理验证与大规模重建（≥200 条）留待后续实测</li>
+        </ul>
+      </div>
+    </section>
+
     <section class="ver" id="v2-13-0">
-      <div class="ver-head"><h2>v2.13.0</h2><span class="badge-latest" data-i18n="c.latest">最新</span><time>2026-08-13</time></div>
+      <div class="ver-head"><h2>v2.13.0</h2><time>2026-08-13</time></div>
       <div class="chg">
         <span class="tag tag-new" data-i18n="t.new">新功能</span>
         <ul>
