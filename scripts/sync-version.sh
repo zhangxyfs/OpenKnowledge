@@ -21,6 +21,17 @@ for f in README.md README_EN.md; do
 done
 [ "$changed" = 0 ] && echo "README 徽标已是 $VERSION，无需变更"
 
+# exe 版本资源（winres.json）：bump 时易漏（v2.9.0 起曾停在 2.8.0.0 直至 2.16.0 发现），
+# 四段式 = 三段版本号 + ".0"
+VERSION4="${VERSION}.0"
+f=cmd/ok/winres.json
+if grep -q "\"file_version\": \"${VERSION4}\"" "$f" && grep -q "\"product_version\": \"${VERSION4}\"" "$f"; then
+  echo "$f: 已是 ${VERSION4}，无需变更"
+else
+  sed -i -E "s|\"(file_version|product_version)\": \"[0-9.]+\"|\"\1\": \"${VERSION4}\"|g" "$f"
+  echo "$f: 版本资源 → ${VERSION4}"
+fi
+
 # 官网：VER 变量、Release 直链、安装/下载文案里的版本号
 # 覆盖 site/index.html（VER + 直链 + version 徽标）、site/changelog.html（下载按钮文案）、
 # site/assets/site.js（英文字典里的直链与文案）

@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -158,6 +159,60 @@ func TestStatusEmptyRegistry(t *testing.T) {
 	}
 	if res.SkillsInstalled || res.EmbeddingConfigured || res.Disabled {
 		t.Fatalf("expected flags false, got %+v", res)
+	}
+}
+
+func TestAPILogs(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	// 写入 10 行 ok.log：含一条语义日志与一条 embedding 相关日志
+	var b strings.Builder
+	for i := 0; i < 8; i++ {
+		fmt.Fprintf(&b, "2026-08-15 10:00:%02d post-tool skip: tool=write path=x%d\n", i, i)
+	}
+	b.WriteString("2026-08-15 10:01:00 prompt semantic: 语义通道未准入任何条目（样本 12，max=0.500 median=0.500 relGap=0.000）\n")
+	b.WriteString("2026-08-15 10:01:01 prompt embed identity: 历史向量无模型身份记录\n")
+	if err := os.WriteFile(filepath.Join(okHome, "ok.log"), []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, data := do(t, "GET", srv.URL+"/api/logs?tail=3", testToken, nil)
+	if code != 200 {
+		t.Fatalf("status = %d, body %s", code, data)
+	}
+	var res struct {
+		Files []map[string]any `json:"files"`
+		Lines []struct {
+			Src      string `json:"src"`
+			Semantic bool   `json:"semantic"`
+			Text     string `json:"text"`
+		} `json:"lines"`
+	}
+	if err := json.Unmarshal(data, &res); err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Lines) != 3 {
+		t.Fatalf("tail=3 should yield 3 lines, got %d: %s", len(res.Lines), data)
+	}
+	var semCount, nonSemCount int
+	for _, l := range res.Lines {
+		if l.Semantic {
+			semCount++
+		} else {
+			nonSemCount++
+		}
+	}
+	// tail=3 应包含最后两行（语义 + embed 各 1）与倒数第三行
+	if semCount != 2 || nonSemCount != 1 {
+		t.Fatalf("semantic tagging wrong: sem=%d non=%d (%s)", semCount, nonSemCount, data)
+	}
+	for _, f := range res.Files {
+		if f["name"] == "ok" && f["exists"] != true {
+			t.Fatalf("ok.log should exist: %s", data)
+		}
+		if f["name"] == "daemon" && f["exists"] != false {
+			t.Fatalf("daemon.log should be absent in fresh env: %s", data)
+		}
 	}
 }
 

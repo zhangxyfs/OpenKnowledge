@@ -494,3 +494,36 @@ main {
 #emb-form-msg { color: var(--muted); }
 #emb-form-msg.err { color: var(--danger); }
 #emb-form-msg.ok { color: var(--ok); }
+
+/* ---------- 日志页 ---------- */
+
+.log-chips { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.chip { padding: 2px 10px; border-radius: 999px; font-size: 12px; }
+.chip-on { background: var(--primary); color: var(--primary-fg); }
+.log-view {
+  margin: 0 20px 20px;
+  height: calc(100vh - 170px);
+  overflow: auto;
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  font: 12px/1.7 Consolas, "Courier New", monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--fg);
+}
+.log-src {
+  display: inline-block;
+  min-width: 44px;
+  text-align: center;
+  border-radius: 4px;
+  padding: 0 5px;
+  margin-right: 6px;
+  font-weight: 600;
+}
+.log-src-ok { background: #dbeafe; color: #1d4ed8; }
+.log-src-daemon { background: #fef3c7; color: #b45309; }
+.log-src-sidecar { background: #dcfce7; color: #15803d; }
+.log-sem { color: #d97706; margin-right: 5px; }
+.log-sem-off { color: #d1d5db; }

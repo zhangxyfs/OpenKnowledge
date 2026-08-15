@@ -114,13 +114,22 @@
     $("tab-manage").classList.toggle("active", name === "manage");
     $("tab-guide").classList.toggle("active", name === "guide");
     $("tab-misc").classList.toggle("active", name === "misc");
+    $("tab-logs").classList.toggle("active", name === "logs");
     $("page-manage").classList.toggle("hidden", name !== "manage");
     $("page-guide").classList.toggle("hidden", name !== "guide");
     $("page-misc").classList.toggle("hidden", name !== "misc");
+    $("page-logs").classList.toggle("hidden", name !== "logs");
+    if (name === "logs") {
+      logPollOnce();
+      logStartPolling();
+    } else {
+      logStopPolling();
+    }
   }
   $("tab-manage").addEventListener("click", function () { switchTab("manage"); });
   $("tab-guide").addEventListener("click", function () { switchTab("guide"); });
   $("tab-misc").addEventListener("click", function () { switchTab("misc"); });
+  $("tab-logs").addEventListener("click", function () { switchTab("logs"); });
 
   // ---------- 启动与状态 ----------
 
@@ -1281,6 +1290,92 @@
       refreshStatus();
     }).catch(function (e) { embMsg(e.message || String(e), "err"); });
   };
+
+  // ---------- 日志页 ----------
+
+  var logState = {
+    lines: [],
+    sources: { ok: true, daemon: true, sidecar: true },
+    semanticOnly: false,
+    filter: "",
+    poll: null,
+    stickBottom: true,
+  };
+
+  function logActive() {
+    return !$("page-logs").classList.contains("hidden");
+  }
+
+  function logPollOnce() {
+    if (!logActive() || !$("log-autorefresh").checked) return;
+    api("/api/logs?tail=400").then(function (data) {
+      logState.lines = (data && data.lines) || [];
+      logRender();
+    }).catch(function () { /* 轮询静默失败 */ });
+  }
+
+  function logStartPolling() {
+    if (logState.poll) return;
+    logState.poll = setInterval(logPollOnce, 2000);
+  }
+
+  function logStopPolling() {
+    if (logState.poll) {
+      clearInterval(logState.poll);
+      logState.poll = null;
+    }
+  }
+
+  function logRender() {
+    var body = $("logs-body");
+    var q = logState.filter.toLowerCase();
+    var html = "";
+    var count = 0;
+    logState.lines.forEach(function (l) {
+      if (!logState.sources[l.src]) return;
+      if (logState.semanticOnly && !l.semantic) return;
+      if (q && String(l.text).toLowerCase().indexOf(q) < 0) return;
+      count++;
+      html += '<span class="log-src log-src-' + esc(l.src) + '">' + esc(l.src) + '</span>' +
+        '<span class="log-sem' + (l.semantic ? '' : ' log-sem-off') + '">' + (l.semantic ? '◆' : '◇') + '</span>' +
+        esc(l.text) + "\n";
+    });
+    body.innerHTML = count ? html : '<span class="muted">（无匹配日志）</span>';
+    if (logState.stickBottom) body.scrollTop = body.scrollHeight;
+    $("log-meta").textContent = "共 " + logState.lines.length + " 行 / 显示 " + count + " 行";
+  }
+
+  $("logs-body").addEventListener("scroll", function () {
+    var b = $("logs-body");
+    logState.stickBottom = b.scrollHeight - b.scrollTop - b.clientHeight < 40;
+  });
+
+  function logToggleSource(key, btn) {
+    logState.sources[key] = !logState.sources[key];
+    btn.classList.toggle("chip-on", logState.sources[key]);
+    logRender();
+  }
+
+  $("log-src-ok").addEventListener("click", function () { logToggleSource("ok", this); });
+  $("log-src-daemon").addEventListener("click", function () { logToggleSource("daemon", this); });
+  $("log-src-sidecar").addEventListener("click", function () { logToggleSource("sidecar", this); });
+  $("log-semantic-only").addEventListener("click", function () {
+    logState.semanticOnly = !logState.semanticOnly;
+    this.classList.toggle("chip-on", logState.semanticOnly);
+    logRender();
+  });
+  $("log-filter").addEventListener("input", function () {
+    logState.filter = this.value;
+    logRender();
+  });
+  $("log-autorefresh").addEventListener("change", function () {
+    if (this.checked) {
+      logPollOnce();
+      logStartPolling();
+    } else {
+      logStopPolling();
+    }
+  });
 
   // ---------- 启动 ----------
 

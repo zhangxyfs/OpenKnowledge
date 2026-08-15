@@ -19,6 +19,7 @@
       <button id="tab-manage" type="button" class="tab">管理</button>
       <button id="tab-guide" type="button" class="tab">引导</button>
       <button id="tab-misc" type="button" class="tab">其他</button>
+      <button id="tab-logs" type="button" class="tab">日志</button>
     </nav>
   </header>
 
@@ -207,6 +208,21 @@
           <p id="misc-project-count" class="card-desc muted"></p>
         </div>
       </div>
+    </section>
+
+    <section id="page-logs" class="page hidden">
+      <div class="toolbar">
+        <span class="log-chips" title="按日志来源过滤（可多选）">
+          <button id="log-src-ok" type="button" class="btn chip chip-on">ok</button>
+          <button id="log-src-daemon" type="button" class="btn chip chip-on">守护</button>
+          <button id="log-src-sidecar" type="button" class="btn chip chip-on">sidecar</button>
+          <button id="log-semantic-only" type="button" class="btn chip" title="只看语义检索相关日志（semantic/embed）">仅语义</button>
+        </span>
+        <input id="log-filter" type="search" placeholder="过滤日志…（如 semantic / prompt / 关键词）" autocomplete="off">
+        <label class="form-inline"><input id="log-autorefresh" type="checkbox" checked> 自动刷新（2 秒）</label>
+        <span id="log-meta" class="muted"></span>
+      </div>
+      <pre id="logs-body" class="log-view">加载中…</pre>
     </section>
   </main>
 

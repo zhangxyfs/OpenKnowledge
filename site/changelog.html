@@ -115,8 +115,12 @@
    <details id="verNav" open>
     <summary data-i18n="c.ledger">版本档案</summary>
     <div class="group">
+      <div class="group-title">2.16.x</div>
+      <a href="#v2-16-0"><span><span class="latest-dot"></span>v2.16.0</span><span class="d">08-15</span></a>
+    </div>
+    <div class="group">
       <div class="group-title">2.15.x</div>
-      <a href="#v2-15-0"><span><span class="latest-dot"></span>v2.15.0</span><span class="d">08-14</span></a>
+      <a href="#v2-15-0"><span>v2.15.0</span><span class="d">08-14</span></a>
     </div>
     <div class="group">
       <div class="group-title">2.14.x</div>
@@ -186,12 +190,44 @@
       <h1 data-i18n="c.h1">更新日志</h1>
       <p class="lede" data-i18n="c.lede">OpenKnowledge 的版本发布记录。日期为 2026 年。</p>
       <div class="cta">
-        <a class="btn btn-primary" href="https://github.com/zhangxyfs/OpenKnowledge/releases" target="_blank" rel="noopener" data-i18n="c.cta">下载最新版 v2.15.0</a>
+        <a class="btn btn-primary" href="https://github.com/zhangxyfs/OpenKnowledge/releases" target="_blank" rel="noopener" data-i18n="c.cta">下载最新版 v2.16.0</a>
       </div>
     </div>
 
+    <section class="ver" id="v2-16-0">
+      <div class="ver-head"><h2>v2.16.0</h2><span class="badge-latest" data-i18n="c.latest">最新</span><time>2026-08-15</time></div>
+      <div class="chg">
+        <span class="tag tag-new" data-i18n="t.new">新功能</span>
+        <ul>
+          <li data-i18n="c.2160.n1">检索注入按通道独立准入：总分只用于排序，关键词通道归一 BM25 分 ≥ 阈值 <b>或</b> 语义通道余弦 ≥ 语义门槛才注入——宁缺毋滥、不再强行凑 <code>top_n</code>；新增 <code>retrieve.min_score</code>（默认 0.5，≤0 关闭），阈值随库规模缩放（&lt;10 条关闭、10→30 线性、≥30 取全值）</li>
+          <li data-i18n="c.2160.n2">语义门槛模型无关（<code>SemanticFloor</code>）：以本次查询余弦分布为参照，头部相对中位数有显著分离（<code>retrieve.min_gap</code> 默认 0.25，可配）才启用 median+0.5·gap，无头部则语义通道整体不准入；四模型 12 场景标定（bge-m3 / bge-large-zh-v1.5 / Qwen3-Embedding-8B / qwen3-emb-0.6b）</li>
+          <li data-i18n="c.2160.n3">GUI 第四标签「日志」页：<code>GET /api/logs</code> 回读 ok / 守护 / embedding 三来源日志尾部，2 秒轮询实时刷新，来源 chips 多选 +「仅语义」开关 + 文本过滤输入框，上滚暂停自动贴底</li>
+          <li data-i18n="c.2160.n4">语义诊断可见化：语义通道全部候选被拒时写 <code>prompt semantic</code> 日志（样本数/max/median/relGap），<code>ok search</code> 同步提示调节指引；语义检索退化（模型身份缺失/切换）时注入末尾每会话一次附提示</li>
+        </ul>
+      </div>
+      <div class="chg">
+        <span class="tag tag-improve" data-i18n="t.improve">改进</span>
+        <ul>
+          <li data-i18n="c.2160.i1">发布流程加固：<code>scripts/sync-version.sh</code> 现在同步 <code>cmd/ok/winres.json</code> 的 exe 版本资源（此前 bump 时易漏，v2.9.0 起一直漂移停在 2.8.0.0）</li>
+        </ul>
+      </div>
+      <div class="chg">
+        <span class="tag tag-fix" data-i18n="t.fix">修复</span>
+        <ul>
+          <li data-i18n="c.2160.f1">修复注入知识与提问无关：CJK 二元组伪词（如"已经验证"切出"经验"）命中标题即可注入、同域语料下无关文本的余弦基线（实测 bge-m3 跨域噪声高达 0.52）顶穿总分阈值——准入改按通道独立判定后，无关提问零注入、相关提问精确命中</li>
+          <li data-i18n="c.2160.f2">修复 exe 文件版本资源自 v2.9.0 起漂移停在 2.8.0.0 的问题</li>
+        </ul>
+      </div>
+      <div class="chg">
+        <span class="tag tag-note" data-i18n="t.note">说明</span>
+        <ul>
+          <li data-i18n="c.2160.s1">切换 embedding 模型后必须 <code>ok index</code> 重建向量（身份守卫会拦旧向量）；低对比度自定义模型可调低 <code>min_gap</code>（必要时配合 <code>min_score</code>）放宽语义准入；极端低对比度下语义通道整体静默关闭（fail-closed，关键词通道兜底），GUI 日志页「仅语义」可观察诊断行</li>
+        </ul>
+      </div>
+    </section>
+
     <section class="ver" id="v2-15-0">
-      <div class="ver-head"><h2>v2.15.0</h2><span class="badge-latest" data-i18n="c.latest">最新</span><time>2026-08-14</time></div>
+      <div class="ver-head"><h2>v2.15.0</h2><time>2026-08-14</time></div>
       <div class="chg">
         <span class="tag tag-new" data-i18n="t.new">新功能</span>
         <ul>

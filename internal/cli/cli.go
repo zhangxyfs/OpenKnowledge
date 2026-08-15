@@ -337,10 +337,14 @@ func Search(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	terms := retrieve.Terms(query)
-	hits, err := db.Query(terms, queryVec, pc.Config.Retrieve)
+	hits, info, err := db.QueryEx(terms, queryVec, pc.Config.Retrieve)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
+	}
+	if info.SemanticRejected {
+		fmt.Fprintf(stderr, "语义通道未准入任何条目（样本 %d，max=%.3f median=%.3f relGap=%.3f）；低对比度模型可调低 retrieve.min_gap 放宽\n",
+			info.Coses, info.MaxCos, info.MedianCos, info.RelGap)
 	}
 	for _, h := range hits {
 		fmt.Fprintf(stdout, "%.2f\t%s (%s)\n", h.Score, h.Title, h.Filename)

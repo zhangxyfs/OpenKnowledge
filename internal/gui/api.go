@@ -59,6 +59,7 @@ func NewHandler(webDir, token string, beats chan<- struct{}) *Handler {
 		mux.HandleFunc(pattern, h.withAuth(fn))
 	}
 	api("GET /api/status", h.apiStatus)
+	api("GET /api/logs", h.apiLogs)
 	api("GET /api/projects", h.apiProjects)
 	api("GET /api/entries", h.apiEntries)
 	api("GET /api/entry", h.apiEntryGet)
@@ -369,6 +370,84 @@ func (h *Handler) apiStatus(w http.ResponseWriter, _ *http.Request) {
 		"app_version":         version.Version,
 		"home":                registry.Home(),
 	})
+}
+
+// apiLogs 返回三类日志（ok / daemon / sidecar）的尾部行，供"日志"页轮询展示。
+// 每行带来源（src）与语义标记（含 semantic/embed 关键字）；过滤与高亮在前端做。
+// 只读、最多回传 tail 行（1~2000，默认 400），不提供清空/写入。
+func (h *Handler) apiLogs(w http.ResponseWriter, r *http.Request) {
+	tail := 400
+	if v := r.URL.Query().Get("tail"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 2000 {
+			tail = n
+		}
+	}
+	home := registry.Home()
+	sources := []struct{ key, file string }{
+		{"ok", "ok.log"}, {"daemon", "daemon.log"}, {"sidecar", "embed-sidecar.log"},
+	}
+	files := make([]map[string]any, 0, len(sources))
+	lines := make([]map[string]any, 0, tail)
+	for _, s := range sources {
+		p := filepath.Join(home, s.file)
+		fi, err := os.Stat(p)
+		if err != nil {
+			files = append(files, map[string]any{"name": s.key, "exists": false})
+			continue
+		}
+		files = append(files, map[string]any{
+			"name": s.key, "exists": true,
+			"size": fi.Size(), "mtime": fi.ModTime().UnixMilli(),
+		})
+		lines = append(lines, tailLines(p, tail, s.key)...)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"files": files, "lines": lines})
+}
+
+// tailLines 读文件尾部（最多 256KB）并按行返回，丢弃截断的首行。
+func tailLines(path string, tail int, src string) []map[string]any {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	const maxRead = 256 * 1024
+	fi, err := f.Stat()
+	if err != nil {
+		return nil
+	}
+	off := fi.Size() - maxRead
+	if off < 0 {
+		off = 0
+	}
+	if _, err := f.Seek(off, io.SeekStart); err != nil {
+		return nil
+	}
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return nil
+	}
+	if off > 0 {
+		if i := bytes.IndexByte(data, '\n'); i >= 0 {
+			data = data[i+1:]
+		} else {
+			data = nil
+		}
+	}
+	raw := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if len(raw) > tail {
+		raw = raw[len(raw)-tail:]
+	}
+	out := make([]map[string]any, 0, len(raw))
+	for _, line := range raw {
+		lower := strings.ToLower(line)
+		out = append(out, map[string]any{
+			"src":      src,
+			"semantic": strings.Contains(lower, "semantic") || strings.Contains(lower, "embed"),
+			"text":     line,
+		})
+	}
+	return out
 }
 
 // apiExport 导出知识库 zip（project 缺省 all）。

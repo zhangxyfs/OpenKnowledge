@@ -97,6 +97,19 @@ type Retrieve struct {
 	Alpha float64 `toml:"alpha"`
 	Beta  float64 `toml:"beta"`
 	TopN  int     `toml:"top_n"`
+	// MinGap 是语义通道的"头部显著性"判定阈值（默认 0.25）：本次查询余弦分布的
+	// max 相对中位数的相对 gap 低于该值时，语义通道整体不准入（宁缺毋滥）。
+	// 低对比度自定义 embedding 模型（相关与噪声的 gap 都很小）可调低放宽；
+	// <=0 关闭 gap 判定（仅绝对下限 min_score 生效，回到模型相关语义）。
+	MinGap float64 `toml:"min_gap"`
+	// MinScore 是检索注入的最低置信阈值（0~1，默认 0.5）。准入按通道独立判定：
+	// 关键词通道需归一 BM25 分（未乘 α）≥ 阈值；语义通道需余弦 ≥ 语义门槛——
+	// 该门槛模型无关（见 index.SemanticFloor：以本次查询余弦分布为参照，
+	// 头部相对背景有显著分离才启用），min_score 只作绝对下限兜底。
+	// 阈值随库规模缩放（index.MinScoreFloor：<10 条关闭、10→30 线性、≥30 全量）。
+	// 自定义/低对比度 embedding 模型整体余弦偏低时，可适当调低本值放宽语义准入。
+	// 0 或负数表示关闭阈值（旧语义：score>0 即注入）。宁缺毋滥，不强行凑 top_n。
+	MinScore float64 `toml:"min_score"`
 }
 
 type EnforceRule struct {
@@ -150,7 +163,7 @@ func Default() Config {
 	return Config{
 		Embedding:  Embedding{TimeoutSec: 5},
 		Inject:     Inject{MaxTokens: 800},
-		Retrieve:   Retrieve{Alpha: 1.0, Beta: 1.0, TopN: 2},
+		Retrieve:   Retrieve{Alpha: 1.0, Beta: 1.0, TopN: 2, MinScore: 0.5, MinGap: 0.25},
 		Capture:    Capture{Mode: "propose", TurnInterval: 5},
 		Wiki:       Wiki{StaleCommits: 20},
 		Hooks:      Hooks{TimeoutSec: 10},

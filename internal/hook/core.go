@@ -86,20 +86,26 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 		}
 	}
 	var queryVec []float32
+	var embedWarn string
 	if client != nil {
 		if vec, err := client.EmbedQuery(context.Background(), promptText); err != nil {
 			logErr("prompt embed: %v", err)
 		} else {
-			var warn string
-			queryVec, warn = embedx.QueryVec(db, client, vec)
-			if warn != "" {
-				logErr("prompt embed identity: %s", warn)
+			queryVec, embedWarn = embedx.QueryVec(db, client, vec)
+			if embedWarn != "" {
+				logErr("prompt embed identity: %s", embedWarn)
 			}
 		}
 	}
-	hits, err := db.Query(retrieve.Terms(promptText), queryVec, pc.Config.Retrieve)
+	hits, info, err := db.QueryEx(retrieve.Terms(promptText), queryVec, pc.Config.Retrieve)
 	if err != nil {
 		logErr("prompt query: %v", err)
+	}
+	// 语义通道未准入任何条目（无显著头部）：记 ok.log，GUI 日志页可按"语义"过滤
+	// 查看；低对比度自定义模型可调低 retrieve.min_gap 放宽。
+	if info.SemanticRejected {
+		logErr("prompt semantic: 语义通道未准入任何条目（样本 %d，max=%.3f median=%.3f relGap=%.3f）；低对比度模型可调低 retrieve.min_gap 放宽",
+			info.Coses, info.MaxCos, info.MedianCos, info.RelGap)
 	}
 	// 丢弃其他分支的差异条目；无 branch 标签的条目与未知分支场景不受影响
 	hits = index.FilterHitsByBranch(hits, ws.Branch)
@@ -143,6 +149,16 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 				out += nudge
 			}
 		}
+	}
+	// 语义检索退化提示（每会话一次，独立于 wiki nudge 预算）：QueryVec 因模型
+	// 身份缺失/切换而拦截向量通道时，仅写 ok.log 用户不可见，注入一行让模型
+	// 知道当前是纯关键词检索、可运行 ok index 重建恢复。
+	if embedWarn != "" && !st.RetrieveWarned {
+		st.RetrieveWarned = true
+		if err := st.Save(pc.Store.StateDir()); err != nil {
+			logErr("prompt save state: %v", err)
+		}
+		out += "\n[OpenKnowledge] 语义检索退化：" + embedWarn + "\n"
 	}
 	return out
 }
