@@ -79,6 +79,12 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	os.Setenv("OK_QODER_IDE_HOME", qoderIdeDir)
+	dshDir, err := os.MkdirTemp("", "hook-test-dsh-home")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	os.Setenv("OK_DSH_HOME", dshDir)
 	os.Exit(m.Run())
 }
 
@@ -171,6 +177,36 @@ func TestFirstPromptInjectsBaseOnce(t *testing.T) {
 	}
 	if strings.Contains(got, "Conventional Commits") {
 		t.Fatalf("retrieval should not inject full body: %q", got)
+	}
+}
+
+// TestHandleCompactResetsBaseInjection L2：Claude Code PreCompact 等压缩前事件应
+// 重置基础注入标记，使下一次 UserPromptSubmit 重新注入 mandatory 全文。
+func TestHandleCompactResetsBaseInjection(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	writeEntry(t, kbRoot, "rule.md", mandatoryEntry)
+	mkPrompt := func(text string) string {
+		return fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":[{"type":"text","text":%q}]}`, projDir, text)
+	}
+	var out bytes.Buffer
+	if code := HandlePrompt(strings.NewReader(mkPrompt("git 提交规范是什么")), &out, ""); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if !strings.Contains(out.String(), "改完代码先写日志。") {
+		t.Fatalf("首次应注入 mandatory 全文: %q", out.String())
+	}
+	// PreCompact 事件：重置基础注入标记
+	compactJSON := fmt.Sprintf(`{"hook_event_name":"PreCompact","session_id":"s1","cwd":%q}`, projDir)
+	if code := HandleCompact(strings.NewReader(compactJSON)); code != 0 {
+		t.Fatalf("HandleCompact exit %d", code)
+	}
+	// 压缩后再提问：重注入全文
+	out.Reset()
+	if code := HandlePrompt(strings.NewReader(mkPrompt("git 提交规范是什么")), &out, ""); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if !strings.Contains(out.String(), "改完代码先写日志。") {
+		t.Fatalf("压缩后应重注入 mandatory 全文: %q", out.String())
 	}
 }
 

@@ -13,6 +13,8 @@ type Session struct {
 	Touched             []string `json:"touched"`
 	BlockedRules        []string `json:"blocked_rules"`
 	BaseInjected        bool     `json:"base_injected"`
+	// InjectCount 本会话 prompt 注入轮次计数（reinject_turns 周期性重注入用）。
+	InjectCount         int      `json:"inject_count"`
 	StopCount           int      `json:"stop_count"`
 	LastExtractReminder int      `json:"last_extract_reminder"`
 	WikiNudged          bool     `json:"wiki_nudged"`

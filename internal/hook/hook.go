@@ -244,6 +244,40 @@ func HandlePostTool(r io.Reader) int {
 	return 0
 }
 
+// ResetBaseInjection 压缩/上下文丢失后重置基础注入标记：下一次 prompt 注入即重新
+// 下发 mandatory 全文 + 索引。返回是否实际发生了重置。Reasonix sidecar 的
+// compaction.complete 与 Claude Code 的 PreCompact 共用此逻辑。
+func ResetBaseInjection(pc *project.Context, sessionID string) bool {
+	st := state.Load(pc.Store.StateDir(), sessionID)
+	if !st.BaseInjected {
+		return false
+	}
+	st.BaseInjected = false
+	if err := st.Save(pc.Store.StateDir()); err != nil {
+		logErr("reset base injection: %v", err)
+	}
+	return true
+}
+
+// HandleCompact PreCompact 等压缩前事件的入口：重置基础注入标记，宿主压缩完成后
+// 下一次 UserPromptSubmit 即重新注入 mandatory 全文。恒退出 0（fail-open，不阻断压缩）。
+func HandleCompact(r io.Reader) int {
+	if registry.HooksDisabled() {
+		return 0
+	}
+	ev, err := ParseEvent(r)
+	if err != nil {
+		logErr("compact parse: %v", err)
+		return 0
+	}
+	pc, err := project.FromCwd(ev.Cwd)
+	if err != nil {
+		return 0
+	}
+	ResetBaseInjection(pc, ev.SessionID)
+	return 0
+}
+
 // relativize 将绝对路径转为相对项目根的路径；无法转换时返回 ""。
 func relativize(pc *project.Context, abs string) string {
 	if abs == "" {

@@ -50,6 +50,9 @@ func NewMux(gh http.Handler, token, fingerprint string) http.Handler {
 		code := hook.HandleStop(bytes.NewReader(body), &errOut, &out, format)
 		return HookResponse{Stdout: out.String(), Stderr: errOut.String(), Code: code}
 	})))
+	mux.HandleFunc("POST /api/hook/compact", auth(hookHandler(func(body []byte, _ string) HookResponse {
+		return HookResponse{Code: hook.HandleCompact(bytes.NewReader(body))}
+	})))
 	mux.Handle("/", gh)
 	return mux
 }

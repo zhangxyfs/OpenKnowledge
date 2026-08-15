@@ -6,3 +6,4 @@
 /installer/output/
 cmd/ok/*.syso
 /.superpowers/
+/.reasonix/

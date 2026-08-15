@@ -20,7 +20,7 @@ import (
 // TestMain 隔离十个 agent home：selfHealHooks 会遍历 detected agents 写 hook 集成，
 // 测试绝不可触碰真实配置（与 hook 包 TestMain 同款，另加 OK_REASONIX_HOME 预留）。
 func TestMain(m *testing.M) {
-	for i, env := range []string{"OK_REASONIX_HOME", "KIMI_CODE_HOME", "PI_CODING_AGENT_DIR", "OK_ZCODE_HOME", "OK_OPENCODE_HOME", "OK_CLAUDE_HOME", "OK_CODEPILOT_HOME", "OK_CODEX_HOME", "OK_QODER_HOME", "OK_QODER_IDE_HOME"} {
+	for i, env := range []string{"OK_REASONIX_HOME", "KIMI_CODE_HOME", "PI_CODING_AGENT_DIR", "OK_ZCODE_HOME", "OK_OPENCODE_HOME", "OK_CLAUDE_HOME", "OK_CODEPILOT_HOME", "OK_CODEX_HOME", "OK_QODER_HOME", "OK_QODER_IDE_HOME", "OK_DSH_HOME"} {
 		dir, err := os.MkdirTemp("", "rxext-test-"+string(rune('a'+i)))
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -90,10 +90,10 @@ func TestInitializeRecordsSession(t *testing.T) {
 	if h.sessionID != "sess-1" || h.cwd != `D:\work\demo` {
 		t.Errorf("会话上下文未记录: %+v", h)
 	}
-	// 断言订阅集合恰为 {input.receive, tool.after}（顺序无关）
-	want := map[string]bool{"input.receive": true, "tool.after": true}
+	// 断言订阅集合恰为 {input.receive, tool.after, compaction.complete}（顺序无关）
+	want := map[string]bool{"input.receive": true, "tool.after": true, "compaction.complete": true}
 	if len(res.Subscriptions) != len(want) {
-		t.Fatalf("订阅应为 input.receive 与 tool.after，got: %v", res.Subscriptions)
+		t.Fatalf("订阅应为 input.receive、tool.after 与 compaction.complete，got: %v", res.Subscriptions)
 	}
 	for _, s := range res.Subscriptions {
 		if !want[s] {
@@ -104,7 +104,7 @@ func TestInitializeRecordsSession(t *testing.T) {
 
 func TestStubInterceptorsContinue(t *testing.T) {
 	h := &handler{sessionID: "s", cwd: "."}
-	for _, fn := range []extension.InterceptorFunc{h.onInput, h.onToolAfter} {
+	for _, fn := range []extension.InterceptorFunc{h.onInput, h.onToolAfter, h.onCompaction} {
 		res, err := fn(context.Background(), "", []byte(`{}`))
 		if err != nil || res == nil {
 			t.Fatalf("拦截器错误: %v", err)
@@ -112,6 +112,33 @@ func TestStubInterceptorsContinue(t *testing.T) {
 		if res.Decision != extension.DecisionContinue {
 			t.Errorf("桩拦截器应 Continue，got: %v", res.Decision)
 		}
+	}
+}
+
+// TestCompactionResetsBaseInjected L2：宿主压缩上下文后，compaction.complete 应
+// 重置 BaseInjected，使下一次 input.receive 重新注入 mandatory 全文。
+func TestCompactionResetsBaseInjected(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	writeEntry(t, kbRoot, "规约.md", "---\ntitle: 架构规约\ntype: rule\nmandatory: true\nsummary: s\n---\n\n永远先跑 gofmt。\n")
+	pc, err := project.FromCwd(projDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionID := "sess-compact"
+	_ = hook.InjectForPrompt(pc, sessionID, projDir, "第一次")
+	if !state.Load(pc.Store.StateDir(), sessionID).BaseInjected {
+		t.Fatal("首次注入应置 BaseInjected")
+	}
+	h := &handler{sessionID: sessionID, cwd: projDir}
+	res, err := h.onCompaction(context.Background(), "", []byte(`{}`))
+	if err != nil || res == nil || res.Decision != extension.DecisionContinue {
+		t.Fatalf("onCompaction 应 Continue，got res=%v err=%v", res, err)
+	}
+	if state.Load(pc.Store.StateDir(), sessionID).BaseInjected {
+		t.Fatal("压缩后 BaseInjected 应重置为 false")
+	}
+	if out := hook.InjectForPrompt(pc, sessionID, projDir, "第二次"); !strings.Contains(out, "永远先跑 gofmt") {
+		t.Fatalf("压缩后下一次注入应重注入 mandatory 全文，got: %q", out)
 	}
 }
 

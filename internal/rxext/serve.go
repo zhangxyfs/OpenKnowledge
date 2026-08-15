@@ -28,8 +28,9 @@ func Serve(ctx context.Context) error {
 		Name:    "openknowledge",
 		Version: version.Version,
 		Interceptors: map[string]extension.InterceptorFunc{
-			"input.receive": h.onInput,
-			"tool.after":    h.onToolAfter,
+			"input.receive":      h.onInput,
+			"tool.after":         h.onToolAfter,
+			"compaction.complete": h.onCompaction,
 		},
 	})
 }
@@ -47,7 +48,7 @@ func (h *handler) Initialize(_ context.Context, p extension.InitializeParams) (*
 	h.sessionID = p.Session.SessionID
 	h.cwd = p.Session.WorkspaceRoot
 	return &extension.InitializeResult{
-		Subscriptions: []string{"input.receive", "tool.after"},
+		Subscriptions: []string{"input.receive", "tool.after", "compaction.complete"},
 	}, nil
 }
 
@@ -192,6 +193,22 @@ func (h *handler) onToolAfter(_ context.Context, _ string, payload json.RawMessa
 		return res, nil
 	}
 	hook.TrackTouched(pc, h.sessionID, p.Name, args.Path)
+	return res, nil
+}
+
+// onCompaction compaction.complete 拦截器：宿主压缩上下文后，首轮注入的 mandatory
+// 全文已被摘要/丢弃，但 BaseInjected 仍为 true 会阻止重注入。这里重置标记，下一次
+// input.receive 即重新注入基础段（mandatory 全文 + 索引）。恒 Continue。
+func (h *handler) onCompaction(_ context.Context, _ string, _ json.RawMessage) (res *extension.InterceptResult, err error) {
+	defer continueOnPanic(&res, &err)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	res = extension.Continue()
+	pc, err := project.FromCwd(h.cwd)
+	if err != nil {
+		return res, nil
+	}
+	hook.ResetBaseInjection(pc, h.sessionID)
 	return res, nil
 }
 

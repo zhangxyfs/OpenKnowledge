@@ -47,6 +47,7 @@ var claudeHookEvents = []struct {
 	{"UserPromptSubmit", "*", "prompt"},
 	{"PostToolUse", "Write|Edit", "post-tool"},
 	{"Stop", "*", "stop"},
+	{"PreCompact", "*", "compact"},
 }
 
 // claudeCommand 生成 hook 命令串。

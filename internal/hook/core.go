@@ -63,23 +63,59 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 	// 与 nudge 共用同一份 Status。分支未知（非 git）时 ws.Branch 为空，
 	// 裁剪与过滤均为恒等（宁多勿漏，零回归）。
 	ws := wiki.CheckStatus(pc.Store.StateDir(), cwd, pc.Config.Wiki.StaleCommits)
-	var b strings.Builder
-	if !st.BaseInjected {
-		_ = state.Clean(pc.Store.StateDir(), 7*24*time.Hour)
-		base := b.Len()
-		mandatory, err := db.Mandatory()
-		if err != nil {
-			logErr("prompt mandatory: %v", err)
+	// mandatory 段与其余段分离：mandatory 是"必须遵守"类规则，注入优先级最高，
+	// 预算截断绝不波及（否则长 INDEX/检索会把尾部 mandatory 静默砍掉）。
+	var mandatoryText, restText strings.Builder
+	mandatory, err := db.Mandatory()
+	if err != nil {
+		logErr("prompt mandatory: %v", err)
+	}
+	// L2 兜底：无显式压缩事件的宿主按轮次重注入 mandatory 全文（reinject_turns>0
+	// 时启用；0=关闭保持旧语义）。显式压缩事件（Reasonix compaction.complete）在
+	// rxext sidecar 直接重置 BaseInjected，不走此轮次计数。
+	doBase := !st.BaseInjected
+	reinjectActive := pc.Config.Inject.ReinjectTurns > 0 && len(mandatory) > 0
+	if reinjectActive && st.BaseInjected {
+		st.InjectCount++
+		if st.InjectCount >= pc.Config.Inject.ReinjectTurns {
+			doBase = true
+			st.BaseInjected = false
+			st.InjectCount = 0
 		}
+	}
+	if doBase {
+		_ = state.Clean(pc.Store.StateDir(), 7*24*time.Hour)
+		wroteBase := false
 		for _, h := range mandatory {
-			fmt.Fprintf(&b, "## %s\n\n%s\n\n", h.Title, h.Body)
+			fmt.Fprintf(&mandatoryText, "## %s\n\n%s\n\n", h.Title, h.Body)
+			wroteBase = true
 		}
 		if idx, err := os.ReadFile(pc.Store.IndexPath()); err == nil {
 			// 按当前分支裁剪 INDEX 的"分支差异（X）"小节，防止检索过滤被 INDEX 绕过
-			b.WriteString(index.TrimIndexBranchSections(string(idx), ws.Branch))
+			if idxText := index.TrimIndexBranchSections(string(idx), ws.Branch); idxText != "" {
+				restText.WriteString(idxText)
+				wroteBase = true
+			}
 		}
-		if b.Len() > base {
+		if wroteBase {
 			st.BaseInjected = true
+		}
+		st.InjectCount = 0
+		if wroteBase || reinjectActive {
+			if err := st.Save(pc.Store.StateDir()); err != nil {
+				logErr("prompt save state: %v", err)
+			}
+		}
+	} else if len(mandatory) > 0 {
+		// L3 粘性指针：全文只在基础注入轮出现，其余每轮仅注标题 + 路径（几十 token），
+		// 即使宿主压缩上下文把首轮全文摘要掉/沉入 lost-middle，模型仍能据此重读原文。
+		mandatoryText.WriteString("## 必守规约（全文见文件，必要时读取）\n\n")
+		for _, h := range mandatory {
+			p := filepath.ToSlash(filepath.Join(pc.Store.KnowledgeDir(), h.Filename))
+			fmt.Fprintf(&mandatoryText, "- **%s** (%s)（%s）\n", h.Title, h.Type, p)
+		}
+		mandatoryText.WriteString("\n")
+		if reinjectActive {
 			if err := st.Save(pc.Store.StateDir()); err != nil {
 				logErr("prompt save state: %v", err)
 			}
@@ -110,18 +146,28 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 	// 丢弃其他分支的差异条目；无 branch 标签的条目与未知分支场景不受影响
 	hits = index.FilterHitsByBranch(hits, ws.Branch)
 	if len(hits) > 0 {
-		b.WriteString("## 相关知识（需要全文时读取对应文件）\n\n")
+		restText.WriteString("## 相关知识（需要全文时读取对应文件）\n\n")
 		for _, h := range hits {
 			p := filepath.ToSlash(filepath.Join(pc.Store.KnowledgeDir(), h.Filename))
 			if h.Summary != "" {
-				fmt.Fprintf(&b, "- **%s** (%s) — %s（%s）\n", h.Title, h.Type, h.Summary, p)
+				fmt.Fprintf(&restText, "- **%s** (%s) — %s（%s）\n", h.Title, h.Type, h.Summary, p)
 			} else {
-				fmt.Fprintf(&b, "- **%s** (%s)（%s）\n", h.Title, h.Type, p)
+				fmt.Fprintf(&restText, "- **%s** (%s)（%s）\n", h.Title, h.Type, p)
 			}
 		}
-		b.WriteString("\n")
+		restText.WriteString("\n")
 	}
-	out := store.TruncateToBudget(b.String(), pc.Config.Inject.MaxTokens)
+	// L4：mandatory 永不被截断；其余段（INDEX + 检索）在剩余预算内截断。
+	budget := pc.Config.Inject.MaxTokens
+	out := ""
+	if mandatoryText.Len() > 0 {
+		out = mandatoryText.String()
+		if restBudget := budget - store.EstimateTokens(mandatoryText.String()); restBudget > 0 {
+			out += store.TruncateToBudget(restText.String(), restBudget)
+		}
+	} else {
+		out = store.TruncateToBudget(restText.String(), budget)
+	}
 	// 分支上下文行（注入开头）与 nudge（末尾）复用前移的同一份 Status
 	if line := wikiContextLine(ws); line != "" && strings.TrimSpace(out) != "" {
 		out = line + "\n" + out

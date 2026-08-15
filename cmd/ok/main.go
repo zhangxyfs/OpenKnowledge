@@ -104,6 +104,8 @@ func runHook(args []string) (code int) {
 		return hook.HandlePostTool(r)
 	case "stop":
 		return hook.HandleStop(r, os.Stderr, os.Stdout, format)
+	case "compact":
+		return hook.HandleCompact(r)
 	}
 	return 0
 }

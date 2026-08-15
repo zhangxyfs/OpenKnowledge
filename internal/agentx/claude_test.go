@@ -36,6 +36,7 @@ func TestIsOKClaudeHook(t *testing.T) {
 		{"prompt", map[string]any{"type": "command", "command": `"D:/x/ok.exe" hook prompt claude`}, true},
 		{"post-tool", map[string]any{"type": "command", "command": `"D:/x/ok.exe" hook post-tool claude`}, true},
 		{"stop", map[string]any{"type": "command", "command": `"D:/x/ok.exe" hook stop claude`}, true},
+		{"compact", map[string]any{"type": "command", "command": `"D:/x/ok.exe" hook compact claude`}, true},
 		{"尾部空白容忍", map[string]any{"type": "command", "command": `"D:/x/ok.exe" hook prompt claude  `}, true},
 		{"非 command 类型", map[string]any{"type": "process", "command": `"D:/x/ok.exe" hook prompt claude`}, false},
 		{"非 ok 命令", map[string]any{"type": "command", "command": "echo hi"}, false},
@@ -81,14 +82,15 @@ func TestClaudeInstallHooks(t *testing.T) {
 	if len(pre) != 1 {
 		t.Error("第三方 PreToolUse 组被删")
 	}
-	// 三事件各多出一个 ok 组（命令形态经 claudeCommand 生成——ToSlash 随平台分叉，
+	// 四事件各多出一个 ok 组（命令形态经 claudeCommand 生成——ToSlash 随平台分叉，
 	// 测试期望与生产形态一致，不写死 D:/ 或 D:\ 形态）
 	wantCmd := map[string]string{
 		"UserPromptSubmit": claudeCommand(claudeTestExe(), "prompt"),
 		"PostToolUse":      claudeCommand(claudeTestExe(), "post-tool"),
 		"Stop":             claudeCommand(claudeTestExe(), "stop"),
+		"PreCompact":       claudeCommand(claudeTestExe(), "compact"),
 	}
-	wantMatcher := map[string]string{"UserPromptSubmit": "*", "PostToolUse": "Write|Edit", "Stop": "*"}
+	wantMatcher := map[string]string{"UserPromptSubmit": "*", "PostToolUse": "Write|Edit", "Stop": "*", "PreCompact": "*"}
 	wantTimeout := float64(HookTimeoutSec())
 	for ev, cmd := range wantCmd {
 		groups, _ := events[ev].([]any)
@@ -131,7 +133,7 @@ func TestClaudeInstallIdempotent(t *testing.T) {
 	var cfg map[string]any
 	_ = json.Unmarshal(data, &cfg)
 	events, _ := cfg["hooks"].(map[string]any)
-	for _, ev := range []string{"UserPromptSubmit", "PostToolUse", "Stop"} {
+	for _, ev := range []string{"UserPromptSubmit", "PostToolUse", "Stop", "PreCompact"} {
 		groups, _ := events[ev].([]any)
 		if len(groups) != 1 {
 			t.Fatalf("重复安装产生堆积: %s 组数 = %d, want 1", ev, len(groups))

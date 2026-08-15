@@ -91,6 +91,10 @@ func (e *Embedding) migrateLegacy() {
 
 type Inject struct {
 	MaxTokens int `toml:"max_tokens"`
+	// ReinjectTurns 无显式压缩事件的宿主按轮次重注入 mandatory 全文（0=关闭）。
+	// 上下文压缩把首轮全文摘要掉后，模型仍可靠粘性指针重读文件；需要
+	// "硬约束始终在场"的宿主可设 >0 周期性重注入全文。
+	ReinjectTurns int `toml:"reinject_turns"`
 }
 
 type Retrieve struct {

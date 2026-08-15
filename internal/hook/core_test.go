@@ -197,3 +197,67 @@ message = "请补变更日志"
 		t.Fatalf("未落标记时应重复命中，got (%q, %q)", reason2, blockedRule2)
 	}
 }
+
+// TestMandatoryPointerAfterBase L3：首轮注入全文后，后续每轮仍注入"标题 + 路径"的
+// 粘性指针（不重复全文），即使宿主压缩上下文把首轮全文摘要掉/沉入 lost-middle，
+// 模型也能据此重读原文。
+func TestMandatoryPointerAfterBase(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	writeEntry(t, kbRoot, "规约.md", "---\ntitle: 架构规约\ntype: reference\nmandatory: true\nsummary: s\n---\n\n永远先跑 gofmt。\n")
+	pc, err := project.FromCwd(projDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = InjectForPrompt(pc, "s-ptr", projDir, "第一次")
+	out2 := InjectForPrompt(pc, "s-ptr", projDir, "第二次")
+	if strings.Contains(out2, "永远先跑 gofmt") {
+		t.Fatalf("第二轮不应重复 mandatory 全文，got: %q", out2)
+	}
+	if !strings.Contains(out2, "必守规约") || !strings.Contains(out2, "架构规约") || !strings.Contains(out2, "规约.md") {
+		t.Fatalf("第二轮应注入粘性指针（标题 + 路径），got: %q", out2)
+	}
+}
+
+// TestMandatoryNeverTruncated L4：mandatory 条目再长也不被预算截断（其余段在剩余
+// 预算内截断）。旧实现用单 builder 砍头，长 INDEX/检索会把尾部 mandatory 静默砍掉。
+func TestMandatoryNeverTruncated(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	longBody := strings.Repeat("甲", 3000)
+	entry := "---\ntitle: 长规约\ntype: rule\nmandatory: true\nsummary: s\n---\n\n" + longBody + "\n"
+	writeEntry(t, kbRoot, "rule.md", entry)
+	pc, err := project.FromCwd(projDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := InjectForPrompt(pc, "s-long", projDir, "随便问问")
+	if !strings.Contains(out, longBody) {
+		t.Fatalf("mandatory 正文必须完整在场，len(out)=%d", len(out))
+	}
+	if strings.Contains(out, "已截断") {
+		t.Fatalf("mandatory 不得携带截断标记，got: %q", out)
+	}
+}
+
+// TestReinjectTurnsPeriodic L2 兜底：reinject_turns>0 时，按轮次周期性重注入
+// mandatory 全文（轮次间为粘性指针）。reinject_turns=2 → 第1/3/5…轮全文。
+func TestReinjectTurnsPeriodic(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	writeEntry(t, kbRoot, "规约.md", "---\ntitle: 架构规约\ntype: rule\nmandatory: true\nsummary: s\n---\n\n永远先跑 gofmt。\n")
+	if err := os.WriteFile(filepath.Join(kbRoot, "config.toml"), []byte("[inject]\nreinject_turns = 2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pc, err := project.FromCwd(projDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out := InjectForPrompt(pc, "s-re", projDir, "q1"); !strings.Contains(out, "永远先跑 gofmt") {
+		t.Fatalf("第1轮应注入全文，got: %q", out)
+	}
+	if out := InjectForPrompt(pc, "s-re", projDir, "q2"); strings.Contains(out, "永远先跑 gofmt") {
+		t.Fatalf("第2轮不应重复全文，got: %q", out)
+	}
+	if out := InjectForPrompt(pc, "s-re", projDir, "q3"); !strings.Contains(out, "永远先跑 gofmt") {
+		t.Fatalf("第3轮应周期性重注入全文，got: %q", out)
+	}
+}
+
