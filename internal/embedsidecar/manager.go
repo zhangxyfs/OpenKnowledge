@@ -13,6 +13,7 @@ import (
 
 	"openknowledge/internal/config"
 	"openknowledge/internal/embed"
+	"openknowledge/internal/logx"
 )
 
 // ServerCommand 是 spawn 接缝：测试替换为 helper 进程。生产即 exec.Command。
@@ -108,9 +109,14 @@ func (m *Manager) Ensure(model embed.BuiltinModel) (*State, error) {
 	cmd := ServerCommand(server, args...)
 	hideWindow(cmd)
 	logF, err := os.OpenFile(logPath(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	var logW *logx.Writer
 	if err == nil {
-		cmd.Stdout = logF
-		cmd.Stderr = logF
+		// 输出经 logx 按行加时间戳再落盘：llama-server 自身不打时间戳，
+		// 多次启动的输出交织后无法对时间线。io.Writer 模式下 exec 用管道 +
+		// 复制 goroutine 转发，句柄不继承给子进程，改在 Wait 返回后关闭。
+		logW = logx.New(logF)
+		cmd.Stdout = logW
+		cmd.Stderr = logW
 	}
 	if err := cmd.Start(); err != nil {
 		if logF != nil {
@@ -118,13 +124,22 @@ func (m *Manager) Ensure(model embed.BuiltinModel) (*State, error) {
 		}
 		return nil, err
 	}
-	if logF != nil {
-		_ = logF.Close() // 子进程已继承句柄
+	if logW != nil {
+		fmt.Fprintf(logW, "=== llama-server 启动 model=%s port=%d pid=%d ===\n", model.ID, port, cmd.Process.Pid)
 	}
 	m.cmd = cmd
 	st := &State{PID: cmd.Process.Pid, Port: port, ModelID: model.ID, StartedAt: time.Now(), LastUsed: time.Now()}
 	waitCh := make(chan error, 1)
-	go func() { waitCh <- cmd.Wait() }()
+	go func() {
+		err := cmd.Wait()
+		if logW != nil {
+			fmt.Fprintf(logW, "=== llama-server 退出: %v ===\n", err)
+		}
+		if logF != nil {
+			_ = logF.Close()
+		}
+		waitCh <- err
+	}()
 	deadline := time.Now().Add(m.HealthTimeout)
 	for {
 		if st.Healthy() {

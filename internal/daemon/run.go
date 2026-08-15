@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -69,7 +70,9 @@ func Run(webDir string, stdout, stderr io.Writer) int {
 	}()
 
 	gh := gui.NewHandler(webDir, token, nil)
-	srv := &http.Server{Handler: NewMux(gh, token, fp)}
+	// ErrorLog 不设时 http.Server 内部错误走 log 默认输出（直写 os.Stderr fd，
+	// 绕过入口的时间戳包装）；指到 stderr 且 flags=0，时间戳由外层统一加。
+	srv := &http.Server{Handler: NewMux(gh, token, fp), ErrorLog: log.New(stderr, "", 0)}
 	go func() {
 		<-gh.Done()
 		_ = srv.Shutdown(context.Background())

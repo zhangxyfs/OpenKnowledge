@@ -11,6 +11,7 @@ import (
 	"openknowledge/internal/cli"
 	"openknowledge/internal/daemon"
 	"openknowledge/internal/hook"
+	"openknowledge/internal/logx"
 	"openknowledge/internal/registry"
 	"openknowledge/internal/rxext"
 )
@@ -38,7 +39,8 @@ func run(argv []string) int {
 			return daemon.Stop(os.Stdout, os.Stderr)
 		}
 		webDir, _ := findWebDir() // 找不到 web 目录也能跑（仅无 GUI 静态页）
-		return daemon.Run(webDir, os.Stdout, os.Stderr)
+		// 后台拉起时 stdio 即 daemon.log：按行加时间戳，排查"何时发生"不再靠猜
+		return daemon.Run(webDir, logx.New(os.Stdout), logx.New(os.Stderr))
 	case "setup":
 		return cli.Setup(argv[2:], os.Stdin, os.Stdout, os.Stderr)
 	case "init":
