@@ -116,7 +116,8 @@
     <summary data-i18n="c.ledger">版本档案</summary>
     <div class="group">
       <div class="group-title">2.16.x</div>
-      <a href="#v2-16-0"><span><span class="latest-dot"></span>v2.16.0</span><span class="d">08-15</span></a>
+      <a href="#v2-16-2"><span><span class="latest-dot"></span>v2.16.2</span><span class="d">08-15</span></a>
+      <a href="#v2-16-0"><span>v2.16.0</span><span class="d">08-15</span></a>
     </div>
     <div class="group">
       <div class="group-title">2.15.x</div>
@@ -194,8 +195,40 @@
       </div>
     </div>
 
+    <section class="ver" id="v2-16-2">
+      <div class="ver-head"><h2>v2.16.2</h2><span class="badge-latest" data-i18n="c.latest">最新</span><time>2026-08-15</time></div>
+      <div class="chg">
+        <span class="tag tag-new" data-i18n="t.new">新功能</span>
+        <ul>
+          <li data-i18n="c.2162.n1">日志全行时间戳：<code>daemon.log</code>（含 http.Server 内部错误）与 <code>embed-sidecar.log</code>（llama-server 输出）按行加时间戳，后者新增启动/退出分隔标记——多次启动的日志交织后也能对上时间线</li>
+        </ul>
+      </div>
+      <div class="chg">
+        <span class="tag tag-improve" data-i18n="t.improve">改进</span>
+        <ul>
+          <li data-i18n="c.2162.i1">落盘写入统一原子化（同目录临时文件 + fsync + rename）：INDEX.md、registry.toml、config.toml、各宿主 settings、备份导入、知识条目、wiki 游标——崩溃/断电不再留半截文件，宿主也不会读到截断的 JSON</li>
+          <li data-i18n="c.2162.i2">注入预算按密度估算：中文按约 1 token/字、拉丁按约 4 字符/token（旧实现统一 2 字符/token，对中文为主的条目低估约 2 倍）；<code>max_tokens</code> 误配为负数不再崩溃</li>
+        </ul>
+      </div>
+      <div class="chg">
+        <span class="tag tag-fix" data-i18n="t.fix">修复</span>
+        <ul>
+          <li data-i18n="c.2162.f1">修复会话状态并发竞态：并行工具调用派发的多个 hook 进程对同一会话状态无锁读改写，互相覆盖丢 Touched（changelog 规则漏拦）、极端时 <code>BaseInjected</code> 归零导致 mandatory 全文重复注入——新增跨进程锁 + 锁内合并 + 原子落盘</li>
+          <li data-i18n="c.2162.f2">修复强负余弦把已过关键词门槛的命中挤出注入（语义通道不应有单方面否决权，语义分只影响排序）</li>
+          <li data-i18n="c.2162.f3">修复 <code>top_n</code> 截断先于分支过滤导致的注入欠额：其他分支条目被过滤后本分支条目无补位</li>
+          <li data-i18n="c.2162.f4">修复 kimi hook 命令路径含空格时静默失效（exe 补引号，存量配置照常自愈替换）；修复版本同步脚本 winres 段 sed 分隔符冲突导致同步中断</li>
+        </ul>
+      </div>
+      <div class="chg">
+        <span class="tag tag-note" data-i18n="t.note">说明</span>
+        <ul>
+          <li data-i18n="c.2162.s1">本版为稳健性批次：注入机制无行为变化，主要修复并发与边界条件缺陷；升级安装器会先自动停止旧 daemon，日志时间戳自新 daemon 拉起后生效</li>
+        </ul>
+      </div>
+    </section>
+
     <section class="ver" id="v2-16-0">
-      <div class="ver-head"><h2>v2.16.0</h2><span class="badge-latest" data-i18n="c.latest">最新</span><time>2026-08-15</time></div>
+      <div class="ver-head"><h2>v2.16.0</h2><time>2026-08-15</time></div>
       <div class="chg">
         <span class="tag tag-new" data-i18n="t.new">新功能</span>
         <ul>
