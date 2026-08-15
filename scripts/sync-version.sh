@@ -28,7 +28,8 @@ f=cmd/ok/winres.json
 if grep -q "\"file_version\": \"${VERSION4}\"" "$f" && grep -q "\"product_version\": \"${VERSION4}\"" "$f"; then
   echo "$f: 已是 ${VERSION4}，无需变更"
 else
-  sed -i -E "s|\"(file_version|product_version)\": \"[0-9.]+\"|\"\1\": \"${VERSION4}\"|g" "$f"
+  # 分隔符必须避开分组 alternation 的 "|"（曾因此报 unknown option to `s' 且更新被跳过）
+  sed -i -E "s~\"(file_version|product_version)\": \"[0-9.]+\"~\"\1\": \"${VERSION4}\"~g" "$f"
   echo "$f: 版本资源 → ${VERSION4}"
 fi
 
