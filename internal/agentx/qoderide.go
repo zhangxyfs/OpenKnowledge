@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+
+	"openknowledge/internal/fsx"
 )
 
 // LingmaHome 返回 Qoder CN IDE（通义灵码内核）配置根目录：OK_QODER_IDE_HOME
@@ -81,7 +83,7 @@ func ensureLingmaWrappers(exe string) error {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return fmt.Errorf("写入 qoder ide hook 包装: %w", err)
 		}
-		if err := os.WriteFile(path, []byte(want), 0o644); err != nil {
+		if err := fsx.WriteFile(path, []byte(want), 0o644); err != nil {
 			return fmt.Errorf("写入 qoder ide hook 包装: %w", err)
 		}
 	}
@@ -310,7 +312,7 @@ func writeLingmaSettings(cfg map[string]any) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(data, '\n'), 0o644)
+	return fsx.WriteFile(path, append(data, '\n'), 0o644)
 }
 
 func (qoderIdeAgent) InstallHooks(exe string) error {

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"openknowledge/internal/config"
+	"openknowledge/internal/fsx"
 	"openknowledge/internal/registry"
 )
 
@@ -28,22 +29,23 @@ func kimiConfigPath() string { return filepath.Join(KimiHome(), "config.toml") }
 
 // HooksBlockFor 生成指向 exe 的 hooks 配置块；三条 hook 统一使用 timeoutSec 秒超时
 // （Windows 上 ok.exe 冷启动 + daemon 转发在高负载下可超过 5s，超时会被 kimi 静默杀死）。
+// exe 必须加引号：路径含空格（如 C:/Users/John Doe/）时按空格分词会断裂，hook 永不执行。
 func HooksBlockFor(exe string, timeoutSec int) string {
 	exe = filepath.ToSlash(exe)
 	return fmt.Sprintf(`[[hooks]]
 event = "UserPromptSubmit"
-command = "%s hook prompt"
+command = "\"%s\" hook prompt"
 timeout = %d
 
 [[hooks]]
 event = "PostToolUse"
 matcher = "Write|Edit"
-command = "%s hook post-tool"
+command = "\"%s\" hook post-tool"
 timeout = %d
 
 [[hooks]]
 event = "Stop"
-command = "%s hook stop"
+command = "\"%s\" hook stop"
 timeout = %d
 `, exe, timeoutSec, exe, timeoutSec, exe, timeoutSec)
 }
@@ -58,8 +60,9 @@ func HookTimeoutSec() int {
 	return cfg.Hooks.TimeoutSec
 }
 
-// okHookCommand 匹配指向 ok hook 的 command 行（如 "ok hook prompt"、"D:/x/ok.exe hook stop"）。
-var okHookCommand = regexp.MustCompile(`(?i)^\s*command\s*=\s*"[^"]*\bok(?:\.exe)?\s+hook\s`)
+// okHookCommand 匹配指向 ok hook 的 command 行（如 "ok hook prompt"、
+// "\"D:/x/ok.exe\" hook stop"——exe 加引号后值内含转义引号，需一并兼容）。
+var okHookCommand = regexp.MustCompile(`(?i)^\s*command\s*=\s*"(?:[^"]|\\")*\bok(?:\.exe)?(?:\\")?\s+hook\s`)
 
 // StripLegacyOKHooks 移除配置中所有指向 ok hook 的无标记 [[hooks]] 表
 // （历史遗留的手动粘贴块），其它工具的 hooks 原样保留。
@@ -151,7 +154,7 @@ func UpsertHooksBlock(configPath, block string) error {
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(configPath, []byte(out), 0o644)
+	return fsx.WriteFile(configPath, []byte(out), 0o644)
 }
 
 // EnsureHooksBlock hook 入口自检：kimi-code 有时会清掉标记注释行，使标记块丢失

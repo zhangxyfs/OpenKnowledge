@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
+
+	"openknowledge/internal/fsx"
 )
 
 type Session struct {
@@ -60,7 +63,58 @@ func (s *Session) Save(dir string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, fileName(s.SessionID)), data, 0o644)
+	return fsx.WriteFile(filepath.Join(dir, fileName(s.SessionID)), data, 0o644)
+}
+
+// Update 在跨进程锁内完成会话状态的读-改-写。宿主（如 Claude Code 并行工具调用）
+// 会并发派发多个 hook 进程，各自 Load→改→Save 会互相覆盖（丢 Touched、丢防重标记，
+// 严重时把 BaseInjected 归零导致 mandatory 重复注入）；Update 在锁内基于最新快照
+// 重放 fn 的修改。锁获取超时 fail-open（无锁继续，竞态窗口远小于无锁直写）。
+func Update(dir, sessionID string, fn func(*Session)) error {
+	var saveErr error
+	withLock(dir, sessionID, func() {
+		s := Load(dir, sessionID)
+		fn(s)
+		saveErr = s.Save(dir)
+	})
+	return saveErr
+}
+
+const (
+	lockTimeout  = 5 * time.Second  // 拿锁最长等待：hook 本身有 10s 超时，不能等满
+	lockStaleAge = 30 * time.Second // 持有者崩溃留下的死锁文件按 mtime 过期抢占
+)
+
+// withLock 以 O_EXCL 锁文件实现跨进程互斥。锁内容写入持有者 token，释放时只删
+// 自己的锁（持有超时被抢占后不误删新持有者）；等不到锁且超过 mtime 过期时间
+// 则删除重试，最终超时后 fail-open 直接执行。
+func withLock(dir, sessionID string, fn func()) {
+	_ = os.MkdirAll(dir, 0o755)
+	lp := filepath.Join(dir, fileName(sessionID)+".lock")
+	token := strconv.Itoa(os.Getpid()) + "-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	deadline := time.Now().Add(lockTimeout)
+	for {
+		f, err := os.OpenFile(lp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		if err == nil {
+			_, _ = f.WriteString(token)
+			_ = f.Close()
+			fn()
+			// 只删除仍属于本持有者的锁：超时被抢占后文件归新持有者
+			if data, err := os.ReadFile(lp); err == nil && string(data) == token {
+				_ = os.Remove(lp)
+			}
+			return
+		}
+		if fi, statErr := os.Stat(lp); statErr == nil && time.Since(fi.ModTime()) > lockStaleAge {
+			_ = os.Remove(lp)
+			continue
+		}
+		if time.Now().After(deadline) {
+			fn()
+			return
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
 }
 
 func (s *Session) AddTouched(p string) {

@@ -11,7 +11,7 @@ import (
 
 // MinScoreFloor 计算生效的最低分数阈值。FTS5 bm25 的 idf 在小语料库下趋近于 0
 // （N=2 时单文档词 idf 恰好为 0），固定绝对阈值会误伤小库的真实命中；条目数
-// n<10 时关闭阈值（命中即注入，小库注入成本低），n≥40 时取配置值，中间线性过渡。
+// n<10 时关闭阈值（命中即注入，小库注入成本低），n≥30 时取配置值，中间线性过渡。
 // minScore<=0 恒返回 0（用户显式关闭，旧语义 score>0 即注入）。
 func MinScoreFloor(minScore float64, n int) float64 {
 	if minScore <= 0 {
@@ -109,7 +109,37 @@ func (db *DB) Query(terms []string, queryVec []float32, cfg config.Retrieve) ([]
 	return hits, err
 }
 
+// scoreFloor 是已过关键词门槛条目的总分下限：同域语料的无关文本余弦可为负
+// （bge 类尤甚），强负余弦叠加会把总分压到 0 以下——关键词准入不可被语义通道
+// 单方面否决（准入按通道独立），下限保住注入资格，语义分仅继续影响排序。
+const scoreFloor = 1e-6
+
 func (db *DB) QueryEx(terms []string, queryVec []float32, cfg config.Retrieve) ([]Hit, QueryInfo, error) {
+	hits, info, err := db.queryAll(terms, queryVec, cfg)
+	if err != nil {
+		return nil, QueryInfo{}, err
+	}
+	return truncateHits(hits, cfg.TopN), info, nil
+}
+
+// QueryExBranch 同 QueryEx，但 top_n 截断前先按 branch 过滤差异条目：截断先于
+// 过滤时其他分支的条目白白挤占名额，本分支注入条数无谓少于 top_n 且无补位。
+func (db *DB) QueryExBranch(terms []string, queryVec []float32, cfg config.Retrieve, branch string) ([]Hit, QueryInfo, error) {
+	hits, info, err := db.queryAll(terms, queryVec, cfg)
+	if err != nil {
+		return nil, QueryInfo{}, err
+	}
+	return truncateHits(FilterHitsByBranch(hits, branch), cfg.TopN), info, nil
+}
+
+func truncateHits(hits []Hit, topN int) []Hit {
+	if topN > 0 && len(hits) > topN {
+		return hits[:topN]
+	}
+	return hits
+}
+
+func (db *DB) queryAll(terms []string, queryVec []float32, cfg config.Retrieve) ([]Hit, QueryInfo, error) {
 	if len(terms) == 0 && len(queryVec) == 0 {
 		return nil, QueryInfo{}, nil
 	}
@@ -199,6 +229,9 @@ func (db *DB) QueryEx(terms []string, queryVec []float32, cfg config.Retrieve) (
 		for _, c := range cands {
 			if h, ok := hits[c.h.Filename]; ok {
 				h.Score += cfg.Beta * c.cos
+				if h.Score <= 0 {
+					h.Score = scoreFloor
+				}
 			} else if c.cos > 0 && (semFloor == 0 || c.cos >= semFloor) {
 				c.h.Score = cfg.Beta * c.cos
 				hits[c.h.Filename] = &c.h
@@ -235,9 +268,6 @@ func (db *DB) QueryEx(terms []string, queryVec []float32, cfg config.Retrieve) (
 		}
 		return out[i].Title < out[j].Title
 	})
-	if cfg.TopN > 0 && len(out) > cfg.TopN {
-		out = out[:cfg.TopN]
-	}
 	return out, info, nil
 }
 

@@ -5,6 +5,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"openknowledge/internal/fsx"
 )
 
 // SetCapture 重写 config.toml 的 [capture] 小节：已存在则整段替换（到下一个
@@ -14,7 +16,7 @@ func SetCapture(path, mode string, turnInterval int, header string) error {
 	block := "[capture]\nmode = " + strconv.Quote(mode) + "\nturn_interval = " + strconv.Itoa(turnInterval) + "\n"
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return os.WriteFile(path, []byte(header+block), 0o644)
+		return fsx.WriteFile(path, []byte(header+block), 0o644)
 	}
 	if err != nil {
 		return err
@@ -47,5 +49,5 @@ func SetCapture(path, mode string, turnInterval int, header string) error {
 		}
 		out = append(out, strings.TrimSuffix(block, "\n"))
 	}
-	return os.WriteFile(path, []byte(strings.Join(out, "\n")), 0o644)
+	return fsx.WriteFile(path, []byte(strings.Join(out, "\n")), 0o644)
 }

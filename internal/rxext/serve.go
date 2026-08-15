@@ -156,9 +156,9 @@ func selfHealHooks() {
 
 // markBlocked 硬阻断生效前落每会话防重标记（fail-open：失败仅记日志）。
 func markBlocked(pc *project.Context, sessionID, ruleType string) {
-	st := state.Load(pc.Store.StateDir(), sessionID)
-	st.MarkBlocked(ruleType)
-	if err := st.Save(pc.Store.StateDir()); err != nil {
+	if err := state.Update(pc.Store.StateDir(), sessionID, func(st *state.Session) {
+		st.MarkBlocked(ruleType)
+	}); err != nil {
 		fmt.Fprintf(os.Stderr, "rxext markBlocked: %v\n", err)
 	}
 }

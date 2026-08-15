@@ -73,38 +73,38 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 	// L2 兜底：无显式压缩事件的宿主按轮次重注入 mandatory 全文（reinject_turns>0
 	// 时启用；0=关闭保持旧语义）。显式压缩事件（Reasonix compaction.complete）在
 	// rxext sidecar 直接重置 BaseInjected，不走此轮次计数。
-	doBase := !st.BaseInjected
+	// 基础注入素材先物化，决策与落盘在跨进程锁内一次完成（防并发 hook 丢更新）。
+	idxText := ""
+	if idx, err := os.ReadFile(pc.Store.IndexPath()); err == nil {
+		// 按当前分支裁剪 INDEX 的"分支差异（X）"小节，防止检索过滤被 INDEX 绕过
+		idxText = index.TrimIndexBranchSections(string(idx), ws.Branch)
+	}
+	wroteBase := len(mandatory) > 0 || idxText != ""
 	reinjectActive := pc.Config.Inject.ReinjectTurns > 0 && len(mandatory) > 0
-	if reinjectActive && st.BaseInjected {
-		st.InjectCount++
-		if st.InjectCount >= pc.Config.Inject.ReinjectTurns {
-			doBase = true
-			st.BaseInjected = false
-			st.InjectCount = 0
+	var doBase bool
+	if err := state.Update(pc.Store.StateDir(), sessionID, func(s *state.Session) {
+		doBase = !s.BaseInjected
+		if reinjectActive && s.BaseInjected {
+			s.InjectCount++
+			if s.InjectCount >= pc.Config.Inject.ReinjectTurns {
+				doBase = true
+			}
 		}
+		if doBase {
+			// 素材为空时维持未注入态，下一轮 prompt 重试基础注入
+			s.BaseInjected = wroteBase
+			s.InjectCount = 0
+		}
+	}); err != nil {
+		logErr("prompt save state: %v", err)
 	}
 	if doBase {
 		_ = state.Clean(pc.Store.StateDir(), 7*24*time.Hour)
-		wroteBase := false
 		for _, h := range mandatory {
 			fmt.Fprintf(&mandatoryText, "## %s\n\n%s\n\n", h.Title, h.Body)
-			wroteBase = true
 		}
-		if idx, err := os.ReadFile(pc.Store.IndexPath()); err == nil {
-			// 按当前分支裁剪 INDEX 的"分支差异（X）"小节，防止检索过滤被 INDEX 绕过
-			if idxText := index.TrimIndexBranchSections(string(idx), ws.Branch); idxText != "" {
-				restText.WriteString(idxText)
-				wroteBase = true
-			}
-		}
-		if wroteBase {
-			st.BaseInjected = true
-		}
-		st.InjectCount = 0
-		if wroteBase || reinjectActive {
-			if err := st.Save(pc.Store.StateDir()); err != nil {
-				logErr("prompt save state: %v", err)
-			}
+		if idxText != "" {
+			restText.WriteString(idxText)
 		}
 	} else if len(mandatory) > 0 {
 		// L3 粘性指针：全文只在基础注入轮出现，其余每轮仅注标题 + 路径（几十 token），
@@ -115,11 +115,6 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 			fmt.Fprintf(&mandatoryText, "- **%s** (%s)（%s）\n", h.Title, h.Type, p)
 		}
 		mandatoryText.WriteString("\n")
-		if reinjectActive {
-			if err := st.Save(pc.Store.StateDir()); err != nil {
-				logErr("prompt save state: %v", err)
-			}
-		}
 	}
 	var queryVec []float32
 	var embedWarn string
@@ -133,7 +128,9 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 			}
 		}
 	}
-	hits, info, err := db.QueryEx(retrieve.Terms(promptText), queryVec, pc.Config.Retrieve)
+	// top_n 截断在分支过滤之后（QueryExBranch 内部保证），其他分支的差异条目
+	// 不再白白挤占名额；无 branch 标签的条目与未知分支场景不受影响。
+	hits, info, err := db.QueryExBranch(retrieve.Terms(promptText), queryVec, pc.Config.Retrieve, ws.Branch)
 	if err != nil {
 		logErr("prompt query: %v", err)
 	}
@@ -143,8 +140,6 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 		logErr("prompt semantic: 语义通道未准入任何条目（样本 %d，max=%.3f median=%.3f relGap=%.3f）；低对比度模型可调低 retrieve.min_gap 放宽",
 			info.Coses, info.MaxCos, info.MedianCos, info.RelGap)
 	}
-	// 丢弃其他分支的差异条目；无 branch 标签的条目与未知分支场景不受影响
-	hits = index.FilterHitsByBranch(hits, ws.Branch)
 	if len(hits) > 0 {
 		restText.WriteString("## 相关知识（需要全文时读取对应文件）\n\n")
 		for _, h := range hits {
@@ -174,12 +169,17 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 	}
 	if nudge := wikiNudge(pc, st, ws); nudge != "" {
 		out += nudge
+		if err := state.Update(pc.Store.StateDir(), sessionID, func(s *state.Session) {
+			s.WikiNudged = true
+		}); err != nil {
+			logErr("prompt save state: %v", err)
+		}
 	}
 	// 已并入提示（merged 变体）：仅在基准分支、有其他分支 tip 已并入且其差异条目
 	// 仍在库中时触发；db 仍在 InjectForPrompt 作用域（defer Close 之前）可直接复用。
 	// 与 wikiNudge 共用 WikiNudged 每会话一次预算（本回合已提示则跳过计算）。
 	// MergedChecked 是检测本身的每会话熔断（独立于 WikiNudged）：merged 为空时
-	// WikiNudged 不置位，若无此熔断每次 prompt 都为每条非基准游标付两次 git spawn；
+	// WikiNudged 不置位，若无此熔断每次 prompt 都会为每条非基准游标付两次 git spawn；
 	// 因此计算后无论结果均置位（仅值变化才 Save，与 WikiNudged 保存惯例一致）。
 	if !st.WikiNudged && !st.MergedChecked && ws.Branch != "" && ws.Branch == ws.BaseBranch {
 		if s := wiki.LoadState(pc.Store.StateDir()); s != nil {
@@ -187,12 +187,17 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 				ok, _ := db.HasBranchWiki(b)
 				return ok
 			})
-			st.MergedChecked = true
-			if err := st.Save(pc.Store.StateDir()); err != nil {
+			mergedNudge := wikiNudgeMerged(pc, st, ws.BaseBranch, merged)
+			if err := state.Update(pc.Store.StateDir(), sessionID, func(s2 *state.Session) {
+				s2.MergedChecked = true
+				if mergedNudge != "" {
+					s2.WikiNudged = true
+				}
+			}); err != nil {
 				logErr("prompt save state: %v", err)
 			}
-			if nudge := wikiNudgeMerged(pc, st, ws.BaseBranch, merged); nudge != "" {
-				out += nudge
+			if mergedNudge != "" {
+				out += mergedNudge
 			}
 		}
 	}
@@ -200,8 +205,9 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 	// 身份缺失/切换而拦截向量通道时，仅写 ok.log 用户不可见，注入一行让模型
 	// 知道当前是纯关键词检索、可运行 ok index 重建恢复。
 	if embedWarn != "" && !st.RetrieveWarned {
-		st.RetrieveWarned = true
-		if err := st.Save(pc.Store.StateDir()); err != nil {
+		if err := state.Update(pc.Store.StateDir(), sessionID, func(s *state.Session) {
+			s.RetrieveWarned = true
+		}); err != nil {
 			logErr("prompt save state: %v", err)
 		}
 		out += "\n[OpenKnowledge] 语义检索退化：" + embedWarn + "\n"
@@ -220,9 +226,10 @@ func TrackTouched(pc *project.Context, sessionID, toolName, filePath string) {
 		logErr("post-tool skip: tool=%s path=%q 不在项目 %s 的路径内", toolName, filePath, pc.Project.Name)
 		return
 	}
-	st := state.Load(pc.Store.StateDir(), sessionID)
-	st.AddTouched(rel)
-	if err := st.Save(pc.Store.StateDir()); err != nil {
+	// 并行工具调用会并发派发多个 post-tool hook 进程，读-改-写须在锁内合并
+	if err := state.Update(pc.Store.StateDir(), sessionID, func(st *state.Session) {
+		st.AddTouched(rel)
+	}); err != nil {
 		logErr("post-tool save state: %v", err)
 	}
 }
@@ -233,6 +240,8 @@ func TrackTouched(pc *project.Context, sessionID, toolName, filePath string) {
 // MarkBlocked 所有权在调用方：本函数只评估不落防重标记——硬阻断生效前由调用方
 // （HandleStop / rxext onInput）落标记；不落标记则下次评估重复命中（rxext soft 档
 // "每条输入重复提醒"依赖此语义）。auto 提醒先于 enforce 评估（与既有 Stop 行为一致）。
+// 评估与回合计数在跨进程锁内一次完成：Stop hook 可能与下一轮 prompt 的 post-tool
+// 并发，无锁读-改-写会互相覆盖。
 func CheckStop(pc *project.Context, sessionID string) (reason string, blockedRule string) {
 	if registry.HooksDisabled() {
 		return "", ""
@@ -241,36 +250,32 @@ func CheckStop(pc *project.Context, sessionID string) (reason string, blockedRul
 	if len(pc.Config.Enforce) == 0 && pc.Config.Capture.Mode != "auto" {
 		return "", ""
 	}
-	st := state.Load(pc.Store.StateDir(), sessionID)
-	// auto 自省模式：有文件修改且距上次提醒满 turn_interval 回合 → 软阻断一次。
-	// 周期性提醒，不进 BlockedRules；先于 enforce 评估触发。
-	st.StopCount++
 	interval := pc.Config.Capture.TurnInterval
 	if interval <= 0 {
 		interval = 1
 	}
-	if pc.Config.Capture.Mode == "auto" && len(st.Touched) > 0 &&
-		st.StopCount-st.LastExtractReminder >= interval {
-		st.LastExtractReminder = st.StopCount
-		if err := st.Save(pc.Store.StateDir()); err != nil {
-			logErr("stop save state: %v", err)
+	if err := state.Update(pc.Store.StateDir(), sessionID, func(st *state.Session) {
+		st.StopCount++
+		// auto 自省模式：有文件修改且距上次提醒满 turn_interval 回合 → 软阻断一次。
+		// 周期性提醒，不进 BlockedRules；先于 enforce 评估触发。
+		if pc.Config.Capture.Mode == "auto" && len(st.Touched) > 0 &&
+			st.StopCount-st.LastExtractReminder >= interval {
+			st.LastExtractReminder = st.StopCount
+			reason = "本会话修改过文件。请回顾是否有值得记录的经验（非显而易见的坑或解法），有则立即运行 ok propose 记录草稿条目；没有则继续。"
+			blockedRule = ""
+			return
 		}
-		return "本会话修改过文件。请回顾是否有值得记录的经验（非显而易见的坑或解法），有则立即运行 ok propose 记录草稿条目；没有则继续。", ""
-	}
-	for _, rule := range pc.Config.Enforce {
-		if rule.Type != "changelog_required" {
-			continue
-		}
-		if block, reason := enforce.EvalChangelog(rule, st); block {
-			if err := st.Save(pc.Store.StateDir()); err != nil {
-				logErr("stop save state: %v", err)
+		for _, rule := range pc.Config.Enforce {
+			if rule.Type != "changelog_required" {
+				continue
 			}
-			return reason, rule.Type
+			if block, why := enforce.EvalChangelog(rule, st); block {
+				reason, blockedRule = why, rule.Type
+				return
+			}
 		}
-	}
-	// 未阻断也要持久化 StopCount
-	if err := st.Save(pc.Store.StateDir()); err != nil {
+	}); err != nil {
 		logErr("stop save state: %v", err)
 	}
-	return "", ""
+	return reason, blockedRule
 }

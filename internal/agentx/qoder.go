@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+
+	"openknowledge/internal/fsx"
 )
 
 // QoderHome 返回 Qoder CN CLI 配置根目录：OK_QODER_HOME（ok 自留测试隔离口，
@@ -88,7 +90,7 @@ func ensureQoderWrappers(exe string) error {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return fmt.Errorf("写入 qoder hook 包装: %w", err)
 		}
-		if err := os.WriteFile(path, []byte(want), 0o644); err != nil {
+		if err := fsx.WriteFile(path, []byte(want), 0o644); err != nil {
 			return fmt.Errorf("写入 qoder hook 包装: %w", err)
 		}
 	}
@@ -351,7 +353,7 @@ func writeQoderSettings(cfg map[string]any) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(data, '\n'), 0o644)
+	return fsx.WriteFile(path, append(data, '\n'), 0o644)
 }
 
 func (qoderAgent) InstallHooks(exe string) error {

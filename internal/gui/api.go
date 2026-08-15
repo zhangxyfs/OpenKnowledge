@@ -22,6 +22,7 @@ import (
 	"openknowledge/internal/embed"
 	"openknowledge/internal/embedx"
 	"openknowledge/internal/entry"
+	"openknowledge/internal/fsx"
 	"openknowledge/internal/index"
 	"openknowledge/internal/registry"
 	"openknowledge/internal/retrieve"
@@ -635,7 +636,7 @@ func writeEntry(w http.ResponseWriter, st *store.Store, path string, req *entryR
 		Body:      strings.TrimSpace(req.Body),
 		Path:      path,
 	}
-	if err := os.WriteFile(path, e.Serialize(), 0o644); err != nil {
+	if err := fsx.WriteFile(path, e.Serialize(), 0o644); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -869,7 +870,7 @@ func (h *Handler) apiApprove(w http.ResponseWriter, r *http.Request) {
 	// Sync 的 diff 按秒级 mtime 判断变化；propose 后同一秒内 approve 会被误判为
 	// 未变化而跳过重建，此时手动把 mtime 推进一秒（同 cli.Approve）。
 	oldInfo, statErr := os.Stat(path)
-	if err := os.WriteFile(path, e.Serialize(), 0o644); err != nil {
+	if err := fsx.WriteFile(path, e.Serialize(), 0o644); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -912,7 +913,7 @@ func setProvenanceAutoBorn(path string, autoBorn bool) error {
 	block := "[provenance]\nauto_born = " + strconv.FormatBool(autoBorn) + "\n"
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return os.WriteFile(path, []byte(block), 0o644)
+		return fsx.WriteFile(path, []byte(block), 0o644)
 	}
 	if err != nil {
 		return err
@@ -945,7 +946,7 @@ func setProvenanceAutoBorn(path string, autoBorn bool) error {
 		}
 		out = append(out, strings.TrimSuffix(block, "\n"))
 	}
-	return os.WriteFile(path, []byte(strings.Join(out, "\n")), 0o644)
+	return fsx.WriteFile(path, []byte(strings.Join(out, "\n")), 0o644)
 }
 
 // apiCaptureSet 设置 capture 模式、轮次间隔与 provenance auto_born：

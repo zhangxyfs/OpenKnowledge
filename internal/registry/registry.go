@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+
+	"openknowledge/internal/fsx"
 )
 
 type Project struct {
@@ -68,7 +70,7 @@ func (r *Registry) Save(path string) error {
 	if err := toml.NewEncoder(&buf).Encode(r); err != nil {
 		return err
 	}
-	return os.WriteFile(path, []byte(buf.String()), 0o644)
+	return fsx.WriteFile(path, []byte(buf.String()), 0o644)
 }
 
 // FindByCwd 按规范化路径最长前缀匹配项目；未命中返回 nil。

@@ -13,6 +13,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"openknowledge/internal/entry"
+	"openknowledge/internal/fsx"
 	"openknowledge/internal/index"
 	"openknowledge/internal/registry"
 	"openknowledge/internal/store"
@@ -208,7 +209,7 @@ func Import(r io.ReaderAt, size int64) (*Report, error) {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, err
 		}
-		if err := os.WriteFile(filepath.Join(dir, it.file), it.data, 0o644); err != nil {
+		if err := fsx.WriteFile(filepath.Join(dir, it.file), it.data, 0o644); err != nil {
 			return nil, err
 		}
 		rep.Imported++
@@ -219,7 +220,7 @@ func Import(r io.ReaderAt, size int64) (*Report, error) {
 		if err := os.MkdirAll(root, 0o755); err != nil {
 			return nil, err
 		}
-		if err := os.WriteFile(filepath.Join(root, "config.toml"), it.data, 0o644); err != nil {
+		if err := fsx.WriteFile(filepath.Join(root, "config.toml"), it.data, 0o644); err != nil {
 			return nil, err
 		}
 		seen[it.project] = true
@@ -230,7 +231,7 @@ func Import(r io.ReaderAt, size int64) (*Report, error) {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, err
 		}
-		if err := os.WriteFile(filepath.Join(dir, it.file), it.data, 0o644); err != nil {
+		if err := fsx.WriteFile(filepath.Join(dir, it.file), it.data, 0o644); err != nil {
 			return nil, err
 		}
 		seen[it.project] = true

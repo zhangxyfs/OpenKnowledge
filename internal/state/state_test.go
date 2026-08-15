@@ -71,3 +71,23 @@ func TestClean(t *testing.T) {
 		t.Fatal("fresh state should remain")
 	}
 }
+
+// Update 基于锁内最新快照重放修改：两次 Update 修改不同字段时后者不得覆盖前者
+// （并发 hook 各自 Load→Save 互相覆盖是旧路径丢 Touched/防重标记的根源）。
+func TestUpdateMergesConcurrentFields(t *testing.T) {
+	dir := t.TempDir()
+	if err := Update(dir, "s1", func(s *Session) { s.AddTouched("a.go") }); err != nil {
+		t.Fatal(err)
+	}
+	if err := Update(dir, "s1", func(s *Session) { s.MarkBlocked("changelog_required") }); err != nil {
+		t.Fatal(err)
+	}
+	s := Load(dir, "s1")
+	if len(s.Touched) != 1 || !s.HasBlocked("changelog_required") {
+		t.Fatalf("second Update must not clobber first Update's fields: %+v", s)
+	}
+	// Update 后锁文件必须释放，不残留 state 目录
+	if _, err := os.Stat(filepath.Join(dir, fileName("s1")+".lock")); !os.IsNotExist(err) {
+		t.Fatal("lock file should be released after Update")
+	}
+}

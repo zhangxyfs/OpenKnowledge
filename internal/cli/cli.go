@@ -20,6 +20,7 @@ import (
 	"openknowledge/internal/embedsidecar"
 	"openknowledge/internal/embedx"
 	"openknowledge/internal/entry"
+	"openknowledge/internal/fsx"
 	"openknowledge/internal/index"
 	"openknowledge/internal/procx"
 	"openknowledge/internal/project"
@@ -90,7 +91,7 @@ func Init(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	if _, err := os.Stat(st.ConfigPath()); os.IsNotExist(err) {
-		if err := os.WriteFile(st.ConfigPath(), []byte(defaultProjectConfig), 0o644); err != nil {
+		if err := fsx.WriteFile(st.ConfigPath(), []byte(defaultProjectConfig), 0o644); err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
@@ -183,7 +184,7 @@ func Add(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "条目已存在: %s\n", path)
 		return 1
 	}
-	if err := os.WriteFile(path, e.Serialize(), 0o644); err != nil {
+	if err := fsx.WriteFile(path, e.Serialize(), 0o644); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
@@ -241,7 +242,7 @@ func BackfillBorn(args []string, in io.Reader, stdout, stderr io.Writer) int {
 			continue // 确认瞬间文件被删/损坏：Parse 出错返回 nil，跳过防 panic
 		}
 		e.Tags = append(e.Tags, "born:"+branch)
-		if err := os.WriteFile(f, e.Serialize(), 0o644); err != nil {
+		if err := fsx.WriteFile(f, e.Serialize(), 0o644); err != nil {
 			fmt.Fprintf(stderr, "写回失败 %s: %v\n", f, err)
 			continue
 		}
@@ -568,7 +569,7 @@ func Propose(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "条目已存在: %s\n", path)
 		return 1
 	}
-	if err := os.WriteFile(path, e.Serialize(), 0o644); err != nil {
+	if err := fsx.WriteFile(path, e.Serialize(), 0o644); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
@@ -633,7 +634,7 @@ func Approve(args []string, stdout, stderr io.Writer) int {
 	// Sync 的 diff 按秒级 mtime 判断变化；propose 后同一秒内 approve 会被误判为
 	// 未变化而跳过重建，此时手动把 mtime 推进一秒。
 	oldInfo, statErr := os.Stat(path)
-	if err := os.WriteFile(path, e.Serialize(), 0o644); err != nil {
+	if err := fsx.WriteFile(path, e.Serialize(), 0o644); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}

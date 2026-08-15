@@ -248,15 +248,16 @@ func HandlePostTool(r io.Reader) int {
 // 下发 mandatory 全文 + 索引。返回是否实际发生了重置。Reasonix sidecar 的
 // compaction.complete 与 Claude Code 的 PreCompact 共用此逻辑。
 func ResetBaseInjection(pc *project.Context, sessionID string) bool {
-	st := state.Load(pc.Store.StateDir(), sessionID)
-	if !st.BaseInjected {
-		return false
-	}
-	st.BaseInjected = false
-	if err := st.Save(pc.Store.StateDir()); err != nil {
+	reset := false
+	if err := state.Update(pc.Store.StateDir(), sessionID, func(s *state.Session) {
+		if s.BaseInjected {
+			s.BaseInjected = false
+			reset = true
+		}
+	}); err != nil {
 		logErr("reset base injection: %v", err)
 	}
-	return true
+	return reset
 }
 
 // HandleCompact PreCompact 等压缩前事件的入口：重置基础注入标记，宿主压缩完成后
@@ -314,9 +315,9 @@ func HandleStop(r io.Reader, stderr, stdout io.Writer, format string) int {
 	if reason != "" {
 		if blockedRule != "" {
 			// 硬阻断生效前落每会话防重标记（fail-open：错误仅记日志）
-			st := state.Load(pc.Store.StateDir(), ev.SessionID)
-			st.MarkBlocked(blockedRule)
-			if err := st.Save(pc.Store.StateDir()); err != nil {
+			if err := state.Update(pc.Store.StateDir(), ev.SessionID, func(s *state.Session) {
+				s.MarkBlocked(blockedRule)
+			}); err != nil {
 				logErr("stop save blocked rule: %v", err)
 			}
 		}
@@ -326,6 +327,7 @@ func HandleStop(r io.Reader, stderr, stdout io.Writer, format string) int {
 }
 
 // wikiNudge 返回 wiki 提示（每会话最多一次，预算外放行）；不适用返回空串。
+// 只置内存标记不落盘：持久化由调用方在跨进程锁内完成（InjectForPrompt）。
 // fail-open：git 不可用/非 git 项目时 Status 不带分支状态，自然无提示。
 func wikiNudge(pc *project.Context, st *state.Session, s *wiki.Status) string {
 	if st.WikiNudged {
@@ -351,24 +353,19 @@ func wikiNudge(pc *project.Context, st *state.Session, s *wiki.Status) string {
 		return ""
 	}
 	st.WikiNudged = true
-	if err := st.Save(pc.Store.StateDir()); err != nil {
-		logErr("prompt save state: %v", err)
-	}
 	return "\n" + msg + "\n"
 }
 
 // wikiNudgeMerged 返回"分支已并入基准、其差异条目已失效"的清理提示（每会话一次，
 // 与 wikiNudge 共用 WikiNudged 预算；不受 stale_commits 阈值门控——条目失效与
 // 落后计数无关）。merged 为空或基准未知时不提示。检测本身只读（spec §7/§10）。
+// 只置内存标记不落盘：持久化由调用方在跨进程锁内完成（InjectForPrompt）。
 func wikiNudgeMerged(pc *project.Context, st *state.Session, base string, merged []string) string {
 	if st.WikiNudged || len(merged) == 0 || base == "" {
 		return ""
 	}
 	msg := fmt.Sprintf("[OpenKnowledge] 分支 %s 已并入 %s，其差异条目已失效，建议用 openknowledge-wiki 技能清理。", strings.Join(merged, "、"), base)
 	st.WikiNudged = true
-	if err := st.Save(pc.Store.StateDir()); err != nil {
-		logErr("prompt save state: %v", err)
-	}
 	return "\n" + msg + "\n"
 }
 

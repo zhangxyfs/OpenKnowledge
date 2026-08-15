@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"time"
 
+	"openknowledge/internal/fsx"
 	"openknowledge/internal/registry"
 )
 
@@ -48,7 +49,7 @@ func writeState(s *State) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(statePath(), data, 0o644)
+	return fsx.WriteFile(statePath(), data, 0o644)
 }
 
 // BaseURL 是 sidecar 的 OpenAI 兼容入口。

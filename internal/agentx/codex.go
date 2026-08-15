@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+
+	"openknowledge/internal/fsx"
 )
 
 // CodexHome 返回 Codex 配置根目录：OK_CODEX_HOME（ok 自留测试隔离口，
@@ -93,7 +95,7 @@ func ensureCodexWrappers(exe string) error {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return fmt.Errorf("写入 codex hook 包装: %w", err)
 		}
-		if err := os.WriteFile(path, []byte(want), 0o644); err != nil {
+		if err := fsx.WriteFile(path, []byte(want), 0o644); err != nil {
 			return fmt.Errorf("写入 codex hook 包装: %w", err)
 		}
 	}
@@ -331,7 +333,7 @@ func writeCodexHooks(cfg map[string]any) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(data, '\n'), 0o644)
+	return fsx.WriteFile(path, append(data, '\n'), 0o644)
 }
 
 // isSectionHeader 判定 trim 后的行是否指定段头：以 header 开头，且其后剩余为空
@@ -490,7 +492,7 @@ func writeCodexConfig(orig []byte, text, op string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("%s: %w", op, err)
 	}
-	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+	if err := fsx.WriteFile(path, []byte(text), 0o644); err != nil {
 		return fmt.Errorf("%s: %w", op, err)
 	}
 	return nil

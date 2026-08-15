@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"openknowledge/internal/fsx"
 )
 
 // ZcodeHome 返回 ZCode 配置根目录（OK_ZCODE_HOME 优先——ok 自留的测试隔离口，
@@ -230,7 +232,7 @@ func writeZcodeConfig(cfg map[string]any) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(data, '\n'), 0o644)
+	return fsx.WriteFile(path, append(data, '\n'), 0o644)
 }
 
 func (zcodeAgent) InstallHooks(exe string) error {

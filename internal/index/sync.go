@@ -11,6 +11,7 @@ import (
 
 	"openknowledge/internal/embed"
 	"openknowledge/internal/entry"
+	"openknowledge/internal/fsx"
 	"openknowledge/internal/retrieve"
 )
 
@@ -328,5 +329,5 @@ func (db *DB) rebuildIndex(dir string) error {
 			}
 		}
 	}
-	return os.WriteFile(filepath.Join(filepath.Dir(dir), "INDEX.md"), []byte(b.String()), 0o644)
+	return fsx.WriteFile(filepath.Join(filepath.Dir(dir), "INDEX.md"), []byte(b.String()), 0o644)
 }

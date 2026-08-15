@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"openknowledge/internal/fsx"
 )
 
 // ClaudeHome 返回 Claude 生态配置根目录（OK_CLAUDE_HOME 优先——ok 自留测试隔离口，
@@ -305,7 +307,7 @@ func writeClaudeSettings(cfg map[string]any) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(data, '\n'), 0o644)
+	return fsx.WriteFile(path, append(data, '\n'), 0o644)
 }
 
 func (claudeAgent) InstallHooks(exe string) error {

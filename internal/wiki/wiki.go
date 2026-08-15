@@ -1,5 +1,5 @@
 // Package wiki 管理项目 wiki 的游标（state/wiki.json）与 git 落后计数。
-// 叶子包：只依赖 stdlib、procx 与外部 git 命令。
+// 叶子包：只依赖 stdlib、procx/fsx 与外部 git 命令。
 package wiki
 
 import (
@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"openknowledge/internal/fsx"
 	"openknowledge/internal/procx"
 )
 
@@ -91,7 +92,7 @@ func SaveState(stateDir string, s *State) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(CursorPath(stateDir), data, 0o644)
+	return fsx.WriteFile(CursorPath(stateDir), data, 0o644)
 }
 
 // Status 是 ok wiki status 的结果。Behind=-1 表示 git 不可用或状态无法计算。
