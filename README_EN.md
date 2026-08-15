@@ -141,6 +141,7 @@ You can also say "initialize the knowledge base" or "disable knowledge-base hook
 | **Manage** | Project/entry list — create, edit, delete entries, search preview, global switch. The project dropdown is sorted by most recent knowledge update; entry rows carry ⎇born-branch / ⇢scope-branch dual badges plus a branch filter; 12 entries per page; the summary column clamps to two lines with a hover tooltip showing the full text; the "Refresh" button re-fetches everything (projects + entries). The tab is hidden automatically on first use (hooks not installed) |
 | **Guide** | One-click hooks/skills/embedding setup (the graphical equivalent of `ok setup`), a configurable hook timeout, the three-mode "enforcement" card (reasonix only), and an "Uninstall" card that removes all integrations (knowledge data is kept). Leads into the Manage tab when done |
 | **Misc** | Data export/import (knowledge-base zip backup & restore, with same-name overwrite and index rebuild), changelog and user-guide entries, **Delete project knowledge base** (triple confirmation: impact summary + pre-delete zip backup checked by default + ticking "I understand" and typing the full project name to unlock), version and project count |
+| **Logs** | Live log viewer: tails ok (hooks/retrieval core), daemon and embedding-sidecar logs, 2-second polling; multi-select source chips + a "semantic only" toggle + a free-text filter; auto-scroll-to-bottom pauses when you scroll up |
 
 The GUI needs the `web/` directory next to `ok.exe` (or in the current directory). The release build script produces both:
 
@@ -237,7 +238,7 @@ message = "Code was changed this session without a changelog update; please add 
 
 - **Keyword channel**: FTS5 full-text index + BM25 scoring (rare terms weigh more, long docs get no advantage), weighted across title/tags/summary/body; Chinese uses bigram tokenization, zero dependencies
 - **Semantic channel**: embeddings + cosine similarity, recalling entries that "ask differently but mean the same"; three forms to choose from — hosted OpenAI-compatible / local Ollama / built-in llama.cpp on-device model (works offline, knowledge never leaves the machine; switching models triggers an automatic vector rebuild on `ok index`)
-- The two scores are normalized and blended (α/β tunable), top-2 injected (`top_n` configurable)
+- **Admission separated from ranking (v2.16.0)**: the blended score (α/β tunable) only ranks; injection is decided per channel — an entry is injected only when its keyword normalized BM25 ≥ `min_score` **or** its cosine ≥ the semantic gate. Better none than noise; `top_n` is never force-filled. `min_score` (default 0.5) scales with corpus size; the semantic gate is model-agnostic (judged against the cosine distribution of the current query, active only when the head separates from the median significantly; `min_gap` default 0.25, configurable) — unrelated questions inject nothing, related ones hit precisely
 - **Draft entries (from `ok propose`) stay out of both retrieval channels**: excluded from FTS and vectors until approved
 
 **Why**: keyword and semantic signals complement each other — that's the baseline of retrieval quality. SQLite (pure-Go port, no CGO) carries the index instead of a vector DB / search service to preserve the "single binary, zero infrastructure" deployment shape — one `kb.db` file is everything.

@@ -168,7 +168,7 @@ OpenKnowledge/
 │       ├── window_windows.go      #   Windows 窗口最大化兜底（maximizeWindowByTitle）
 │       ├── window_other.go        #   非 Windows 平台无操作实现
 │       └── api_test.go
-├── web/                           # GUI 前端（零依赖原生 HTML/JS/CSS，三标签页：管理/引导/其他）
+├── web/                           # GUI 前端（零依赖原生 HTML/JS/CSS，四标签页：管理/引导/其他/日志）
 │   ├── index.html                 #   页面骨架（{{TOKEN}} 占位符由服务端注入令牌）
 │   ├── app.js                     #   条目 CRUD、检索预览、引导流程、心跳（5s）
 │   └── style.css
@@ -304,13 +304,14 @@ API 一览：
 | GET | `/api/project/branch-info?project=` | 基准分支/当前分支/合并谱系（GUI 工具条分支上下文与谱系行数据源） |
 | DELETE | `/api/project?project=` | 删除项目知识库：先注销注册表（Save 失败 500 中止）再删目录（失败 200 + `warning`/`dir`）；未注册 404 |
 | GET | `/api/changelog` | 更新日志：`current/pending/all`（pending 只算严格大于 last_seen 且不超过 current 的版本） |
+| GET | `/api/logs?tail=` | 三类日志尾部（ok/daemon/sidecar，每文件 ≤256KB、tail 1~2000 默认 400），行带 `src` 来源与 `semantic` 标记（含 semantic/embed 关键字）；只读，「日志」页 2s 轮询数据源 |
 | POST | `/api/changelog/seen` | 标记已读（写 `~/.openknowledge/gui.json`；只有弹窗"知道了"才标记） |
 | POST | `/api/shutdown` | 停服 |
 | POST | `/api/uninstall` | 卸载集成：移除 hooks 标记块、技能目录、全局 [embedding]；KB 数据保留（`setupx.Uninstall`） |
 | GET | `/api/export?project=<名\|all>` | 知识库导出 zip（`backup.Export`；project 缺省 all，项目不存在 404） |
 | POST | `/api/import` | multipart `file` 上传备份 zip 导入（`backup.Import`，32MB 上限；`ErrBadPackage` → 400，成功返回 `Report{imported, skipped, projects}`） |
 
-前端 `web/`（零依赖原生 HTML/JS/CSS）：「管理」标签页（项目下拉按 `last_update` 降序、条目列表每页 12 条、新建/编辑/删除、检索预览带命中高亮、草稿徽标与「采纳」按钮、分支上下文/⎇born⇢scope 双徽标/分支过滤器/合并谱系行、摘要列两行截断+悬停浮窗显示全文、「刷新」按钮全量拉齐项目与条目并带三态反馈、全局开关；daemon 被替换致 token 过期 401 时自动刷新一次页面取新 token，sessionStorage 标志防循环）+「引导」标签页（hooks/技能/全局开关状态卡、**embedding 卡片显示使用中服务单行摘要 + "配置…"弹窗（左 profile 列表右三形态表单，内置含下载进度与显式"设为使用中"）**、agents 下拉联动、「经验沉淀」卡片查看/切换 capture 模式与轮次间隔、reasonix 强制检查三档卡、危险区「卸载」卡片）+「其他」标签页（数据导出/导入、更新日志弹窗与常驻入口、使用帮助卡、**「删除项目知识库」危险卡**——弹窗明示影响面 + 默认勾选的删除前 zip 备份 + 「我已了解后果」勾选与输入完整项目名双重解锁、关于卡片）。hooks 未安装时「管理」页隐藏，「引导」为默认页。
+前端 `web/`（零依赖原生 HTML/JS/CSS）：「管理」标签页（项目下拉按 `last_update` 降序、条目列表每页 12 条、新建/编辑/删除、检索预览带命中高亮、草稿徽标与「采纳」按钮、分支上下文/⎇born⇢scope 双徽标/分支过滤器/合并谱系行、摘要列两行截断+悬停浮窗显示全文、「刷新」按钮全量拉齐项目与条目并带三态反馈、全局开关；daemon 被替换致 token 过期 401 时自动刷新一次页面取新 token，sessionStorage 标志防循环）+「引导」标签页（hooks/技能/全局开关状态卡、**embedding 卡片显示使用中服务单行摘要 + "配置…"弹窗（左 profile 列表右三形态表单，内置含下载进度与显式"设为使用中"）**、agents 下拉联动、「经验沉淀」卡片查看/切换 capture 模式与轮次间隔、reasonix 强制检查三档卡、危险区「卸载」卡片）+「其他」标签页（数据导出/导入、更新日志弹窗与常驻入口、使用帮助卡、**「删除项目知识库」危险卡**——弹窗明示影响面 + 默认勾选的删除前 zip 备份 + 「我已了解后果」勾选与输入完整项目名双重解锁、关于卡片）+「日志」标签页（v2.16.0：三来源实时日志、来源 chips 多选 +「仅语义」开关 + 文本过滤、2 秒轮询仅标签激活时、上滚暂停自动贴底）。hooks 未安装时「管理」页隐藏，「引导」为默认页。
 
 ### 5.12 backup — 知识库导出/导入（251 行）
 
@@ -658,7 +659,7 @@ python scripts/build.py       # 一键构建：dist/（ok.exe + web/ + changelog
 bash scripts/build-linux.sh   # Linux 发布：tar + deb（含 runtime/）
 ```
 
-无构建标签、无代码生成、无资源嵌入；`go.mod` 声明 `go 1.25.0`。GUI 的 web 资源不内嵌，由 `dist/web/` 随二进制分发。应用版本号由 build-dist.sh 用 sed 从 `installer/openknowledge.iss` 的 `#define AppVersion` 提取，经 `-ldflags -X openknowledge/internal/version.Version=<版本>` 注入 `internal/version.Version`（事实源只有 .iss 一处；裸 `go build` 为 `dev`）。
+无构建标签、无代码生成、无资源嵌入；`go.mod` 声明 `go 1.25.0`。GUI 的 web 资源不内嵌，由 `dist/web/` 随二进制分发。应用版本号由 build-dist.sh 用 sed 从 `installer/openknowledge.iss` 的 `#define AppVersion` 提取，经 `-ldflags -X openknowledge/internal/version.Version=<版本>` 注入 `internal/version.Version`（事实源只有 .iss 一处；裸 `go build` 为 `dev`）。**版本 bump 三处同步**：`scripts/sync-version.sh` 统一改写 README 徽标、官网（site/ 的 VER 变量/直链/文案）与 `cmd/ok/winres.json` 的 exe 版本资源（四段式 = 三段版本号 + ".0"；v2.9.0 起曾漏改 winres.json 漂移停在 2.8.0.0，v2.16.0 起脚本兜底，pre-push 钩子也会跑）。
 
 **runtime 随包分发（内置 embedding 推理运行时）**：`build.py`/`build-linux.sh` 从 llama.cpp release 下载预编译 `llama-server`（版本钉死 b10405 CPU 版，win `bin-win-cpu-x64` zip / linux `bin-ubuntu-x64` tar；`LLAMA_CPP_BASE_URL` 可换源）到 `dist/runtime/`，iss 装到 `{app}\runtime`、linux 包装进 tar/deb 同目录——安装包体积因此约 50MB 级。运行时定位 `<exe 所在目录>/runtime/llama-server`，缺失则内置形态不可用（裸 exe 便携形态）并在 GUI/CLI/doctor 明确提示。**模型不随包分发**：首次启用内置形态时按清单从镜像源下载（默认 hf-mirror，约 146MB–639MB/档，断点续传 + sha256 校验）默认下载到 `<安装目录>/models/`（`[embedding] models_dir` 可改；GUI 配置弹窗可直接修改并打开文件夹，已有模型文件不随迁）。
 
@@ -792,10 +793,10 @@ go build ./...         # 编译检查
                 ├── vectors（float32 blob）
                 └── meta（embedding_model/embedding_dim 模型身份）
 [查询侧]  用户提问
-            │  Terms 分词 ──► FTS5 BM25 ─┐
-            │  embedding  ──► 余弦相似度 ─┤ score = α·kw + β·cos
+            │  Terms 分词 ──► FTS5 BM25 ─┐（准入：归一 BM25 ≥ MinScoreFloor(min_score, N)）
+            │  embedding  ──► 余弦相似度 ─┤（准入：cos ≥ SemanticFloor(cos 分布, floor, min_gap)）
             ▼                             ▼
-        过滤(mandatory/≤0) → 排序 → top_n → 取正文注入
+        score = α·kw + β·cos 只排序；准入任一通道达标即可 → top_n → 摘要注入
 ```
 
 ### 17.2 分词器（`retrieve.Terms`）
@@ -853,30 +854,48 @@ WHERE entries_fts MATCH ? AND e.mandatory = 0
 
 - **三形态接入**（配置 `[[embedding.profiles]]` + `active`，`embedx` 唯一构造点，形态细节见 9.3）：openai 直连、ollama 补 `/v1`、builtin 经 sidecar 状态文件发现端口；三形态共用 `OpenAIClient`，仅以 `QueryPrefix`/`DocPrefix` 区分双路径前缀。
 - **写入**：条目向量 = `EmbedDocument(标题+摘要+正文)`，float32 小端 blob 存 `vectors` 表；mtime 未变的条目不重算（增量），缺向量的未变化条目在有 client 时补齐（backfill）；`ok index` 全量重建按 **32 条/批**调 `EmbedDocuments`。
-- **查询**：`EmbedQuery(提问)` 与全量向量逐条算余弦（万条约 60MB 内存、毫秒级），维度不匹配返回 0。
+- **查询**：`EmbedQuery(提问)` 与全量向量逐条算余弦（万条约 60MB 内存、毫秒级），维度不匹配返回 0；先收集本查询的余弦分布再准入（见 17.5 的 `SemanticFloor`）。
 - **模型身份管理（kb.db meta）**：client 的 `ModelIdentity()`（如 `builtin:qwen3-emb-0.6b-q8`、`ollama:bge-m3@http://…`）与维度在确有向量写入后落 `meta(embedding_model/embedding_dim)`。**查询侧**身份/维度不符 → `embedx.QueryVec` 拦截：语义通道显式跳过并返回中文提示（"运行 ok index 重建后恢复"，替代以往维度不等静默归零）；**同步侧**身份不符 → `Sync` 阻断全部向量写（INDEX/FTS 照常），杜绝新旧模型向量混合；`ok index` 检测到切换先 `ClearVectors` 再全量重建。
 - **内置形态 sidecar 生命周期**（daemon 托管，`embedsidecar.Manager`）：daemon 内 10s 周期 `Reconcile`——active=内置且模型文件就绪时才允许在线；拉起条件 = 激活刚变化或 want 标记 pending（hook/cli 发现未就绪时写 `embed-sidecar.want`，自己绝不等待冷启动）；`Ensure` 幂等拉起（随机回环端口 + `-m <gguf> --embeddings --pooling <清单值>`，90s 就绪等待，状态写 `embed-sidecar.json`）；**空闲 10 分钟回收**（按 `last_used`，每次成功调用经 `Touch` 刷新）；**崩溃有界重启 ×3**（连续失败进入冷却，直到配置变化重试）；模型切换/停用内置 → 立即回收；**daemon 退出时回收 sidecar**（跨进程残留按状态文件 PID 杀）。
 - **成本边界**：hook 路径每次最多为**提问**算 1 次 embedding（5s 超时），条目向量只在同步时算。
 
-### 17.5 混合打分与排序
+### 17.5 准入与排序（v2.16.0 起分离）
 
 ```
-score = α · normBM25 + β · cosine        （α、β 默认 1.0，项目可调）
+score = α · normBM25 + β · cosine        （α、β 默认 1.0，只用于排序）
 ```
 
-过滤与排序（严格确定顺序）：
+**准入按通道独立判定**（`QueryEx`，满足其一即注入）：
 
-1. `mandatory = 0`（mandatory 条目已在每会话首次的基础注入中）
-2. `score > 0`（零分不注入）
-3. 分数降序；同分按标题升序（结果可复现）
-4. 截 `top_n`（默认 3）；注入文本再按 `inject.max_tokens` 预算截断
+1. **关键词通道**：归一 BM25 分（未乘 α）≥ `MinScoreFloor(min_score, N)`——
+   `min_score` 默认 0.5、≤0 关闭；阈值随可检索条目数 N 缩放：<10 条关闭、
+   10→30 线性过渡、≥30 取全值（FTS5 bm25 的 idf 在小库下趋近 0，N=2 时恰为 0，
+   固定绝对阈值会误伤小库真实命中）。
+2. **语义通道**：余弦 ≥ `SemanticFloor(coses, floor, min_gap)`——**模型无关**
+   相对门槛：余弦绝对分布随 embedding 模型漂移（实测同组查询 bge-m3 跨域噪声
+   0.52、qwen3 仅 0.26），固定绝对阈值要么漏噪声要么误杀低对比度模型。故以本次
+   查询的余弦分布为参照：头部（max）相对中位数有显著分离（相对 gap ≥ `min_gap`
+   默认 0.25，BGE/Qwen 四模型 12 场景标定）时门槛 = max(floor, median+0.5·gap)；
+   **无显著头部则语义通道整体不准入**（宁缺毋滥，关键词通道兜底）。低对比度
+   自定义模型调低 `min_gap` 放宽、≤0 关闭 gap 判定（仅绝对下限）。
+3. 已获关键词准入的条目语义通道只加总分（排序用），不受语义门槛影响。
+
+过滤与排序（严格确定顺序）：`mandatory=0 AND draft=0` → 任一通道达标 → 总分
+降序（同分标题升序）→ 截 `top_n`（默认 2，**不强行凑满**）→ 注入文本按
+`inject.max_tokens` 预算截断。
+
+**诊断**（`QueryInfo`）：语义通道参与但全部候选被拒时返回
+`SemanticRejected` + 分布统计（样本数/max/median/relGap）——hook 记
+`prompt semantic` 日志（GUI「日志」页可按"仅语义"过滤）、`ok search` 打
+stderr 并附 `min_gap` 调节指引；语义退化（模型身份缺失/切换，见 17.4）时注入
+末尾每会话一次附 `[OpenKnowledge] 语义检索退化：…` 提示。
 
 **打分实例**（提问"git 提交规范"，条目《Git 提交规范》tags:[git]）：
 
 - 词元：`git, 提交, 交规, 规范`
-- BM25：title 全命中 + tag 命中 → kw≈7.4 → 归一 ≈0.55
-- 余弦（假设语义高度相关）≈0.8
-- **score = 1.0×0.55 + 1.0×0.8 = 1.35**；对照纯噪音条目 score=0 被过滤
+- BM25：title 全命中 + tag 命中 → kw≈7.4 → 归一 ≈0.55 ≥ 0.5 → 关键词通道准入
+- 余弦（假设语义高度相关）≈0.8 ≥ 语义门槛 → 语义通道亦准入
+- **score = 1.0×0.55 + 1.0×0.8 = 1.35**；无关提问两通道都不达标 → 零注入
 
 ### 17.6 同步算法（热路径性能来源）
 
@@ -910,6 +929,7 @@ os.ReadDir(knowledge/)                # 只拿文件名，不读内容
 | sidecar 空闲 10 分钟 | daemon 回收（杀进程删状态文件），下次需要时经 want 再拉起 |
 | 模型下载失败/校验不符 | 保留 `.part` 可续传重试；sha256 不符删 `.part`；不激活 |
 | 模型身份与索引不符 | 语义通道显式跳过 + 提示 `ok index`（替代以往维度不等静默归零）；Sync 阻断向量写杜绝混合；`ok index` 自动清向量全量重建（32/批） |
+| 查询余弦分布无显著头部 | 语义通道整体不准入（宁缺毋滥，关键词兜底），记 `prompt semantic` 日志（样本/max/median/relGap）；低对比度模型调低 `min_gap` 放宽 |
 | 删除"使用中"的 profile | 允许删除，`active` 置空退回纯关键词，GUI/CLI 明确提示 |
 | 条目缺向量（未 index） | 该条目语义分为 0，仍可被关键词命中 |
 | 单个条目文件损坏 | 跳过并保留其旧索引（`CorruptEntriesError` 警告），其余正常 |

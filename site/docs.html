@@ -208,11 +208,12 @@ summary: 每次代码修改必须立即记录变更日志
     </div>
 
     <h2 id="gui">Web GUI</h2>
-    <p data-i18n="d.s6p"><b>双击 <code>ok.exe</code>（无参数运行）或执行 <code>ok gui</code></b> 启动 Web 管理界面，浏览器自动打开 <code>http://127.0.0.1:17888</code>。GUI 由常驻 daemon 托管，关闭页面不会退出进程；<code>ok daemon stop</code> 停止常驻服务。三个标签页：</p>
+    <p data-i18n="d.s6p"><b>双击 <code>ok.exe</code>（无参数运行）或执行 <code>ok gui</code></b> 启动 Web 管理界面，浏览器自动打开 <code>http://127.0.0.1:17888</code>。GUI 由常驻 daemon 托管，关闭页面不会退出进程；<code>ok daemon stop</code> 停止常驻服务。四个标签页：</p>
     <ul>
       <li data-i18n="d.s6l1"><b>管理</b>：项目/条目列表、新建/编辑/删除、检索预览、全局开关、分支过滤</li>
       <li data-i18n="d.s6l2"><b>引导</b>：图形版 <code>ok setup</code>，另有 hook 超时、强制检查方式（reasonix）与卸载卡片</li>
       <li data-i18n="d.s6l3"><b>其他</b>：数据导出/导入、更新日志、使用帮助、删除项目知识库（三重确认）</li>
+      <li data-i18n="d.s6l4"><b>日志</b>：ok / 守护 / embedding 三来源实时日志，来源 chips 多选 +「仅语义」开关 + 文本过滤</li>
     </ul>
 
     <h2 id="config" data-i18n="d.s7h">配置</h2>
@@ -231,10 +232,10 @@ changelog_glob = "docs/changelogs/**"     <span class="c"># 碰了这些 = 写�
 message = "本次会话修改了代码但未更新变更日志，请先按规范补齐。"</code></pre>
 
     <h2 id="retrieval" data-i18n="d.s8h">检索算法</h2>
-    <p data-i18n="d.s8p">SQLite + FTS5 的混合检索，两路分数归一化后加权混合（α/β 可调），取 top-2 注入：</p>
+    <p data-i18n="d.s8p">SQLite + FTS5 的混合检索，总分只用于排序、<b>准入按通道独立判定</b>——宁缺毋滥、不强行凑 top_n：</p>
     <ul>
-      <li data-i18n="d.s8l1"><b>关键词通道</b>：FTS5 全文索引 + BM25 打分，按 标题/标签/摘要/正文 分权重；中文用二元组分词，零依赖</li>
-      <li data-i18n="d.s8l2"><b>语义通道</b>：OpenAI 兼容 embedding + 余弦相似度，召回「问法不同但意思相近」的条目</li>
+      <li data-i18n="d.s8l1"><b>关键词通道</b>：FTS5 全文索引 + BM25 打分，按 标题/标签/摘要/正文 分权重；中文用二元组分词，零依赖；准入需归一 BM25 分 ≥ <code>min_score</code>（默认 0.5，随库规模缩放）</li>
+      <li data-i18n="d.s8l2"><b>语义通道</b>：OpenAI 兼容 embedding + 余弦相似度，召回「问法不同但意思相近」的条目；准入走模型无关的语义门槛（以本次查询余弦分布为参照，头部相对中位数有显著分离才启用，<code>min_gap</code> 默认 0.25 可调）</li>
       <li data-i18n="d.s8l3"><b>草稿条目不进检索通道</b>：FTS 与向量都排除，批准后自动参与</li>
     </ul>
     <p data-i18n="d.s8tail">1 万条条目下单次查询约 30ms；embedding 服务不可用时自动降级为纯关键词检索，注入永不缺席。实现细节见<a href="https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge/src/branch/master/docs/ARCHITECTURE.md" target="_blank" rel="noopener">架构文档第 17 章</a>。</p>

@@ -28,6 +28,7 @@ OpenKnowledge 是 AI 编码助手的**本地知识库**：把项目经验、规�
 - **管理**：条目增删改查、草稿"采纳"、按项目/类型/分支过滤、搜索
 - **引导**：安装/重装各 agent 集成、hook 超时、enforce 三档（reasonix）、embedding 语义检索
 - **其他**：数据导出/导入（zip 备份）、更新日志、本帮助
+- **日志**：ok / 守护 / embedding 三来源实时日志（2 秒轮询）；来源 chips 多选 +「仅语义」开关 + 文本过滤；「仅语义」可观察 `prompt semantic` 诊断行（语义通道整体拒绝时的样本/max/median/relGap）
 
 ### CLI 速查
 
@@ -67,6 +68,8 @@ daemon 常驻后台、按需自动拉起，无需手动管理；托盘图标右�
 - `[enforce]`（默认空）——强制检查规则（如 changelog_required：改了代码必须更新 CHANGELOG，否则阻断）。改法：手改文件
 - `[wiki] stale_commits`（默认 20）——wiki 落后多少 commit 开始提醒；0 = 关闭提醒。改法：手改文件
 - `[retrieve] top_n`（默认 2）——每次注入最多检索命中条数。改法：手改文件
+- `[retrieve] min_score`（默认 0.5，≤0 关闭）——注入的最低置信阈值（关键词/语义通道独立判定，宁缺毋滥不凑 top_n；随库规模缩放）
+- `[retrieve] min_gap`（默认 0.25，≤0 关闭 gap 判定）——语义通道头部显著性阈值（模型无关）；低对比度自定义 embedding 模型可调低放宽
 - `[inject] max_tokens`（默认 800）——注入预算（超出截断）。改法：手改文件
 
 ### 条目级控制（frontmatter）
