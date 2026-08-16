@@ -360,3 +360,53 @@ func TestRecencyConfigDefaultAndOverride(t *testing.T) {
 		t.Fatalf("project 缺键应继承 %+v", cfg.Retrieve.Recency)
 	}
 }
+
+func TestFeedbackConfigDefaultAndOverride(t *testing.T) {
+	dir := t.TempDir()
+	global := filepath.Join(dir, "global.toml")
+	project := filepath.Join(dir, "project.toml")
+	// 全缺省
+	cfg, err := LoadMerged(project, global)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := cfg.Retrieve.Feedback
+	if !f.Enabled || f.WindowDays != 30 || f.MinInjections != 4 || f.Demote != 0.8 {
+		t.Fatalf("unexpected defaults %+v", f)
+	}
+	// 全局覆盖，项目缺键继承
+	if err := os.WriteFile(global, []byte("[retrieve.feedback]\nenabled = false\nwindow_days = 7\nmin_injections = 10\ndemote = 0.5\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = LoadMerged(project, global)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f = cfg.Retrieve.Feedback
+	if f.Enabled || f.WindowDays != 7 || f.MinInjections != 10 || f.Demote != 0.5 {
+		t.Fatalf("global override failed %+v", f)
+	}
+	// 项目覆盖一键、其余继承
+	if err := os.WriteFile(project, []byte("[retrieve.feedback]\nenabled = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = LoadMerged(project, global)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f = cfg.Retrieve.Feedback
+	if !f.Enabled || f.WindowDays != 7 || f.Demote != 0.5 {
+		t.Fatalf("project override failed %+v", f)
+	}
+	// 项目清掉 → 重新继承全局
+	if err := os.WriteFile(project, []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = LoadMerged(project, global)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Retrieve.Feedback.Enabled {
+		t.Fatalf("project 缺键应继承全局 %+v", cfg.Retrieve.Feedback)
+	}
+}

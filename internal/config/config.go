@@ -122,6 +122,16 @@ type RecencyWindows struct {
 	Reference []int `toml:"reference"`
 }
 
+// RetrieveFeedback 控制注入→采纳反馈闭环（[retrieve.feedback] 子表）：
+// 窗口内持续注入但从未被读取的条目降权（v1 只降不升——加分会自我强化造成
+// 条目固化，降权只修"持续噪声"这一种确定的问题）。
+type RetrieveFeedback struct {
+	Enabled       bool    `toml:"enabled"`        // 默认 true（见 Default）
+	WindowDays    int     `toml:"window_days"`    // 统计窗口（天），默认 30；<=0 按 30
+	MinInjections int     `toml:"min_injections"` // 触发降权的最低注入次数，默认 4；<=0 按 4
+	Demote        float64 `toml:"demote"`         // 降权系数，默认 0.8；<=0 或 >=1 按 0.8
+}
+
 type Retrieve struct {
 	Alpha float64 `toml:"alpha"`
 	Beta  float64 `toml:"beta"`
@@ -153,6 +163,9 @@ type Retrieve struct {
 	// Recency 是时效信号（[retrieve.recency] 子表）：陈旧条目在近似同分时让位，
 	// 不参与准入。编辑条目即刷新 mtime 新鲜度（feature）。
 	Recency RetrieveRecency `toml:"recency"`
+	// Feedback 是注入→采纳反馈闭环（[retrieve.feedback] 子表）：采纳归因窗口
+	// = 本会话（只统计"读本会话注入过的条目"）。
+	Feedback RetrieveFeedback `toml:"feedback"`
 }
 
 type EnforceRule struct {
@@ -210,7 +223,8 @@ func Default() Config {
 			Gate:    RetrieveGate{Enabled: true},
 			Recency: RetrieveRecency{Enabled: true, Floor: 0.85, Windows: RecencyWindows{
 				Rule: []int{180, 730}, Pitfall: []int{90, 365}, Note: []int{60, 180}, Reference: []int{180, 730},
-			}}},
+			}},
+			Feedback: RetrieveFeedback{Enabled: true, WindowDays: 30, MinInjections: 4, Demote: 0.8}},
 		Capture:    Capture{Mode: "propose", TurnInterval: 5},
 		Wiki:       Wiki{StaleCommits: 20},
 		Hooks:      Hooks{TimeoutSec: 10},
