@@ -96,9 +96,11 @@ func buildMatch(terms []string) string {
 	return strings.Join(quoted, " OR ")
 }
 
-// Query 混合检索：score = α·归一BM25 + β·余弦（总分仅用于排序）。准入按通道
-// 独立判定：关键词通道需归一 BM25 分（未乘 α）≥ floor，语义通道需余弦 ≥
-// SemanticFloor(cos 分布, floor)（模型无关相对门槛），满足其一即可注入；
+// Query 混合检索：准入按通道独立判定——关键词通道需归一 BM25 分（未乘 α）≥
+// floor，语义通道需余弦 ≥ SemanticFloor(cos 分布, floor)（模型无关相对门槛），
+// 满足其一即可注入。融合（只用于排序）默认 RRF：score = Σ_channel 1/(rrf_k+rank)，
+// 只看各准入通道内名次不看分数（换 embedding 模型不影响平衡）；fusion="weighted"
+// 回滚旧行为 score = α·归一BM25 + β·余弦。
 // floor = MinScoreFloor(cfg.MinScore, 库条目数)，随库规模缩放，
 // MinScore<=0 维持旧语义（score>0 即注入）。同域语料下无关文本的余弦基线可能
 // 高达 0.4+，若用混合总分做准入会把伪词关键词命中顶过阈值，故必须分通道。
@@ -144,6 +146,15 @@ func (db *DB) queryAll(terms []string, queryVec []float32, cfg config.Retrieve) 
 		return nil, QueryInfo{}, nil
 	}
 	hits := map[string]*Hit{}
+	// 各通道准入集合的原始信号（kwNorm / cos），供 RRF 排名次；weighted 模式
+	// 不用但记录成本可忽略，准入路径两模式共用一份代码。
+	kwNorms := map[string]float64{}
+	cosScores := map[string]float64{}
+	// 融合方式：缺省/非法值一律 rrf（fail-open）；weighted 为旧行为回滚档。
+	fusion := cfg.Fusion
+	if fusion != "weighted" {
+		fusion = "rrf"
+	}
 	// 通道准入阈值按可检索条目数缩放（Count 失败时关闭阈值，fail-open 不阻断注入）
 	floor := 0.0
 	if n, err := db.Count(); err == nil {
@@ -176,7 +187,9 @@ func (db *DB) queryAll(terms []string, queryVec []float32, cfg config.Retrieve) 
 			if floor > 0 && kw/(kw+6) < floor {
 				continue
 			}
-			h.Score = cfg.Alpha * kw / (kw + 6)
+			kwNorm := kw / (kw + 6)
+			h.Score = cfg.Alpha * kwNorm
+			kwNorms[h.Filename] = kwNorm
 			hits[h.Filename] = &h
 		}
 		if err := rows.Err(); err != nil {
@@ -232,9 +245,13 @@ func (db *DB) queryAll(terms []string, queryVec []float32, cfg config.Retrieve) 
 				if h.Score <= 0 {
 					h.Score = scoreFloor
 				}
+				if c.cos > 0 && (semFloor == 0 || c.cos >= semFloor) {
+					cosScores[c.h.Filename] = c.cos
+				}
 			} else if c.cos > 0 && (semFloor == 0 || c.cos >= semFloor) {
 				c.h.Score = cfg.Beta * c.cos
 				hits[c.h.Filename] = &c.h
+				cosScores[c.h.Filename] = c.cos
 				semAdmitted = true
 			}
 		}
@@ -256,6 +273,10 @@ func (db *DB) queryAll(terms []string, queryVec []float32, cfg config.Retrieve) 
 		}
 	}
 
+	if fusion == "rrf" {
+		applyRRF(hits, kwNorms, cosScores, cfg.RrfK)
+	}
+
 	out := make([]Hit, 0, len(hits))
 	for _, h := range hits {
 		if h.Score > 0 {
@@ -269,6 +290,45 @@ func (db *DB) queryAll(terms []string, queryVec []float32, cfg config.Retrieve) 
 		return out[i].Title < out[j].Title
 	})
 	return out, info, nil
+}
+
+// applyRRF 用 RRF（Reciprocal Rank Fusion）重算总分：只看各准入通道内的名次，
+// score(h) = Σ_channel 1/(k + rank_c)，rank 从 1 起；通道内按信号降序、同分按
+// 文件名升序排名（确定性）。双通道同时准入的 hit 两项相加，自然排在单通道命中
+// 之前（交叉验证优先）。k<=0 按 60。负余弦条目不进语义名次表（准入段已过滤），
+// 无需 scoreFloor 保护——该保护仅属 weighted 模式。
+func applyRRF(hits map[string]*Hit, kwNorms, cosScores map[string]float64, k int) {
+	if k <= 0 {
+		k = 60
+	}
+	ranks := func(scores map[string]float64) map[string]int {
+		names := make([]string, 0, len(scores))
+		for n := range scores {
+			names = append(names, n)
+		}
+		sort.Slice(names, func(i, j int) bool {
+			if scores[names[i]] != scores[names[j]] {
+				return scores[names[i]] > scores[names[j]]
+			}
+			return names[i] < names[j]
+		})
+		out := make(map[string]int, len(names))
+		for i, n := range names {
+			out[n] = i + 1
+		}
+		return out
+	}
+	kwRanks, cosRanks := ranks(kwNorms), ranks(cosScores)
+	for name, h := range hits {
+		score := 0.0
+		if r, ok := kwRanks[name]; ok {
+			score += 1 / (float64(k) + float64(r))
+		}
+		if r, ok := cosRanks[name]; ok {
+			score += 1 / (float64(k) + float64(r))
+		}
+		h.Score = score
+	}
 }
 
 // Mandatory 返回全部 mandatory 条目（用于基础注入）；草稿即使带 mandatory 标记也不注入。
