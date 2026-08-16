@@ -486,7 +486,9 @@ func TestInjectGateSkipsRetrieval(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := InjectForPrompt(pc, "s-gate", projDir, "RetrievalQuirk 是什么")
-	if strings.Contains(out, "检索经验") || strings.Contains(out, "相关知识") {
+	// 注：不断言标题"检索经验"缺席——首轮基础注入的 INDEX 主列表合法地列出全部
+	// 条目标题（门控按设计不影响 INDEX）；检索段的判据是"相关知识"小节与条目路径。
+	if strings.Contains(out, "相关知识") || strings.Contains(out, "检索.md") {
 		t.Errorf("门控命中不应注入检索段，got: %q", out)
 	}
 	if !strings.Contains(out, "永远先跑 gofmt") {
@@ -502,7 +504,8 @@ func TestInjectGateSkipsRetrieval(t *testing.T) {
 		t.Fatal(err)
 	}
 	out2 := InjectForPrompt(pc2, "s-gate-off", projDir, "RetrievalQuirk 是什么")
-	if !strings.Contains(out2, "检索经验") {
+	// 对照组同样以"相关知识"小节为判据（标题在 INDEX 中恒在，不足以证明检索恢复）
+	if !strings.Contains(out2, "相关知识") || !strings.Contains(out2, "检索.md") {
 		t.Errorf("关闭门控后应恢复检索注入，got: %q", out2)
 	}
 }
@@ -511,7 +514,7 @@ func TestInjectGateSkipsRetrieval(t *testing.T) {
 - [ ] **Step 2: 跑测试确认失败**
 
 Run: `go test ./internal/hook/ -run TestInjectGateSkipsRetrieval -v`
-Expected: FAIL（门控未实现，第一个断言即失败——`out` 含"检索经验"）
+Expected: FAIL（门控未实现，第一个断言即失败——`out` 含"相关知识"检索段）
 
 - [ ] **Step 3: 实现**（`internal/hook/core.go:119-142`，把 embed + 查询段包进 else 分支；`hits` 提升到外层声明，内层用短变量名接住再赋值避免 shadow）
 
