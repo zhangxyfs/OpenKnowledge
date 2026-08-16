@@ -452,11 +452,11 @@ Expected: FAIL（ok.log 无提示行）
 
 ```go
 	if cfg.Retrieve.Fusion != "weighted" && (cfg.Retrieve.Alpha != 1 || cfg.Retrieve.Beta != 1) {
-		fmt.Fprintf(os.Stderr, "[OpenKnowledge] rrf 模式下 alpha/beta 配置被忽略（仅 weighted 生效）\n")
+		fmt.Fprintf(stderr, "[OpenKnowledge] rrf 模式下 alpha/beta 配置被忽略（仅 weighted 生效）\n")
 	}
 ```
 
-（变量名以实际代码为准——先 Read 确认 cfg 的持有者；fmt/os 已 import。）
+（`Search(args, stdout, stderr io.Writer)` 的输出一律走注入的 `stderr` 参数——不要直写 `os.Stderr`（否则测试无法捕获）；变量名以实际代码为准——先 Read 确认 cfg 的持有者；fmt 已 import。）
 
 同文件输出格式（:351）：`"%.2f\t%s (%s)\n"` 改为 `"%.4f\t%s (%s)\n"`——RRF 分值域 ~0.016-0.033，`%.2f` 下全部糊成 0.02/0.03 无法区分。
 
