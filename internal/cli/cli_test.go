@@ -1014,3 +1014,70 @@ func TestWikiBaseListsCandidates(t *testing.T) {
 		t.Errorf("设置后查询应显示基准行与候选清单: %q", out.String())
 	}
 }
+
+// setupCLIProject 在临时 OK_HOME 下注册 demo 项目并 chdir 进去，返回项目目录与 KB 根。
+func setupCLIProject(t *testing.T) (projDir, kbRoot string) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("OK_HOME", home)
+	projDir = filepath.Join(home, "work", "demo")
+	kbRoot = filepath.Join(home, "projects", "demo")
+	if err := os.MkdirAll(filepath.Join(kbRoot, "knowledge"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(kbRoot, "state"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(projDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	reg := &registry.Registry{Projects: []registry.Project{{Name: "demo", Paths: []string{projDir}}}}
+	if err := reg.Save(registry.DefaultPath()); err != nil {
+		t.Fatal(err)
+	}
+	chdir(t, projDir)
+	return projDir, kbRoot
+}
+
+func writeCLIEntry(t *testing.T, kbRoot, name, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(kbRoot, "knowledge", name), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestArchiveCommand(t *testing.T) {
+	_, kbRoot := setupCLIProject(t)
+	writeCLIEntry(t, kbRoot, "old.md", `---
+title: 老坑
+type: pitfall
+summary: s
+---
+
+正文。
+`)
+	var out, errBuf bytes.Buffer
+	if code := Archive([]string{"old.md"}, &out, &errBuf); code != 0 {
+		t.Fatalf("exit %d: %s", code, errBuf.String())
+	}
+	// frontmatter 已写 archived: true
+	data, _ := os.ReadFile(filepath.Join(kbRoot, "knowledge", "old.md"))
+	e, err := entry.Parse(data)
+	if err != nil || !e.Archived {
+		t.Fatalf("archived 未写入: %v %+v", err, e)
+	}
+	// INDEX 不含归档条目
+	idx, _ := os.ReadFile(filepath.Join(kbRoot, "INDEX.md"))
+	if strings.Contains(string(idx), "老坑") {
+		t.Fatalf("归档后 INDEX 仍含条目: %q", idx)
+	}
+	// --undo 还原
+	out.Reset()
+	if code := Archive([]string{"--undo", "old.md"}, &out, &errBuf); code != 0 {
+		t.Fatalf("undo exit %d: %s", code, errBuf.String())
+	}
+	idx, _ = os.ReadFile(filepath.Join(kbRoot, "INDEX.md"))
+	if !strings.Contains(string(idx), "老坑") {
+		t.Fatalf("undo 后 INDEX 应恢复条目: %q", idx)
+	}
+}

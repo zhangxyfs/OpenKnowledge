@@ -424,6 +424,66 @@ func Index(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+// Archive: ok archive [--undo] <文件.md...> —— 标记/取消归档并重建索引；
+// 归档条目不进 INDEX 主列表，仍保留在库中可检索。
+func Archive(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("archive", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	undo := fs.Bool("undo", false, "取消归档")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() == 0 {
+		fmt.Fprintln(stderr, "用法: ok archive [--undo] <文件.md...>")
+		return 2
+	}
+	pc, code := resolveFromCwd(stderr)
+	if pc == nil {
+		return code
+	}
+	dir := pc.Store.KnowledgeDir()
+	for _, name := range fs.Args() {
+		base := filepath.Base(name)
+		path := filepath.Join(dir, base)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			fmt.Fprintf(stderr, "%s: %v\n", base, err)
+			return 1
+		}
+		e, err := entry.Parse(data)
+		if err != nil {
+			fmt.Fprintf(stderr, "%s: %v\n", base, err)
+			return 1
+		}
+		e.Archived = !*undo
+		// Sync 的 diff 按秒级 mtime 判断变化；归档与 --undo 同秒内连跑会被误判为
+		// 未变化而跳过重建，此时手动把 mtime 推进一秒（与 Approve 同口径）。
+		oldInfo, statErr := os.Stat(path)
+		if err := os.WriteFile(path, e.Serialize(), 0o644); err != nil {
+			fmt.Fprintf(stderr, "%s: %v\n", base, err)
+			return 1
+		}
+		if statErr == nil {
+			if newInfo, err := os.Stat(path); err == nil && newInfo.ModTime().Unix() == oldInfo.ModTime().Unix() {
+				t := oldInfo.ModTime().Add(time.Second)
+				_ = os.Chtimes(path, t, t)
+			}
+		}
+	}
+	db, err := index.Open(pc.Store.KbPath())
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	defer func() { _ = db.Close() }()
+	if err := db.Sync(dir, nil, index.SyncOptions{MaxLines: pc.Config.Index.MaxLines}); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	fmt.Fprintln(stdout, "归档标记已更新，索引已重建")
+	return 0
+}
+
 // List: ok list —— 列出项目与条目（* 表示 mandatory）
 func List(args []string, stdout, stderr io.Writer) int {
 	reg, err := registry.Load(registry.DefaultPath())
