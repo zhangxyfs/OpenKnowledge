@@ -91,3 +91,42 @@ func TestUpdateMergesConcurrentFields(t *testing.T) {
 		t.Fatal("lock file should be released after Update")
 	}
 }
+
+func TestSessionAdoptedKnowledge(t *testing.T) {
+	dir := t.TempDir()
+	// 去重追加
+	if err := Update(dir, "s1", func(s *Session) {
+		s.AddAdopted("a.md")
+		s.AddAdopted("a.md")
+		s.AddAdopted("b.md")
+		s.InjectedKnowledge = []string{"a.md", "b.md"}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	st := Load(dir, "s1")
+	if len(st.AdoptedKnowledge) != 2 || st.AdoptedKnowledge[0] != "a.md" || st.AdoptedKnowledge[1] != "b.md" {
+		t.Fatalf("AddAdopted 去重失败: %v", st.AdoptedKnowledge)
+	}
+	if len(st.InjectedKnowledge) != 2 {
+		t.Fatalf("InjectedKnowledge 落盘失败: %v", st.InjectedKnowledge)
+	}
+	// 入账后清空挂账、保留注入清单（模拟 InjectForPrompt 开头的入账动作）
+	if err := Update(dir, "s1", func(s *Session) {
+		s.AdoptedKnowledge = nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	st = Load(dir, "s1")
+	if len(st.AdoptedKnowledge) != 0 || len(st.InjectedKnowledge) != 2 {
+		t.Fatalf("清挂账/留注入失败: %+v", st)
+	}
+	// 并发场合并不覆盖（既有 TestUpdateMergesConcurrentFields 同款断言路径）：
+	// 两次 Update 分别改两字段互不丢
+	if err := Update(dir, "s1", func(s *Session) { s.AddAdopted("c.md") }); err != nil {
+		t.Fatal(err)
+	}
+	st = Load(dir, "s1")
+	if len(st.InjectedKnowledge) != 2 || len(st.AdoptedKnowledge) != 1 {
+		t.Fatalf("Update 合并失败: %+v", st)
+	}
+}

@@ -27,6 +27,12 @@ type Session struct {
 	// merged 为空时 WikiNudged 不置位，若无此字段基准分支上每次 prompt 都会为每条
 	// 非基准游标重付 rev-parse + merge-base 两次 git spawn。
 	MergedChecked bool `json:"merged_checked"`
+	// InjectedKnowledge 本会话最近一轮注入的检索条目（原始大小写 basename，
+	// 供采纳归因）；AdoptedKnowledge 待入账的采纳挂账（post-tool 不开库，
+	// 下次 InjectForPrompt 开头入账 entry_events 后清空；会话结束挂账丢失，
+	// 统计性信号可接受）。
+	InjectedKnowledge []string `json:"injected_knowledge"`
+	AdoptedKnowledge  []string `json:"adopted_knowledge"`
 }
 
 func fileName(sessionID string) string {
@@ -124,6 +130,16 @@ func (s *Session) AddTouched(p string) {
 		}
 	}
 	s.Touched = append(s.Touched, p)
+}
+
+// AddAdopted 去重追加采纳挂账。
+func (s *Session) AddAdopted(name string) {
+	for _, v := range s.AdoptedKnowledge {
+		if v == name {
+			return
+		}
+	}
+	s.AdoptedKnowledge = append(s.AdoptedKnowledge, name)
 }
 
 func (s *Session) HasBlocked(ruleType string) bool {
