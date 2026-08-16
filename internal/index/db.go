@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS entries(
   body TEXT NOT NULL DEFAULT '',
   mandatory INTEGER NOT NULL DEFAULT 0,
   draft INTEGER NOT NULL DEFAULT 0,
+  archived INTEGER NOT NULL DEFAULT 0,
   mtime INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS vectors(
@@ -69,6 +70,10 @@ func Open(path string) (*DB, error) {
 		_ = sqldb.Close()
 		return nil, err
 	}
+	if err := db.migrateArchivedColumn(); err != nil {
+		_ = sqldb.Close()
+		return nil, err
+	}
 	if err := db.migrateVectorsJSON(path); err != nil {
 		_ = sqldb.Close()
 		return nil, err
@@ -106,6 +111,38 @@ func (db *DB) migrateDraftColumn() error {
 		return nil
 	}
 	_, err = db.sql.Exec(`ALTER TABLE entries ADD COLUMN draft INTEGER NOT NULL DEFAULT 0`)
+	return err
+}
+
+// migrateArchivedColumn 为旧库补 entries.archived 列（归档标记，见 migrateDraftColumn）。
+func (db *DB) migrateArchivedColumn() error {
+	rows, err := db.sql.Query(`PRAGMA table_info(entries)`)
+	if err != nil {
+		return err
+	}
+	has := false
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull, pk int
+		var dflt sql.RawBytes
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		if name == "archived" {
+			has = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	_ = rows.Close()
+	if has {
+		return nil
+	}
+	_, err = db.sql.Exec(`ALTER TABLE entries ADD COLUMN archived INTEGER NOT NULL DEFAULT 0`)
 	return err
 }
 

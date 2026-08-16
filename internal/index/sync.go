@@ -42,6 +42,11 @@ func readEntry(path string) (*entry.Entry, error) {
 	return e, nil
 }
 
+// SyncOptions 控制 Sync 重建 INDEX.md 的渲染预算；零值走默认（MaxLines=50）。
+type SyncOptions struct {
+	MaxLines int // 主列表最大行数，<=0 按 50
+}
+
 // Sync 将 dir（knowledge 目录）下的 Markdown 条目增量同步进索引库：
 // 先用 os.ReadDir 枚举文件名+mtime（不读文件内容），与 entries 表按
 // filename+mtime 对比；仅新增/变化的条目才 read+parse 并 upsert
@@ -58,7 +63,12 @@ func readEntry(path string) (*entry.Entry, error) {
 // errors.As 区分）。SQL 失败、目录不可读、INDEX.md 写入失败等致命错误
 // 仍中止并回滚。diff 非空或 INDEX.md 缺失时重建 <dir>/../INDEX.md，
 // 无变化的纯热路径不做任何写盘。
-func (db *DB) Sync(dir string, client embed.Client) error {
+func (db *DB) Sync(dir string, client embed.Client, opts ...SyncOptions) error {
+	o := SyncOptions{}
+	if len(opts) > 0 {
+		o = opts[0]
+	}
+	_ = o // Task 5 起用于 rebuildIndex
 	// Windows 上 DirEntry.Info 复用 readdir 数据，无额外系统调用
 	dirents, err := os.ReadDir(dir)
 	if err != nil {
@@ -184,13 +194,18 @@ func (db *DB) Sync(dir string, client embed.Client) error {
 		if e.Draft {
 			draft = 1
 		}
-		if _, err := tx.Exec(`INSERT INTO entries(filename,title,type,tags,summary,body,mandatory,draft,mtime)
-			VALUES(?,?,?,?,?,?,?,?,?)
+		archived := 0
+		if e.Archived {
+			archived = 1
+		}
+		if _, err := tx.Exec(`INSERT INTO entries(filename,title,type,tags,summary,body,mandatory,draft,archived,mtime)
+			VALUES(?,?,?,?,?,?,?,?,?,?)
 			ON CONFLICT(filename) DO UPDATE SET
 			title=excluded.title, type=excluded.type, tags=excluded.tags,
 			summary=excluded.summary, body=excluded.body,
-			mandatory=excluded.mandatory, draft=excluded.draft, mtime=excluded.mtime`,
-			name, e.Title, e.Type, tags, e.Summary, e.Body, mandatory, draft, mtime); err != nil {
+			mandatory=excluded.mandatory, draft=excluded.draft,
+			archived=excluded.archived, mtime=excluded.mtime`,
+			name, e.Title, e.Type, tags, e.Summary, e.Body, mandatory, draft, archived, mtime); err != nil {
 			return rollback(err)
 		}
 		if _, err := tx.Exec(`DELETE FROM entries_fts WHERE filename=?`, name); err != nil {
