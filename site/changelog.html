@@ -115,8 +115,12 @@
    <details id="verNav" open>
     <summary data-i18n="c.ledger">版本档案</summary>
     <div class="group">
+      <div class="group-title">2.17.x</div>
+      <a href="#v2-17-0"><span><span class="latest-dot"></span>v2.17.0</span><span class="d">08-16</span></a>
+    </div>
+    <div class="group">
       <div class="group-title">2.16.x</div>
-      <a href="#v2-16-2"><span><span class="latest-dot"></span>v2.16.2</span><span class="d">08-15</span></a>
+      <a href="#v2-16-2"><span>v2.16.2</span><span class="d">08-15</span></a>
       <a href="#v2-16-0"><span>v2.16.0</span><span class="d">08-15</span></a>
     </div>
     <div class="group">
@@ -191,12 +195,37 @@
       <h1 data-i18n="c.h1">更新日志</h1>
       <p class="lede" data-i18n="c.lede">OpenKnowledge 的版本发布记录。日期为 2026 年。</p>
       <div class="cta">
-        <a class="btn btn-primary" href="https://github.com/zhangxyfs/OpenKnowledge/releases" target="_blank" rel="noopener" data-i18n="c.cta">下载最新版 v2.16.2</a>
+        <a class="btn btn-primary" href="https://github.com/zhangxyfs/OpenKnowledge/releases" target="_blank" rel="noopener" data-i18n="c.cta">下载最新版 v2.17.0</a>
       </div>
     </div>
 
+    <section class="ver" id="v2-17-0">
+      <div class="ver-head"><h2>v2.17.0</h2><span class="badge-latest" data-i18n="c.latest">最新</span><time>2026-08-16</time></div>
+      <div class="chg">
+        <span class="tag tag-new" data-i18n="t.new">新功能</span>
+        <ul>
+          <li data-i18n="c.2170.n1">泛化 prompt 门控：「继续」「好的」「ok」这类无信息量 prompt 不再跑检索——连 embedding 网络往返都省掉；内置 21 条中英常用确认词（随版本演进），GUI 引导页新增「泛化门控」卡片 + 短语管理弹窗可维护自定义短语（与内置取并集、自动去重，单条 ≤64 字符）；mandatory/索引/wiki 提醒等其余注入不受影响</li>
+          <li data-i18n="c.2170.n2">时效信号：按条目文件 mtime 的新鲜度给检索分乘系数——新鲜窗口内 1.0、陈旧后 0.85、中间线性，窗口按条目类型分（pitfall 90/365 天、note 60/180、rule/reference 180/730）；不参与准入，只在近似同分时让位；编辑条目即刷新新鲜度</li>
+          <li data-i18n="c.2170.n3">注入→采纳反馈闭环：新增 entry_events 表记录「注入/采纳」事件——采纳 = 本会话注入过的条目被读取（post-tool 不开库，先挂账会话状态、下次 prompt 入账）；30 天窗口内注入 ≥4 次且零采纳的条目降权 ×0.8（v1 只降不升）</li>
+        </ul>
+      </div>
+      <div class="chg">
+        <span class="tag tag-improve" data-i18n="t.improve">改进</span>
+        <ul>
+          <li data-i18n="c.2170.i1">检索融合改 RRF（Reciprocal Rank Fusion，按名次不按分数）：换 embedding 模型后余弦分布漂移不再破坏两路平衡；双通道同时命中的条目天然「交叉验证优先」；准入逻辑不变；<code>ok search</code> 分数输出改 4 位小数</li>
+        </ul>
+      </div>
+      <div class="chg">
+        <span class="tag tag-note" data-i18n="t.note">说明</span>
+        <ul>
+          <li data-i18n="c.2170.s1">反馈降权<strong>默认关闭</strong>（<code>retrieve.feedback.enabled = false</code>）：现行所有宿主的 PostTool 钩子只派发写工具，read 不到达追踪链路，采纳信号暂恒为零，开启会误伤频繁注入的条目；注入/采纳事件照常记录，待 read 派发接通后的版本恢复默认开启</li>
+          <li data-i18n="c.2170.s2">要旧排序行为可在配置里显式 <code>fusion = "weighted"</code>（旧 α/β 加权回滚档）；时效与门控均可经 <code>retrieve.recency.enabled</code> / <code>retrieve.gate.enabled</code> 单独关闭</li>
+        </ul>
+      </div>
+    </section>
+
     <section class="ver" id="v2-16-2">
-      <div class="ver-head"><h2>v2.16.2</h2><span class="badge-latest" data-i18n="c.latest">最新</span><time>2026-08-15</time></div>
+      <div class="ver-head"><h2>v2.16.2</h2><time>2026-08-15</time></div>
       <div class="chg">
         <span class="tag tag-new" data-i18n="t.new">新功能</span>
         <ul>
