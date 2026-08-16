@@ -1394,3 +1394,94 @@ func TestProjectDelete(t *testing.T) {
 		t.Fatalf("re-delete: status = %d, want 404", code)
 	}
 }
+
+func TestGateRoundTrip(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	mkProject(t, okHome, "demo")
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	cfgPath := filepath.Join(okHome, "projects", "demo", "config.toml")
+
+	// 默认 GET：enabled=true、内置 21 条、extra 空
+	code, data := do(t, "GET", srv.URL+"/api/gate?project=demo", testToken, nil)
+	if code != 200 {
+		t.Fatalf("gate get: status = %d, body %s", code, data)
+	}
+	var view struct {
+		Enabled bool     `json:"enabled"`
+		Builtin []string `json:"builtin"`
+		Extra   []string `json:"extra"`
+	}
+	if err := json.Unmarshal([]byte(data), &view); err != nil {
+		t.Fatal(err)
+	}
+	if !view.Enabled || len(view.Builtin) != 21 || len(view.Extra) != 0 {
+		t.Fatalf("unexpected default view %+v", view)
+	}
+
+	// POST enabled=false → 项目 config.toml 落盘 [retrieve.gate]；GET 反映
+	code, _ = do(t, "POST", srv.URL+"/api/gate", testToken,
+		map[string]any{"project": "demo", "enabled": false})
+	if code != 200 {
+		t.Fatalf("gate set enabled: status = %d", code)
+	}
+	cfgData, _ := os.ReadFile(cfgPath)
+	if !strings.Contains(string(cfgData), "[retrieve.gate]") || !strings.Contains(string(cfgData), "enabled = false") {
+		t.Fatalf("config 应含 [retrieve.gate] enabled = false: %q", cfgData)
+	}
+
+	// POST extra 全量替换：去重（归一化形）、与内置重复丢弃、折叠空白
+	code, data = do(t, "POST", srv.URL+"/api/gate", testToken,
+		map[string]any{"project": "demo", "extra": []string{"走起", "走起 ", "好的", "Go  On"}})
+	if code != 200 {
+		t.Fatalf("gate set extra: status = %d, body %s", code, data)
+	}
+	if err := json.Unmarshal([]byte(data), &view); err != nil {
+		t.Fatal(err)
+	}
+	// "走起 " 重复丢弃；"好的"/"go on" 与内置重复丢弃 → 只剩 ["走起"]
+	if len(view.Extra) != 1 || view.Extra[0] != "走起" {
+		t.Fatalf("extra 清洗错误: %+v", view.Extra)
+	}
+	// enabled 为 null = 不变（仍是 false）
+	if view.Enabled {
+		t.Fatalf("enabled null 应保持不变: %+v", view)
+	}
+
+	// 校验：单条 >64 字符 → 400
+	code, _ = do(t, "POST", srv.URL+"/api/gate", testToken,
+		map[string]any{"project": "demo", "extra": []string{strings.Repeat("长", 65)}})
+	if code != 400 {
+		t.Fatalf("超长短语应 400, got %d", code)
+	}
+	// 校验：空短语 → 400
+	code, _ = do(t, "POST", srv.URL+"/api/gate", testToken,
+		map[string]any{"project": "demo", "extra": []string{"   "}})
+	if code != 400 {
+		t.Fatalf("空短语应 400, got %d", code)
+	}
+	// 校验：>200 条 → 400
+	big := make([]string, 201)
+	for i := range big {
+		big[i] = fmt.Sprintf("短语%d", i)
+	}
+	code, _ = do(t, "POST", srv.URL+"/api/gate", testToken,
+		map[string]any{"project": "demo", "extra": big})
+	if code != 400 {
+		t.Fatalf("超量短语应 400, got %d", code)
+	}
+
+	// 再设 enabled=true → 整段替换而非重复追加
+	code, _ = do(t, "POST", srv.URL+"/api/gate", testToken,
+		map[string]any{"project": "demo", "enabled": true})
+	if code != 200 {
+		t.Fatalf("gate re-enable: status = %d", code)
+	}
+	cfgData, _ = os.ReadFile(cfgPath)
+	if strings.Count(string(cfgData), "[retrieve.gate]") != 1 || !strings.Contains(string(cfgData), "enabled = true") {
+		t.Fatalf("[retrieve.gate] 应唯一且 enabled = true: %q", cfgData)
+	}
+	if !strings.Contains(string(cfgData), `extra_phrases = ["走起"]`) {
+		t.Fatalf("extra 应保留: %q", cfgData)
+	}
+}

@@ -72,6 +72,8 @@ func NewHandler(webDir, token string, beats chan<- struct{}) *Handler {
 	api("POST /api/approve", h.apiApprove)
 	api("GET /api/capture", h.apiCaptureGet)
 	api("POST /api/capture", h.apiCaptureSet)
+	api("GET /api/gate", h.apiGateGet)
+	api("POST /api/gate", h.apiGateSet)
 	api("GET /api/project/branch-info", h.apiProjectBranchInfo)
 	api("POST /api/heartbeat", h.apiHeartbeat)
 	api("POST /api/shutdown", h.apiShutdown)
@@ -1000,6 +1002,109 @@ func (h *Handler) apiCaptureSet(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "mode": mode, "turn_interval": interval, "auto_born": autoBorn})
+}
+
+// apiGateGet 返回项目合并配置中的门控开关、内置短语表与 extra 追加层。
+func (h *Handler) apiGateGet(w http.ResponseWriter, r *http.Request) {
+	st := resolveProject(w, r.URL.Query().Get("project"))
+	if st == nil {
+		return
+	}
+	cfg, err := config.LoadMerged(st.ConfigPath(), filepath.Join(registry.Home(), "config.toml"))
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	extra := cfg.Retrieve.Gate.ExtraPhrases
+	if extra == nil {
+		extra = []string{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"enabled": cfg.Retrieve.Gate.Enabled,
+		"builtin": retrieve.BuiltinPhrases(),
+		"extra":   extra,
+	})
+}
+
+// apiGateSet 设置门控开关与 extra 短语（全量替换，幂等）：enabled / extra 任一为
+// null 表示该字段不变。extra 校验：逐条 trim+折叠空白，按归一化形去重（与内置
+// 重复的直接丢弃），单条 ≤64 字符、总数 ≤200 条；非法即 400。
+// 落盘走 config.SetGate（[retrieve.gate] 整段替换）。
+func (h *Handler) apiGateSet(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Project string    `json:"project"`
+		Enabled *bool     `json:"enabled"`
+		Extra   *[]string `json:"extra"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	st := resolveProject(w, req.Project)
+	if st == nil {
+		return
+	}
+	cfg, err := config.LoadMerged(st.ConfigPath(), filepath.Join(registry.Home(), "config.toml"))
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	enabled := cfg.Retrieve.Gate.Enabled
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+	extra := cfg.Retrieve.Gate.ExtraPhrases
+	if req.Extra != nil {
+		cleaned, err := cleanGatePhrases(*req.Extra)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		extra = cleaned
+	}
+	if req.Enabled != nil || req.Extra != nil {
+		if err := config.SetGate(st.ConfigPath(), enabled, extra); err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	if extra == nil {
+		extra = []string{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"enabled": enabled,
+		"builtin": retrieve.BuiltinPhrases(),
+		"extra":   extra,
+	})
+}
+
+// cleanGatePhrases 校验并清洗 extra 短语：trim+折叠连续空白、按归一化形去重、
+// 与内置重复的丢弃；单条 ≤64 字符、总数 ≤200 条（防止 config 被刷爆）。
+func cleanGatePhrases(in []string) ([]string, error) {
+	if len(in) > 200 {
+		return nil, fmt.Errorf("短语总数 %d 超过上限 200", len(in))
+	}
+	builtin := map[string]bool{}
+	for _, p := range retrieve.BuiltinPhrases() {
+		builtin[p] = true
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, len(in))
+	for _, p := range in {
+		folded := strings.Join(strings.Fields(p), " ")
+		if folded == "" {
+			return nil, fmt.Errorf("短语不能为空")
+		}
+		if len(folded) > 64 {
+			return nil, fmt.Errorf("短语 %q 超过 64 字符", folded)
+		}
+		n := retrieve.Normalize(folded)
+		if builtin[n] || seen[n] {
+			continue // 与内置重复 / 列表内重复：直接丢弃
+		}
+		seen[n] = true
+		out = append(out, folded)
+	}
+	return out, nil
 }
 
 // apiProjectBranchInfo 返回项目的分支上下文：基准分支（wiki.json）、
