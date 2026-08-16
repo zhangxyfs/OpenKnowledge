@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"openknowledge/internal/agentx"
 	"openknowledge/internal/entry"
@@ -1079,5 +1080,25 @@ summary: s
 	idx, _ = os.ReadFile(filepath.Join(kbRoot, "INDEX.md"))
 	if !strings.Contains(string(idx), "老坑") {
 		t.Fatalf("undo 后 INDEX 应恢复条目: %q", idx)
+	}
+}
+
+func TestIndexArchiveCandidates(t *testing.T) {
+	_, kbRoot := setupCLIProject(t)
+	old := time.Now().AddDate(0, 0, -120).Format("2006-01-02")
+	writeCLIEntry(t, kbRoot, "stale.md", "---\ntitle: 陈年条目\ntype: note\ncreated: "+old+"\nsummary: s\n---\n\n正文。\n")
+	writeCLIEntry(t, kbRoot, "fresh.md", "---\ntitle: 新条目\ntype: note\ncreated: "+time.Now().Format("2006-01-02")+"\nsummary: s\n---\n\n正文。\n")
+	var out, errBuf bytes.Buffer
+	// 离线（无 embedding）时退出码为 1（既有约定，见 TestIndexRebuildsIndexWithoutAPIKey），
+	// 归档候选报告仍写到 stdout。
+	if code := Index(nil, &out, &errBuf); code != 1 {
+		t.Fatalf("exit %d: %s", code, errBuf.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "归档候选") || !strings.Contains(got, "stale.md") {
+		t.Fatalf("缺归档候选报告: %q", got)
+	}
+	if strings.Contains(got, "fresh.md") {
+		t.Fatalf("新条目不应入选: %q", got)
 	}
 }

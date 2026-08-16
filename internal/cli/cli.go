@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -418,10 +419,45 @@ func Index(args []string, stdout, stderr io.Writer) int {
 	}
 	if client == nil {
 		fmt.Fprintf(stderr, "INDEX 已重建（%d 条）；embedding 未配置或暂不可用，跳过向量重建\n", n)
+		printArchiveCandidates(pc.Store.KnowledgeDir(), db, stdout)
 		return 1
 	}
 	fmt.Fprintf(stdout, "INDEX 已重建；索引共 %d 条（embedding：%s）\n", n, client.ModelIdentity())
+	printArchiveCandidates(pc.Store.KnowledgeDir(), db, stdout)
 	return 0
+}
+
+// printArchiveCandidates 在 ok index 输出末尾附归档候选：created 超 90 天
+// 且近 30 天零注入零采纳的条目（仅提示，不动数据）。统计/解析失败只省略报告。
+func printArchiveCandidates(dir string, db *index.DB, stdout io.Writer) {
+	entries, _ := entry.LoadTolerant(dir)
+	stats, err := db.FeedbackStats(30)
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().AddDate(0, 0, -90)
+	var names []string
+	for _, e := range entries {
+		if e.Draft || e.Archived || e.Created == "" {
+			continue
+		}
+		created, err := time.Parse("2006-01-02", e.Created)
+		if err != nil || created.After(cutoff) {
+			continue
+		}
+		s := stats[e.FileName()]
+		if s.Injections == 0 && s.Adoptions == 0 {
+			names = append(names, e.FileName())
+		}
+	}
+	if len(names) == 0 {
+		return
+	}
+	sort.Strings(names)
+	fmt.Fprintln(stdout, "归档候选（创建超 90 天且近 30 天零使用，可 ok archive <文件> 归档）:")
+	for _, n := range names {
+		fmt.Fprintf(stdout, "  - %s\n", n)
+	}
 }
 
 // Archive: ok archive [--undo] <文件.md...> —— 标记/取消归档并重建索引；
