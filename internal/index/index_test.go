@@ -241,7 +241,9 @@ func TestQueryMinScore(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 默认阈值 0.5 → floor = MinScoreFloor(0.5, 12) = 0.05：真实命中保留
-	got, err := db.Query(retrieve.Terms("git 提交规范"), nil, config.Retrieve{Alpha: 1, Beta: 1, TopN: 5, MinScore: 0.5})
+	// Fusion 钉 weighted：下方 h.Score >= floor 断言隐含"总分与准入 floor 同量纲"
+	// 的加权前提（RRF 总分是名次分，量纲不同）；准入语义两模式一致，覆盖不受影响。
+	got, err := db.Query(retrieve.Terms("git 提交规范"), nil, config.Retrieve{Alpha: 1, Beta: 1, TopN: 5, MinScore: 0.5, Fusion: "weighted"})
 	if err != nil {
 		t.Fatal(err)
 	}
