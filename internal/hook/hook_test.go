@@ -906,3 +906,33 @@ func TestEventPatchPaths(t *testing.T) {
 		}
 	}
 }
+
+// TestPromptIndexFoldedLine 超 max_lines 的条目折叠为可检索提示行注入，
+// 替代外层 token 截断的静默丢失。
+func TestPromptIndexFoldedLine(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	if err := os.WriteFile(filepath.Join(kbRoot, "config.toml"), []byte("[index]\nmax_lines = 2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mk := func(title, tags string) string {
+		return "---\ntitle: " + title + "\ntype: note\ntags: [" + tags + "]\nsummary: " + title + "的补充\n---\n\n正文。\n"
+	}
+	writeEntry(t, kbRoot, "a.md", mk("甲条目", "agentx"))
+	writeEntry(t, kbRoot, "b.md", mk("乙条目", "hooks"))
+	writeEntry(t, kbRoot, "c.md", mk("丙条目", "agentx"))
+	mkPrompt := func(text string) string {
+		return fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":[{"type":"text","text":%q}]}`, projDir, text)
+	}
+	var out bytes.Buffer
+	if code := HandlePrompt(strings.NewReader(mkPrompt("随便问点啥")), &out, ""); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	got := out.String()
+	if !strings.Contains(got, "另有 1 条未列出") {
+		t.Fatalf("注入缺折叠行: %q", got)
+	}
+	// 无事件+mtime 同秒退化为 filename 序：丙条目被折叠
+	if strings.Contains(got, "- **丙条目**") {
+		t.Fatalf("被折叠条目标题不应出现在注入里: %q", got)
+	}
+}
