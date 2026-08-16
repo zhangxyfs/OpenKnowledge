@@ -208,3 +208,50 @@ func TestCaptureLoad(t *testing.T) {
 		t.Fatalf("capture load %+v", cfg.Capture)
 	}
 }
+
+func TestGateConfigDefaultAndOverride(t *testing.T) {
+	dir := t.TempDir()
+	global := filepath.Join(dir, "global.toml")
+	project := filepath.Join(dir, "project.toml")
+	// 全缺省：门控默认启用、无 extra
+	cfg, err := LoadMerged(project, global)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Retrieve.Gate.Enabled || len(cfg.Retrieve.Gate.ExtraPhrases) != 0 {
+		t.Fatalf("unexpected defaults %+v", cfg.Retrieve.Gate)
+	}
+	// 全局关、项目缺键 → 继承全局 false；extra 来自全局
+	if err := os.WriteFile(global, []byte("[retrieve.gate]\nenabled = false\nextra_phrases = [\"走起\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = LoadMerged(project, global)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Retrieve.Gate.Enabled || len(cfg.Retrieve.Gate.ExtraPhrases) != 1 || cfg.Retrieve.Gate.ExtraPhrases[0] != "走起" {
+		t.Fatalf("global override failed %+v", cfg.Retrieve.Gate)
+	}
+	// 项目显式开 → 覆盖全局
+	if err := os.WriteFile(project, []byte("[retrieve.gate]\nenabled = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = LoadMerged(project, global)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Retrieve.Gate.Enabled {
+		t.Fatalf("project override failed %+v", cfg.Retrieve.Gate)
+	}
+	// 项目清掉 → 重新继承全局 false
+	if err := os.WriteFile(project, []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = LoadMerged(project, global)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Retrieve.Gate.Enabled {
+		t.Fatalf("project 缺键应继承全局 %+v", cfg.Retrieve.Gate)
+	}
+}
