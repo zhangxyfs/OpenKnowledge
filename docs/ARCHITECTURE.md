@@ -236,7 +236,7 @@ func (e Embedding) ResolvedAPIKey() string  // api_key 字段 > api_key_env 环�
 
 ### 5.6 index/retrieve — 索引化混合检索（db.go 138 + sync.go 240 + query.go 138 + retrieve.go 44 行）
 
-检索不再逐文件扫描 Markdown，而是查询 SQLite 索引库 `kb.db`（位于各项目 KB 根目录；entries/entries_fts/vectors 之外另有 `meta(key,value)` 表记录建向量的模型身份 `embedding_model`/`embedding_dim`，见 17.4）。同步按 filename+mtime 增量（枚举优先、只解析变化文件）；查询为 `score = α·归一BM25 + β·余弦` 的混合打分。**草稿条目（frontmatter `draft: true`，由 `ok propose` 写入）不进 FTS 与向量，检索与注入一律排除；INDEX.md 中以【草稿】标记，批准（`ok approve` / GUI 采纳）后才参与检索**。**算法实现细节（分词、BM25、归一化、混合、降级矩阵、实测性能）见第 17 章**，配置参数见第 18 章。
+检索不再逐文件扫描 Markdown，而是查询 SQLite 索引库 `kb.db`（位于各项目 KB 根目录；entries/entries_fts/vectors 之外另有 `meta(key,value)` 表记录建向量的模型身份 `embedding_model`/`embedding_dim`，见 17.4）。同步按 filename+mtime 增量（枚举优先、只解析变化文件）；查询为准入按通道独立判定 + 融合排序：融合默认 RRF（`score = Σ 1/(rrf_k+rank)`，只看名次不看分数），`fusion = "weighted"` 回滚旧加权（`α·归一BM25 + β·余弦`）。**草稿条目（frontmatter `draft: true`，由 `ok propose` 写入）不进 FTS 与向量，检索与注入一律排除；INDEX.md 中以【草稿】标记，批准（`ok approve` / GUI 采纳）后才参与检索**。**算法实现细节（分词、BM25、归一化、混合、降级矩阵、实测性能）见第 17 章**，配置参数见第 18 章。
 
 ### 5.7 state — 会话状态（96 行）
 
@@ -796,7 +796,7 @@ go build ./...         # 编译检查
             │  Terms 分词 ──► FTS5 BM25 ─┐（准入：归一 BM25 ≥ MinScoreFloor(min_score, N)）
             │  embedding  ──► 余弦相似度 ─┤（准入：cos ≥ SemanticFloor(cos 分布, floor, min_gap)）
             ▼                             ▼
-        score = α·kw + β·cos 只排序；准入任一通道达标即可 → top_n → 摘要注入
+        准入任一通道达标即可 → RRF 名次融合（weighted 可回滚）只排序 → top_n → 摘要注入
 ```
 
 ### 17.2 分词器（`retrieve.Terms`）
@@ -849,6 +849,7 @@ WHERE entries_fts MATCH ? AND e.mandatory = 0
   3. **长度归一**：长 summary/body 不再天然占优。
 - **归一化**：SQLite 的 `bm25()` 返回**负值**（越小越好），取 `kw = -rank`
   后用 `kw/(kw+6)` 压缩到 [0,1)——与余弦同量纲，α/β 才有真实意义。
+  注：归一化仍用于关键词通道准入判定；v2.17.0 起融合默认改 RRF（只看名次），α/β 仅 `fusion = "weighted"` 回滚档生效。
 
 ### 17.4 语义通道：向量余弦
 
@@ -862,7 +863,8 @@ WHERE entries_fts MATCH ? AND e.mandatory = 0
 ### 17.5 准入与排序（v2.16.0 起分离）
 
 ```
-score = α · normBM25 + β · cosine        （α、β 默认 1.0，只用于排序）
+融合（只用于排序）：rrf（默认）score = Σ_channel 1/(rrf_k + rank)，rrf_k 默认 60
+                  weighted（回滚档）score = α · normBM25 + β · cosine
 ```
 
 **准入按通道独立判定**（`QueryEx`，满足其一即注入）：
@@ -973,8 +975,10 @@ os.ReadDir(knowledge/)                # 只拿文件名，不读内容
 | `embedding.timeout_sec` | `5` | 必须小于 hook 配置的 10s，保证 prompt hook 不超时；builtin 未就绪立即降级不占预算 |
 | ~~换模型重建~~ | — | 不再需要手删 kb.db：身份不符自动跳过语义通道，`ok index` 检测切换自动清向量全量重建 |
 | `inject.max_tokens` | `1500` | 单次注入预算（字符数÷2 估算）；mandatory 多/条目长则调大 |
-| `retrieve.alpha` | `1.0` | 关键词分权重。术语精确的场景（错误码、命令名）可调大 |
-| `retrieve.beta` | `1.0` | 语义分权重。问法多变的场景可调大（前提是 embedding 质量好） |
+| `retrieve.alpha` | `1.0` | 关键词分权重。术语精确的场景（错误码、命令名）可调大（仅 fusion=weighted 生效） |
+| `retrieve.beta` | `1.0` | 语义分权重。问法多变的场景可调大（前提是 embedding 质量好）（仅 fusion=weighted 生效） |
+| `retrieve.fusion` | `rrf` | 融合方式：rrf（默认，按名次融合，模型无关）或 weighted（旧 α/β 加权回滚档） |
+| `retrieve.rrf_k` | `60` | RRF 名次平滑常数（仅 fusion=rrf 生效） |
 | `retrieve.top_n` | `3` | 每次最多注入条数；调大注意挤占 `max_tokens` 预算 |
 
 ### 18.2 项目配置 `~/.openknowledge/projects/<名>/config.toml`
