@@ -40,6 +40,10 @@ CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
 CREATE TABLE IF NOT EXISTS meta(
   key TEXT PRIMARY KEY, value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS entry_events(
+  filename TEXT NOT NULL, kind TEXT NOT NULL, ts INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_entry_events_filename_ts ON entry_events(filename, ts);
 `
 
 // DB 是知识索引库句柄。

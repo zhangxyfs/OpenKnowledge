@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"openknowledge/internal/embed"
 	"openknowledge/internal/entry"
@@ -251,6 +252,8 @@ func (db *DB) Sync(dir string, client embed.Client) error {
 			return err
 		}
 	}
+	// 顺带 prune 60 天前的条目事件（统计性数据，失败不阻断 Sync）
+	_ = db.PruneEvents(time.Now().Unix() - 60*86400)
 	// diff 为空时跳过重写（hook 热路径零写盘）；INDEX.md 缺失时总是重建
 	if !changed {
 		if _, err := os.Stat(filepath.Join(filepath.Dir(dir), "INDEX.md")); err == nil {
