@@ -294,6 +294,20 @@ func relativize(pc *project.Context, abs string) string {
 	return ""
 }
 
+// knowledgeBase 判定路径是否位于知识库目录内，是则返回其 basename（已随
+// NormalizePath 转小写；与 InjectedKnowledge 的比对用 EqualFold）。
+func knowledgeBase(pc *project.Context, abs string) (string, bool) {
+	if abs == "" {
+		return "", false
+	}
+	normAbs := registry.NormalizePath(abs)
+	kd := registry.NormalizePath(pc.Store.KnowledgeDir())
+	if strings.HasPrefix(normAbs, kd+"/") {
+		return filepath.Base(normAbs), true
+	}
+	return "", false
+}
+
 // HandleStop 解析 hook 事件，按 CheckStop 评估结果阻断：纯文本格式 stderr + exit 2
 // （kimi/pi）；claude 格式 stdout decision:block JSON + exit 0。
 // enforce 硬阻断（blockedRule 非空）在阻断输出前落 MarkBlocked——MarkBlocked 所有权

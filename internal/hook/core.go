@@ -58,6 +58,21 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 			}
 		}
 	}
+	// 采纳入账：post-tool 不开库，采纳先挂账在 session 状态；本轮反正开了库，
+	// 开头先入账（读挂账到闭包外再清空）。会话就此结束则挂账丢失——统计性
+	// 信号，可接受。fail-open：失败仅记日志。
+	var adopted []string
+	if err := state.Update(pc.Store.StateDir(), sessionID, func(st *state.Session) {
+		adopted = st.AdoptedKnowledge
+		st.AdoptedKnowledge = nil
+	}); err != nil {
+		logErr("prompt adopt load: %v", err)
+	}
+	if len(adopted) > 0 {
+		if err := db.RecordEvents(index.EventAdopted, adopted); err != nil {
+			logErr("prompt adopt record: %v", err)
+		}
+	}
 	st := state.Load(pc.Store.StateDir(), sessionID)
 	// CheckStatus 每次注入只算一次：INDEX 分支裁剪、检索分支过滤、分支上下文行
 	// 与 nudge 共用同一份 Status。分支未知（非 git）时 ws.Branch 为空，
@@ -161,6 +176,7 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 	}
 	if len(hits) > 0 {
 		restText.WriteString("## 相关知识（需要全文时读取对应文件）\n\n")
+		names := make([]string, 0, len(hits))
 		for _, h := range hits {
 			p := filepath.ToSlash(filepath.Join(pc.Store.KnowledgeDir(), h.Filename))
 			if h.Summary != "" {
@@ -168,8 +184,19 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 			} else {
 				fmt.Fprintf(&restText, "- **%s** (%s)（%s）\n", h.Title, h.Type, p)
 			}
+			names = append(names, h.Filename)
 		}
 		restText.WriteString("\n")
+		// 注入事件 + 会话挂账（采纳归因的数据源；原始大小写 basename）；
+		// fail-open：写失败仅记日志
+		if err := db.RecordEvents(index.EventInjected, names); err != nil {
+			logErr("prompt inject record: %v", err)
+		}
+		if err := state.Update(pc.Store.StateDir(), sessionID, func(st *state.Session) {
+			st.InjectedKnowledge = names
+		}); err != nil {
+			logErr("prompt inject state: %v", err)
+		}
 	}
 	// L4：mandatory 永不被截断；其余段（INDEX + 检索）在剩余预算内截断。
 	budget := pc.Config.Inject.MaxTokens
@@ -242,6 +269,22 @@ func TrackTouched(pc *project.Context, sessionID, toolName, filePath string) {
 	}
 	rel := relativize(pc, filePath)
 	if rel == "" {
+		// 知识库目录在项目路径之外：规范化路径位于 KnowledgeDir 且 basename 命中
+		// 本会话注入过的条目 → 采纳挂账（锁内读判+写，post-tool 不开库）。
+		// mandatory 粘性指针重读不经检索、不在 InjectedKnowledge，天然不计入。
+		if base, ok := knowledgeBase(pc, filePath); ok {
+			if err := state.Update(pc.Store.StateDir(), sessionID, func(st *state.Session) {
+				for _, name := range st.InjectedKnowledge {
+					if strings.EqualFold(name, base) {
+						st.AddAdopted(name)
+						break
+					}
+				}
+			}); err != nil {
+				logErr("post-tool adopt state: %v", err)
+			}
+			return
+		}
 		logErr("post-tool skip: tool=%s path=%q 不在项目 %s 的路径内", toolName, filePath, pc.Project.Name)
 		return
 	}

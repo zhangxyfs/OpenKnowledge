@@ -325,3 +325,79 @@ func TestInjectRRFIgnoresAlphaBetaHint(t *testing.T) {
 	}
 }
 
+
+// TestAdoptionLoop 注入→采纳全链路：检索注入挂账 InjectedKnowledge →
+// post-tool 读知识库文件记 AdoptedKnowledge → 下一轮 prompt 开头入账
+// entry_events(adopted)；mandatory 重读与项目外路径不计入。
+func TestAdoptionLoop(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	writeEntry(t, kbRoot, "规约.md", "---\ntitle: 架构规约\ntype: reference\nmandatory: true\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\n永远先跑 gofmt。\n")
+	writeEntry(t, kbRoot, "检索.md", "---\ntitle: 检索经验\ntype: note\ntags: []\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\n独角兽紫晶 RetrievalQuirk 词。\n")
+	pc, err := project.FromCwd(projDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stateDir := filepath.Join(kbRoot, "state")
+	// 第一轮：检索注入 → InjectedKnowledge 挂账 + injected 事件
+	out := InjectForPrompt(pc, "s-adopt", projDir, "RetrievalQuirk 是什么")
+	if !strings.Contains(out, "检索经验") {
+		t.Fatalf("首轮应注入检索命中: %q", out)
+	}
+	st := state.Load(stateDir, "s-adopt")
+	if len(st.InjectedKnowledge) != 1 || st.InjectedKnowledge[0] != "检索.md" {
+		t.Fatalf("InjectedKnowledge 挂账失败: %+v", st.InjectedKnowledge)
+	}
+	// post-tool 读知识库内已注入条目 → 采纳挂账（知识库目录在项目路径之外）
+	TrackTouched(pc, "s-adopt", "read_file", filepath.Join(kbRoot, "knowledge", "检索.md"))
+	st = state.Load(stateDir, "s-adopt")
+	if len(st.AdoptedKnowledge) != 1 || st.AdoptedKnowledge[0] != "检索.md" {
+		t.Fatalf("采纳挂账失败: %+v", st.AdoptedKnowledge)
+	}
+	// mandatory 粘性指针重读不计入（mandatory 不经检索，不在 InjectedKnowledge）
+	TrackTouched(pc, "s-adopt", "read_file", filepath.Join(kbRoot, "knowledge", "规约.md"))
+	st = state.Load(stateDir, "s-adopt")
+	if len(st.AdoptedKnowledge) != 1 {
+		t.Fatalf("mandatory 重读不应计入采纳: %+v", st.AdoptedKnowledge)
+	}
+	// 未注入过的知识库文件不计入
+	writeEntry(t, kbRoot, "别的.md", "---\ntitle: 别的\ntype: note\ntags: []\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\n无关。\n")
+	TrackTouched(pc, "s-adopt", "read_file", filepath.Join(kbRoot, "knowledge", "别的.md"))
+	st = state.Load(stateDir, "s-adopt")
+	if len(st.AdoptedKnowledge) != 1 {
+		t.Fatalf("未注入条目不挂账: %+v", st.AdoptedKnowledge)
+	}
+	// 第二轮 prompt：开头入账 → entry_events 有 adopted 行，挂账清空
+	_ = InjectForPrompt(pc, "s-adopt", projDir, "随便问问")
+	st = state.Load(stateDir, "s-adopt")
+	if len(st.AdoptedKnowledge) != 0 {
+		t.Fatalf("入账后挂账应清空: %+v", st.AdoptedKnowledge)
+	}
+	db, err := index.Open(filepath.Join(kbRoot, "kb.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	stats, err := db.FeedbackStats(30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := stats["检索.md"]
+	if s.Adoptions != 1 {
+		t.Fatalf("entry_events 应有 1 条 adopted: %+v", s)
+	}
+	if s.Injections < 1 {
+		t.Fatalf("entry_events 应有 injected 行: %+v", s)
+	}
+	// 回归：项目内文件仍走 Touched（既有行为不变）
+	TrackTouched(pc, "s-adopt", "write_file", filepath.Join(projDir, "a.go"))
+	st = state.Load(stateDir, "s-adopt")
+	found := false
+	for _, v := range st.Touched {
+		if v == "a.go" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("项目内文件仍应记 Touched: %+v", st.Touched)
+	}
+}
