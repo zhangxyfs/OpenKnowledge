@@ -264,7 +264,7 @@ func afterAdd(pc *project.Context, stdout, stderr io.Writer) int {
 	if c := embeddingClientForIndex(pc); c != nil {
 		client = c
 	}
-	if err := db.Sync(pc.Store.KnowledgeDir(), client); err != nil {
+	if err := db.Sync(pc.Store.KnowledgeDir(), client, index.SyncOptions{MaxLines: pc.Config.Index.MaxLines}); err != nil {
 		var corrupt *index.CorruptEntriesError
 		switch {
 		case errors.As(err, &corrupt):
@@ -275,7 +275,7 @@ func afterAdd(pc *project.Context, stdout, stderr io.Writer) int {
 			return 1
 		default:
 			// embedding 失败：降级为只同步 INDEX，向量稍后 ok index 补齐
-			if err2 := db.Sync(pc.Store.KnowledgeDir(), nil); err2 != nil {
+			if err2 := db.Sync(pc.Store.KnowledgeDir(), nil, index.SyncOptions{MaxLines: pc.Config.Index.MaxLines}); err2 != nil {
 				fmt.Fprintln(stderr, err2)
 				if !errors.As(err2, &corrupt) {
 					return 1
@@ -401,7 +401,7 @@ func Index(args []string, stdout, stderr io.Writer) int {
 			}
 		}
 	}
-	if err := db.Sync(pc.Store.KnowledgeDir(), client); err != nil {
+	if err := db.Sync(pc.Store.KnowledgeDir(), client, index.SyncOptions{MaxLines: pc.Config.Index.MaxLines}); err != nil {
 		var corrupt *index.CorruptEntriesError
 		if errors.As(err, &corrupt) {
 			// 损坏条目已跳过、INDEX 已重建：警告到 stderr，成功流程继续
@@ -590,7 +590,7 @@ func Propose(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	defer db.Close()
-	if err := db.Sync(pc.Store.KnowledgeDir(), nil); err != nil {
+	if err := db.Sync(pc.Store.KnowledgeDir(), nil, index.SyncOptions{MaxLines: pc.Config.Index.MaxLines}); err != nil {
 		var corrupt *index.CorruptEntriesError
 		if errors.As(err, &corrupt) {
 			// 损坏条目已跳过、INDEX 已重建：警告到 stderr，成功流程继续
@@ -809,7 +809,7 @@ func WikiCmd(args []string, stdout, stderr io.Writer) int {
 		count := 0
 		var merged []string
 		if db, err := index.Open(pc.Store.KbPath()); err == nil {
-			if err := db.Sync(pc.Store.KnowledgeDir(), nil); err == nil {
+			if err := db.Sync(pc.Store.KnowledgeDir(), nil, index.SyncOptions{MaxLines: pc.Config.Index.MaxLines}); err == nil {
 				count, _ = db.WikiCount()
 			}
 			// mark 前先算 merged（与 status 同款检测，仅在基准分支上检出）；

@@ -38,7 +38,7 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 		return ""
 	}
 	defer db.Close()
-	if err := db.Sync(pc.Store.KnowledgeDir(), client); err != nil {
+	if err := db.Sync(pc.Store.KnowledgeDir(), client, index.SyncOptions{MaxLines: pc.Config.Index.MaxLines}); err != nil {
 		var corrupt *index.CorruptEntriesError
 		switch {
 		case errors.As(err, &corrupt):
@@ -50,7 +50,7 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 		default:
 			// embedding 失败：降级重试（仅同步 INDEX），保证基础注入与关键词检索不被阻断
 			logErr("prompt sync index with embedding: %v", err)
-			if err2 := db.Sync(pc.Store.KnowledgeDir(), nil); err2 != nil {
+			if err2 := db.Sync(pc.Store.KnowledgeDir(), nil, index.SyncOptions{MaxLines: pc.Config.Index.MaxLines}); err2 != nil {
 				logErr("prompt sync index: %v", err2)
 				if !errors.As(err2, &corrupt) {
 					return ""
