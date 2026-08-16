@@ -118,27 +118,36 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 	}
 	var queryVec []float32
 	var embedWarn string
-	if client != nil {
-		if vec, err := client.EmbedQuery(context.Background(), promptText); err != nil {
-			logErr("prompt embed: %v", err)
-		} else {
-			queryVec, embedWarn = embedx.QueryVec(db, client, vec)
-			if embedWarn != "" {
-				logErr("prompt embed identity: %s", embedWarn)
+	var hits []index.Hit
+	if pc.Config.Retrieve.Gate.Enabled && retrieve.Gated(promptText, pc.Config.Retrieve.Gate.ExtraPhrases) {
+		// 泛化门控：无信息量 prompt（"继续"/"好的"类）跳过检索注入段——连 embed
+		// 调用都省（每轮一次网络往返）；mandatory/INDEX/wiki nudge 不受影响。
+		// GUI 日志页可按"门控"过滤。
+		logErr("prompt gate: 泛化 prompt，跳过检索与 embed")
+	} else {
+		if client != nil {
+			if vec, err := client.EmbedQuery(context.Background(), promptText); err != nil {
+				logErr("prompt embed: %v", err)
+			} else {
+				queryVec, embedWarn = embedx.QueryVec(db, client, vec)
+				if embedWarn != "" {
+					logErr("prompt embed identity: %s", embedWarn)
+				}
 			}
 		}
-	}
-	// top_n 截断在分支过滤之后（QueryExBranch 内部保证），其他分支的差异条目
-	// 不再白白挤占名额；无 branch 标签的条目与未知分支场景不受影响。
-	hits, info, err := db.QueryExBranch(retrieve.Terms(promptText), queryVec, pc.Config.Retrieve, ws.Branch)
-	if err != nil {
-		logErr("prompt query: %v", err)
-	}
-	// 语义通道未准入任何条目（无显著头部）：记 ok.log，GUI 日志页可按"语义"过滤
-	// 查看；低对比度自定义模型可调低 retrieve.min_gap 放宽。
-	if info.SemanticRejected {
-		logErr("prompt semantic: 语义通道未准入任何条目（样本 %d，max=%.3f median=%.3f relGap=%.3f）；低对比度模型可调低 retrieve.min_gap 放宽",
-			info.Coses, info.MaxCos, info.MedianCos, info.RelGap)
+		// top_n 截断在分支过滤之后（QueryExBranch 内部保证），其他分支的差异条目
+		// 不再白白挤占名额；无 branch 标签的条目与未知分支场景不受影响。
+		h, info, err := db.QueryExBranch(retrieve.Terms(promptText), queryVec, pc.Config.Retrieve, ws.Branch)
+		if err != nil {
+			logErr("prompt query: %v", err)
+		}
+		// 语义通道未准入任何条目（无显著头部）：记 ok.log，GUI 日志页可按"语义"过滤
+		// 查看；低对比度自定义模型可调低 retrieve.min_gap 放宽。
+		if info.SemanticRejected {
+			logErr("prompt semantic: 语义通道未准入任何条目（样本 %d，max=%.3f median=%.3f relGap=%.3f）；低对比度模型可调低 retrieve.min_gap 放宽",
+				info.Coses, info.MaxCos, info.MedianCos, info.RelGap)
+		}
+		hits = h
 	}
 	if len(hits) > 0 {
 		restText.WriteString("## 相关知识（需要全文时读取对应文件）\n\n")

@@ -46,6 +46,46 @@ func TestInjectForPromptBaseAndRetrieve(t *testing.T) {
 	}
 }
 
+// TestInjectGateSkipsRetrieval 门控命中时跳过检索注入段（连查询词本身被登记为
+// 泛化短语也不例外）；关闭门控后同 prompt 恢复注入——证明跳过的是检索段而非"没命中"。
+func TestInjectGateSkipsRetrieval(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	writeEntry(t, kbRoot, "规约.md", "---\ntitle: 架构规约\ntype: reference\nmandatory: true\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\n永远先跑 gofmt。\n")
+	writeEntry(t, kbRoot, "检索.md", "---\ntitle: 检索经验\ntype: note\ntags: []\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\n独角兽紫晶 RetrievalQuirk 词。\n")
+	// 把查询词登记为 extra 泛化短语 → 门控必命中
+	cfg := "[retrieve.gate]\nenabled = true\nextra_phrases = [\"RetrievalQuirk 是什么\"]\n"
+	if err := os.WriteFile(filepath.Join(kbRoot, "config.toml"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pc, err := project.FromCwd(projDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := InjectForPrompt(pc, "s-gate", projDir, "RetrievalQuirk 是什么")
+	// 注：不断言标题"检索经验"缺席——首轮基础注入的 INDEX 主列表合法地列出全部
+	// 条目标题（门控按设计不影响 INDEX）；检索段的判据是"相关知识"小节与条目路径。
+	if strings.Contains(out, "相关知识") || strings.Contains(out, "检索.md") {
+		t.Errorf("门控命中不应注入检索段，got: %q", out)
+	}
+	if !strings.Contains(out, "永远先跑 gofmt") {
+		t.Errorf("门控不应影响 mandatory 基础注入，got: %q", out)
+	}
+	// 对照：关闭门控后同 prompt 应命中检索
+	cfg2 := "[retrieve.gate]\nenabled = false\nextra_phrases = [\"RetrievalQuirk 是什么\"]\n"
+	if err := os.WriteFile(filepath.Join(kbRoot, "config.toml"), []byte(cfg2), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pc2, err := project.FromCwd(projDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out2 := InjectForPrompt(pc2, "s-gate-off", projDir, "RetrievalQuirk 是什么")
+	// 对照组同样以"相关知识"小节为判据（标题在 INDEX 中恒在，不足以证明检索恢复）
+	if !strings.Contains(out2, "相关知识") || !strings.Contains(out2, "检索.md") {
+		t.Errorf("关闭门控后应恢复检索注入，got: %q", out2)
+	}
+}
+
 // TestInjectSemanticDegradeHintOnce 语义检索退化（模型身份不符）时，注入末尾
 // 应附提示（每会话一次），把"退化为关键词检索、可 ok index 重建"暴露给用户/模型。
 func TestInjectSemanticDegradeHintOnce(t *testing.T) {
