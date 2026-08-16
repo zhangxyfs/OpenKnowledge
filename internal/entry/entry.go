@@ -17,9 +17,13 @@ type Entry struct {
 	Tags      []string `yaml:"tags"`
 	Mandatory bool     `yaml:"mandatory"`
 	Draft     bool     `yaml:"draft"` // 草稿不参与检索注入，INDEX.md 标【草稿】
-	Summary   string   `yaml:"summary"`
-	Body      string   `yaml:"-"`
-	Path      string   `yaml:"-"`
+	// Archived 归档条目：不进 INDEX 主列表，仍保留在库中可检索
+	Archived bool `yaml:"archived,omitempty"`
+	// Created 创建日期（YYYY-MM-DD），供归档候选报告；历史条目缺省为空
+	Created string   `yaml:"created,omitempty"`
+	Summary string   `yaml:"summary"`
+	Body    string   `yaml:"-"`
+	Path    string   `yaml:"-"`
 }
 
 var validTypes = map[string]bool{"rule": true, "pitfall": true, "note": true, "reference": true}

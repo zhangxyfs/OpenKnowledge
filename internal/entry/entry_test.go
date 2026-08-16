@@ -118,6 +118,25 @@ func TestLoadTolerant(t *testing.T) {
 	}
 }
 
+func TestParseArchivedAndCreated(t *testing.T) {
+	e, err := Parse([]byte("---\ntitle: 旧坑\ntype: pitfall\narchived: true\ncreated: 2026-01-02\nsummary: s\n---\n\n正文\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !e.Archived || e.Created != "2026-01-02" {
+		t.Fatalf("archived=%v created=%q", e.Archived, e.Created)
+	}
+	// 零值序列化回写不多出 archived/created 键
+	e2, err := Parse([]byte("---\ntitle: 新坑\ntype: note\nsummary: s\n---\n\n正文\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := string(e2.Serialize())
+	if strings.Contains(out, "archived") || strings.Contains(out, "created") {
+		t.Fatalf("omitempty 失效: %q", out)
+	}
+}
+
 func TestDraftRoundtrip(t *testing.T) {
 	e := &Entry{Title: "草稿条目", Type: "note", Summary: "s", Draft: true, Body: "正文"}
 	data := e.Serialize()
