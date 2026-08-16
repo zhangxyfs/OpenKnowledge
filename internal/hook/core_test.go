@@ -301,3 +301,27 @@ func TestReinjectTurnsPeriodic(t *testing.T) {
 	}
 }
 
+// TestInjectRRFIgnoresAlphaBetaHint rrf 模式下配置了非默认 alpha/beta 时，
+// 注入流程应记一行 ok.log 提示被忽略（仅 weighted 生效）。
+func TestInjectRRFIgnoresAlphaBetaHint(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	writeEntry(t, kbRoot, "检索.md", "---\ntitle: 检索经验\ntype: note\ntags: []\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\n独角兽紫晶 RetrievalQuirk 词。\n")
+	// rrf（缺省）+ 非默认 alpha → 应提示被忽略
+	cfg := "[retrieve]\nalpha = 2.0\n"
+	if err := os.WriteFile(filepath.Join(kbRoot, "config.toml"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pc, err := project.FromCwd(projDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = InjectForPrompt(pc, "s-fusion", projDir, "RetrievalQuirk 是什么")
+	logData, err := os.ReadFile(filepath.Join(registry.Home(), "ok.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(logData), "alpha/beta") {
+		t.Errorf("rrf 模式下非默认 alpha 应记 ok.log 提示，got: %q", logData)
+	}
+}
+

@@ -125,6 +125,12 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 		// GUI 日志页可按"门控"过滤。
 		logErr("prompt gate: 门控命中，泛化 prompt 跳过检索与 embed")
 	} else {
+		if pc.Config.Retrieve.Fusion != "weighted" &&
+			(pc.Config.Retrieve.Alpha != 1 || pc.Config.Retrieve.Beta != 1) {
+			// rrf 模式下 alpha/beta 不生效（仅 weighted 回滚档读取）——每 prompt
+			// 一行属自限性提示：用户删掉配置即消失。GUI 日志页可按"fusion"过滤。
+			logErr("prompt fusion: rrf 模式下 alpha/beta 配置被忽略（仅 weighted 生效），建议从 config.toml 移除")
+		}
 		if client != nil {
 			if vec, err := client.EmbedQuery(context.Background(), promptText); err != nil {
 				logErr("prompt embed: %v", err)

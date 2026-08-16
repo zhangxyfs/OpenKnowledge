@@ -338,6 +338,9 @@ func Search(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	terms := retrieve.Terms(query)
+	if pc.Config.Retrieve.Fusion != "weighted" && (pc.Config.Retrieve.Alpha != 1 || pc.Config.Retrieve.Beta != 1) {
+		fmt.Fprintf(os.Stderr, "[OpenKnowledge] rrf 模式下 alpha/beta 配置被忽略（仅 weighted 生效）\n")
+	}
 	hits, info, err := db.QueryEx(terms, queryVec, pc.Config.Retrieve)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
@@ -348,7 +351,7 @@ func Search(args []string, stdout, stderr io.Writer) int {
 			info.Coses, info.MaxCos, info.MedianCos, info.RelGap)
 	}
 	for _, h := range hits {
-		fmt.Fprintf(stdout, "%.2f\t%s (%s)\n", h.Score, h.Title, h.Filename)
+		fmt.Fprintf(stdout, "%.4f\t%s (%s)\n", h.Score, h.Title, h.Filename)
 	}
 	// wiki 覆盖兜底提示：无 wiki 条目命中该主题时，提示可经 openknowledge-wiki 补充。
 	// fail-open：检查失败不提示，search 主输出格式不变。
