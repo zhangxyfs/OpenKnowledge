@@ -207,6 +207,7 @@
     loadEntries();
     runSearch();
     refreshCapture();
+    state.gate = null; // 项目切换：清空旧项目短语缓存，防弹窗展示/串写旧项目数据
     refreshGate();
   });
 

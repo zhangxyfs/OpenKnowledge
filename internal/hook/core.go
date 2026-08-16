@@ -123,7 +123,7 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 		// 泛化门控：无信息量 prompt（"继续"/"好的"类）跳过检索注入段——连 embed
 		// 调用都省（每轮一次网络往返）；mandatory/INDEX/wiki nudge 不受影响。
 		// GUI 日志页可按"门控"过滤。
-		logErr("prompt gate: 泛化 prompt，跳过检索与 embed")
+		logErr("prompt gate: 门控命中，泛化 prompt 跳过检索与 embed")
 	} else {
 		if client != nil {
 			if vec, err := client.EmbedQuery(context.Background(), promptText); err != nil {
