@@ -68,7 +68,6 @@ func (db *DB) Sync(dir string, client embed.Client, opts ...SyncOptions) error {
 	if len(opts) > 0 {
 		o = opts[0]
 	}
-	_ = o // Task 5 起用于 rebuildIndex
 	// Windows 上 DirEntry.Info 复用 readdir 数据，无额外系统调用
 	dirents, err := os.ReadDir(dir)
 	if err != nil {
@@ -275,7 +274,7 @@ func (db *DB) Sync(dir string, client embed.Client, opts ...SyncOptions) error {
 			return nil
 		}
 	}
-	if err := db.rebuildIndex(dir); err != nil {
+	if err := db.rebuildIndex(dir, o.MaxLines); err != nil {
 		return err
 	}
 	if len(skipped) > 0 {
@@ -314,43 +313,96 @@ func dedupSummary(title, summary string) string {
 	return summary
 }
 
-// rebuildIndex 从 entries 表重写 <dir>/../INDEX.md（标题+类型+tags+摘要的固定行格式）；
-// 草稿行标题前加【草稿】前缀。
-func (db *DB) rebuildIndex(dir string) error {
-	rows, err := db.sql.Query(`SELECT title, type, tags, summary, draft FROM entries ORDER BY filename`)
+// indexRow 是 rebuildIndex 主列表渲染用的条目视图。
+type indexRow struct {
+	filename, title, typ, tags, summary string
+	draft, weight                       int
+	mtime                               int64
+}
+
+// rebuildIndex 从 entries 表重写 <dir>/../INDEX.md。主列表按价值排序
+// （30 天窗口 采纳×2+注入×1 降序，平局按 mtime 降序再按 filename 升序；
+// 草稿沉底），超过 maxLines 的尾部折叠为一行可检索提示；archived 条目
+// 不进主列表（仍保留在库可检索）。wiki 目录节/分支差异节维持原有输出。
+func (db *DB) rebuildIndex(dir string, maxLines int) error {
+	if maxLines <= 0 {
+		maxLines = 50
+	}
+	rows, err := db.sql.Query(`SELECT filename, title, type, tags, summary, draft, archived, mtime FROM entries`)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
-	var b strings.Builder
-	b.WriteString("# 知识索引\n\n")
+	// FeedbackStats 失败静默降级（与 PruneEvents 一致）：权重全零退回 mtime/filename 序
+	stats, _ := db.FeedbackStats(30)
+	var main, drafts []indexRow
 	for rows.Next() {
-		var title, typ, tags, summary string
-		var draft int
-		if err := rows.Scan(&title, &typ, &tags, &summary, &draft); err != nil {
+		var r indexRow
+		var archived int
+		if err := rows.Scan(&r.filename, &r.title, &r.typ, &r.tags, &r.summary, &r.draft, &archived, &r.mtime); err != nil {
+			_ = rows.Close()
 			return err
 		}
+		if archived != 0 {
+			continue
+		}
 		// 已转正的 wiki 条目只进 Wiki 目录节（带链接），主列表不重复
-		if draft == 0 && strings.Contains(tags, "wiki") {
+		if r.draft == 0 && strings.Contains(r.tags, "wiki") {
 			continue
 		}
 		// 带 branch: 标签的条目（无论类型）不进全分支共享的主列表：
 		// branch 标签语义=分支专属——wiki 差异条目已在下方差异节，
 		// 非 wiki 分支条目仍可按分支检索命中，只是不进共享目录
-		if BranchOf(splitTags(tags)) != "" {
+		if BranchOf(splitTags(r.tags)) != "" {
 			continue
 		}
-		if draft != 0 {
-			title = "【草稿】" + title
-		}
-		if sum := dedupSummary(title, summary); sum != "" {
-			fmt.Fprintf(&b, "- **%s** (%s) [%s] — %s\n", title, typ, tags, sum)
+		s := stats[r.filename]
+		r.weight = 2*s.Adoptions + s.Injections
+		if r.draft != 0 {
+			drafts = append(drafts, r)
 		} else {
-			fmt.Fprintf(&b, "- **%s** (%s) [%s]\n", title, typ, tags)
+			main = append(main, r)
 		}
 	}
 	if err := rows.Err(); err != nil {
+		_ = rows.Close()
 		return err
+	}
+	_ = rows.Close()
+	byValue := func(rs []indexRow) {
+		sort.SliceStable(rs, func(i, j int) bool {
+			if rs[i].weight != rs[j].weight {
+				return rs[i].weight > rs[j].weight
+			}
+			if rs[i].mtime != rs[j].mtime {
+				return rs[i].mtime > rs[j].mtime
+			}
+			return rs[i].filename < rs[j].filename
+		})
+	}
+	byValue(main)
+	byValue(drafts)
+	ordered := append(main, drafts...)
+
+	var b strings.Builder
+	b.WriteString("# 知识索引\n\n")
+	shown := ordered
+	var folded []indexRow
+	if len(ordered) > maxLines {
+		shown, folded = ordered[:maxLines], ordered[maxLines:]
+	}
+	for _, r := range shown {
+		title := r.title
+		if r.draft != 0 {
+			title = "【草稿】" + title
+		}
+		if sum := dedupSummary(r.title, r.summary); sum != "" {
+			fmt.Fprintf(&b, "- **%s** (%s) [%s] — %s\n", title, r.typ, r.tags, sum)
+		} else {
+			fmt.Fprintf(&b, "- **%s** (%s) [%s]\n", title, r.typ, r.tags)
+		}
+	}
+	if len(folded) > 0 {
+		writeFoldedLine(&b, folded)
 	}
 	if wikiEntries, err := db.WikiEntries(); err == nil && len(wikiEntries) > 0 {
 		writeWikiLine := func(b *strings.Builder, we WikiEntry) {
@@ -382,4 +434,40 @@ func (db *DB) rebuildIndex(dir string) error {
 		}
 	}
 	return fsx.WriteFile(filepath.Join(filepath.Dir(dir), "INDEX.md"), []byte(b.String()), 0o644)
+}
+
+// writeFoldedLine 渲染溢出折叠行：条数 + 被折叠条目 tags 计数降序前 5。
+func writeFoldedLine(b *strings.Builder, folded []indexRow) {
+	counts := map[string]int{}
+	for _, r := range folded {
+		for _, tg := range splitTags(r.tags) {
+			counts[tg]++
+		}
+	}
+	if len(counts) == 0 {
+		fmt.Fprintf(b, "- 另有 %d 条未列出，可用关键词/向量检索命中\n", len(folded))
+		return
+	}
+	type kv struct {
+		tag string
+		n   int
+	}
+	pairs := make([]kv, 0, len(counts))
+	for tg, n := range counts {
+		pairs = append(pairs, kv{tg, n})
+	}
+	sort.Slice(pairs, func(i, j int) bool {
+		if pairs[i].n != pairs[j].n {
+			return pairs[i].n > pairs[j].n
+		}
+		return pairs[i].tag < pairs[j].tag
+	})
+	if len(pairs) > 5 {
+		pairs = pairs[:5]
+	}
+	parts := make([]string, len(pairs))
+	for i, p := range pairs {
+		parts[i] = fmt.Sprintf("%s×%d", p.tag, p.n)
+	}
+	fmt.Fprintf(b, "- 另有 %d 条未列出（tags 分布：%s），可用关键词/向量检索命中\n", len(folded), strings.Join(parts, ", "))
 }
