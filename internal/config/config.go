@@ -97,6 +97,11 @@ type Inject struct {
 	ReinjectTurns int `toml:"reinject_turns"`
 }
 
+// Index 控制 INDEX.md 渲染预算。
+type Index struct {
+	MaxLines int `toml:"max_lines"` // 主列表最大行数，默认 50；<=0 按 50（渲染处归一）
+}
+
 // RetrieveGate 控制泛化 prompt 门控：内置短语表编译进二进制（随版本演进，
 // 不物化进 config.toml），用户在 GUI 维护的只是 extra_phrases 追加层。
 type RetrieveGate struct {
@@ -213,6 +218,7 @@ type Config struct {
 	Hooks      Hooks         `toml:"hooks"`
 	Reasonix   Reasonix      `toml:"reasonix"`
 	Provenance Provenance    `toml:"provenance"`
+	Index      Index         `toml:"index"`
 }
 
 func Default() Config {
@@ -229,6 +235,7 @@ func Default() Config {
 		Wiki:       Wiki{StaleCommits: 20},
 		Hooks:      Hooks{TimeoutSec: 10},
 		Provenance: Provenance{AutoBorn: true},
+		Index:      Index{MaxLines: 50},
 	}
 }
 
