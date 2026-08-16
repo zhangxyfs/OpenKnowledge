@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"openknowledge/internal/agentx"
 	"openknowledge/internal/backup"
@@ -1094,7 +1095,7 @@ func cleanGatePhrases(in []string) ([]string, error) {
 		if folded == "" {
 			return nil, fmt.Errorf("短语不能为空")
 		}
-		if len(folded) > 64 {
+		if utf8.RuneCountInString(folded) > 64 {
 			return nil, fmt.Errorf("短语 %q 超过 64 字符", folded)
 		}
 		n := retrieve.Normalize(folded)

@@ -1454,6 +1454,18 @@ func TestGateRoundTrip(t *testing.T) {
 	if code != 400 {
 		t.Fatalf("超长短语应 400, got %d", code)
 	}
+	// 反向钉住：64 个汉字（192 字节）→ 应被接受，证明按字符（rune）而非字节计
+	code, data = do(t, "POST", srv.URL+"/api/gate", testToken,
+		map[string]any{"project": "demo", "extra": []string{strings.Repeat("汉", 64)}})
+	if code != 200 {
+		t.Fatalf("64 字符短语应 200, got %d, body %s", code, data)
+	}
+	// 恢复 extra，避免影响后续"extra 应保留"断言
+	code, _ = do(t, "POST", srv.URL+"/api/gate", testToken,
+		map[string]any{"project": "demo", "extra": []string{"走起"}})
+	if code != 200 {
+		t.Fatalf("恢复 extra: status = %d", code)
+	}
 	// 校验：空短语 → 400
 	code, _ = do(t, "POST", srv.URL+"/api/gate", testToken,
 		map[string]any{"project": "demo", "extra": []string{"   "}})
