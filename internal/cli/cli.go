@@ -339,7 +339,7 @@ func Search(args []string, stdout, stderr io.Writer) int {
 	}
 	terms := retrieve.Terms(query)
 	if pc.Config.Retrieve.Fusion != "weighted" && (pc.Config.Retrieve.Alpha != 1 || pc.Config.Retrieve.Beta != 1) {
-		fmt.Fprintf(os.Stderr, "[OpenKnowledge] rrf 模式下 alpha/beta 配置被忽略（仅 weighted 生效）\n")
+		fmt.Fprintf(stderr, "[OpenKnowledge] rrf 模式下 alpha/beta 配置被忽略（仅 weighted 生效）\n")
 	}
 	hits, info, err := db.QueryEx(terms, queryVec, pc.Config.Retrieve)
 	if err != nil {
