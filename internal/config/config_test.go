@@ -255,3 +255,50 @@ func TestGateConfigDefaultAndOverride(t *testing.T) {
 		t.Fatalf("project 缺键应继承全局 %+v", cfg.Retrieve.Gate)
 	}
 }
+
+func TestFusionConfigDefaultAndOverride(t *testing.T) {
+	dir := t.TempDir()
+	global := filepath.Join(dir, "global.toml")
+	project := filepath.Join(dir, "project.toml")
+	// 全缺省：fusion=rrf、rrf_k=60
+	cfg, err := LoadMerged(project, global)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Retrieve.Fusion != "rrf" || cfg.Retrieve.RrfK != 60 {
+		t.Fatalf("unexpected defaults %+v", cfg.Retrieve)
+	}
+	// 全局覆盖，项目缺键继承
+	if err := os.WriteFile(global, []byte("[retrieve]\nfusion = \"weighted\"\nrrf_k = 30\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = LoadMerged(project, global)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Retrieve.Fusion != "weighted" || cfg.Retrieve.RrfK != 30 {
+		t.Fatalf("global override failed %+v", cfg.Retrieve)
+	}
+	// 项目覆盖回 rrf
+	if err := os.WriteFile(project, []byte("[retrieve]\nfusion = \"rrf\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = LoadMerged(project, global)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Retrieve.Fusion != "rrf" || cfg.Retrieve.RrfK != 30 {
+		t.Fatalf("project override failed %+v", cfg.Retrieve)
+	}
+	// 项目清掉 → 重新继承全局
+	if err := os.WriteFile(project, []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = LoadMerged(project, global)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Retrieve.Fusion != "weighted" {
+		t.Fatalf("project 缺键应继承全局 %+v", cfg.Retrieve)
+	}
+}

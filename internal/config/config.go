@@ -121,6 +121,13 @@ type Retrieve struct {
 	// 自定义/低对比度 embedding 模型整体余弦偏低时，可适当调低本值放宽语义准入。
 	// 0 或负数表示关闭阈值（旧语义：score>0 即注入）。宁缺毋滥，不强行凑 top_n。
 	MinScore float64 `toml:"min_score"`
+	// Fusion 是融合方式：rrf（默认，Reciprocal Rank Fusion，只看各准入通道内
+	// 名次不看分数——换 embedding 模型后余弦分布漂移不影响平衡）| weighted
+	//（旧行为回滚档：score = α·归一BM25 + β·余弦）。准入逻辑两模式完全一致；
+	// Alpha/Beta 仅 weighted 生效。缺省/非法值一律按 rrf（fail-open）。
+	Fusion string `toml:"fusion"`
+	// RrfK 是 RRF 名次平滑常数（默认 60，Zep 同款惯例）；仅 rrf 模式生效，<=0 按 60。
+	RrfK int `toml:"rrf_k"`
 	// Gate 是泛化 prompt 门控（[retrieve.gate] 子表）：命中内置/extra 短语的
 	// prompt 跳过检索注入与 embed 调用。Enabled 默认 true（见 Default）；
 	// ExtraPhrases 是内置短语表之外的追加层，两层取并集生效。
@@ -178,7 +185,7 @@ func Default() Config {
 	return Config{
 		Embedding:  Embedding{TimeoutSec: 5},
 		Inject:     Inject{MaxTokens: 800},
-		Retrieve:   Retrieve{Alpha: 1.0, Beta: 1.0, TopN: 2, MinScore: 0.5, MinGap: 0.25, Gate: RetrieveGate{Enabled: true}},
+		Retrieve:   Retrieve{Alpha: 1.0, Beta: 1.0, TopN: 2, MinScore: 0.5, MinGap: 0.25, Fusion: "rrf", RrfK: 60, Gate: RetrieveGate{Enabled: true}},
 		Capture:    Capture{Mode: "propose", TurnInterval: 5},
 		Wiki:       Wiki{StaleCommits: 20},
 		Hooks:      Hooks{TimeoutSec: 10},
