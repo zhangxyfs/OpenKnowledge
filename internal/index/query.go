@@ -82,6 +82,7 @@ type Hit struct {
 	Body     string
 	Tags     []string // 供注入层按分支过滤
 	Score    float64
+	Mtime    int64 // 文件系统 mtime（Unix 秒），时效信号用
 }
 
 // buildMatch 构造 FTS5 MATCH 串：每个词元双引号包裹（防注入）后以 OR 连接。
