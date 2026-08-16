@@ -153,6 +153,10 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 			logErr("prompt semantic: 语义通道未准入任何条目（样本 %d，max=%.3f median=%.3f relGap=%.3f）；低对比度模型可调低 retrieve.min_gap 放宽",
 				info.Coses, info.MaxCos, info.MedianCos, info.RelGap)
 		}
+		// 时效衰减改变了排序：记 ok.log，GUI 日志页可按"时效"过滤
+		if len(info.RecencyShifted) > 0 {
+			logErr("prompt recency: 时效衰减改变排序（%s）", strings.Join(info.RecencyShifted, "、"))
+		}
 		hits = h
 	}
 	if len(hits) > 0 {

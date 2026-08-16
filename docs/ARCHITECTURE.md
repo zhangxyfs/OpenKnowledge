@@ -867,6 +867,8 @@ WHERE entries_fts MATCH ? AND e.mandatory = 0
                   weighted（回滚档）score = α · normBM25 + β · cosine
 ```
 
+融合分之后、排序之前乘时效系数（`retrieve.recency`，默认启用）：mtime age ≤ fresh 天 → 1.0，≥ stale 天 → floor 0.85，中间线性；窗口按条目类型分（[retrieve.recency.windows]）。不参与准入。
+
 **准入按通道独立判定**（`QueryEx`，满足其一即注入）：
 
 1. **关键词通道**：归一 BM25 分（未乘 α）≥ `MinScoreFloor(min_score, N)`——
@@ -979,6 +981,8 @@ os.ReadDir(knowledge/)                # 只拿文件名，不读内容
 | `retrieve.beta` | `1.0` | 语义分权重。问法多变的场景可调大（前提是 embedding 质量好）（仅 fusion=weighted 生效） |
 | `retrieve.fusion` | `rrf` | 融合方式：rrf（默认，按名次融合，模型无关）或 weighted（旧 α/β 加权回滚档） |
 | `retrieve.rrf_k` | `60` | RRF 名次平滑常数（仅 fusion=rrf 生效） |
+| `retrieve.recency.enabled` / `floor` | `true` / `0.85` | 时效信号：按 mtime 新鲜度给融合分乘系数（不参与准入）；floor 为陈旧系数下限 |
+| `retrieve.recency.windows.*` | rule/reference `[180,730]`、pitfall `[90,365]`、note `[60,180]` | 各类型 `[fresh_days, stale_days]` 窗口；全零或非法 = 该类型不衰减 |
 | `retrieve.top_n` | `3` | 每次最多注入条数；调大注意挤占 `max_tokens` 预算 |
 
 ### 18.2 项目配置 `~/.openknowledge/projects/<名>/config.toml`

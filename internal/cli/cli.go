@@ -350,6 +350,9 @@ func Search(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "语义通道未准入任何条目（样本 %d，max=%.3f median=%.3f relGap=%.3f）；低对比度模型可调低 retrieve.min_gap 放宽\n",
 			info.Coses, info.MaxCos, info.MedianCos, info.RelGap)
 	}
+	if len(info.RecencyShifted) > 0 {
+		fmt.Fprintf(stderr, "时效衰减改变排序（%s）\n", strings.Join(info.RecencyShifted, "、"))
+	}
 	for _, h := range hits {
 		fmt.Fprintf(stdout, "%.4f\t%s (%s)\n", h.Score, h.Title, h.Filename)
 	}
