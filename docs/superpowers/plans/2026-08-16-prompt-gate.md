@@ -817,7 +817,7 @@ func cleanGatePhrases(in []string) ([]string, error) {
 		if folded == "" {
 			return nil, fmt.Errorf("短语不能为空")
 		}
-		if len(folded) > 64 {
+		if utf8.RuneCountInString(folded) > 64 {
 			return nil, fmt.Errorf("短语 %q 超过 64 字符", folded)
 		}
 		n := retrieve.Normalize(folded)
@@ -831,7 +831,7 @@ func cleanGatePhrases(in []string) ([]string, error) {
 }
 ```
 
-检查 `api.go` 的 import 是否已有 `strings` / `fmt`（`setProvenanceAutoBorn` 用了 `strconv`；`fmt`/`strings` 基本必有——若没有则补上）。
+检查 `api.go` 的 import 是否已有 `strings` / `fmt` / `unicode/utf8`（`setProvenanceAutoBorn` 用了 `strconv`；`fmt`/`strings` 基本必有，`unicode/utf8` 需补——长度校验按 rune 计）以及 `"openknowledge/internal/retrieve"`。
 
 - [ ] **Step 4: 跑测试确认通过**
 
