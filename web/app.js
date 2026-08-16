@@ -207,6 +207,7 @@
     loadEntries();
     runSearch();
     refreshCapture();
+    refreshGate();
   });
 
   $("branch-filter").addEventListener("change", function () {
@@ -674,6 +675,7 @@
     setBadge("badge-toggle", !s.disabled, "已开启", "已关闭");
     $("btn-toggle").textContent = s.disabled ? "开启" : "关闭";
     refreshCapture();
+    refreshGate();
   }
 
   // renderRxEnforce 三档卡仅 agent=reasonix 时显示，并回填当前保存的档位。
@@ -779,6 +781,138 @@
       body: { project: project, turn_interval: n }
     }).then(refreshCapture)
       .catch(function (err) { showError(err.message); });
+  });
+
+  // ---------- 引导页：泛化门控卡片 ----------
+
+  function refreshGate() {
+    var project = captureProject();
+    var statusEl = $("gate-status");
+    if (!project) {
+      statusEl.textContent = "门控：尚无已注册项目（先 ok init）";
+      $("badge-gate").className = "badge badge-off";
+      $("badge-gate").textContent = "无项目";
+      return;
+    }
+    api("/api/gate?project=" + encodeURIComponent(project)).then(function (g) {
+      state.gate = g;
+      $("gate-enabled").checked = !!g.enabled;
+      $("badge-gate").className = "badge " + (g.enabled ? "badge-on" : "badge-off");
+      $("badge-gate").textContent = g.enabled ? "启用" : "停用";
+      statusEl.textContent = "门控：" + (g.enabled ? "启用" : "停用") +
+        "（内置 " + g.builtin.length + " 条 + 自定义 " + (g.extra || []).length +
+        " 条，项目 " + project + "）";
+    }).catch(function (err) { showError(err.message); });
+  }
+
+  $("gate-enabled").addEventListener("change", function () {
+    var project = captureProject();
+    if (!project) {
+      showError("尚无已注册项目，请先 ok init");
+      this.checked = !this.checked;
+      return;
+    }
+    api("/api/gate", {
+      method: "POST",
+      body: { project: project, enabled: this.checked }
+    }).then(refreshGate)
+      .catch(function (err) { showError(err.message); refreshGate(); });
+  });
+
+  // ---- 短语管理弹窗 ----
+  function renderGatePhrases() {
+    var g = state.gate || { builtin: [], extra: [] };
+    var list = $("gate-phrase-list");
+    list.innerHTML = "";
+    g.builtin.forEach(function (p) {
+      list.appendChild(gatePhraseRow(p, "内置", null));
+    });
+    (g.extra || []).forEach(function (p, i) {
+      list.appendChild(gatePhraseRow(p, "自定义", i));
+    });
+  }
+
+  // onEdit==null → 内置只读行；否则为 extra 下标（编辑/删除）
+  function gatePhraseRow(phrase, source, extraIdx) {
+    var row = document.createElement("div");
+    row.className = "gate-phrase-row";
+    var text = document.createElement("span");
+    text.className = "grow";
+    text.textContent = phrase;
+    var src = document.createElement("span");
+    src.className = "muted";
+    src.textContent = source;
+    row.appendChild(text);
+    row.appendChild(src);
+    if (extraIdx === null) return row;
+    var edit = document.createElement("button");
+    edit.type = "button";
+    edit.className = "btn";
+    edit.textContent = "编辑";
+    edit.addEventListener("click", function () {
+      var input = document.createElement("input");
+      input.type = "text";
+      input.maxLength = 64;
+      input.value = phrase;
+      row.replaceChild(input, text);
+      input.focus();
+      var done = false;
+      function finish(save) {
+        if (done) return;
+        done = true;
+        if (save) saveGateExtra(function (xs) { xs[extraIdx] = input.value; });
+        else renderGatePhrases();
+      }
+      input.addEventListener("keydown", function (ev) {
+        if (ev.key === "Enter") finish(true);
+        if (ev.key === "Escape") finish(false);
+      });
+      input.addEventListener("blur", function () { finish(false); });
+    });
+    var del = document.createElement("button");
+    del.type = "button";
+    del.className = "btn btn-danger";
+    del.textContent = "删除";
+    del.addEventListener("click", function () {
+      saveGateExtra(function (xs) { xs.splice(extraIdx, 1); });
+    });
+    row.appendChild(edit);
+    row.appendChild(del);
+    return row;
+  }
+
+  // 全量替换语义：本地改完整个 extra 列表后一次性 POST（幂等）
+  function saveGateExtra(mutate) {
+    var project = captureProject();
+    if (!project) { showError("尚无已注册项目，请先 ok init"); return; }
+    var xs = ((state.gate && state.gate.extra) || []).slice();
+    mutate(xs);
+    api("/api/gate", {
+      method: "POST",
+      body: { project: project, extra: xs }
+    }).then(function (g) {
+      state.gate = g;
+      renderGatePhrases();
+      refreshGate();
+    }).catch(function (err) { showError(err.message); renderGatePhrases(); });
+  }
+
+  $("btn-gate-add").addEventListener("click", function () {
+    var input = $("gate-phrase-input");
+    var v = input.value.trim();
+    if (!v) return;
+    saveGateExtra(function (xs) { xs.push(v); });
+    input.value = "";
+  });
+  $("gate-phrase-input").addEventListener("keydown", function (ev) {
+    if (ev.key === "Enter") $("btn-gate-add").click();
+  });
+  $("btn-gate-phrases").addEventListener("click", function () {
+    renderGatePhrases();
+    $("gate-modal").classList.remove("hidden");
+  });
+  $("gate-close").addEventListener("click", function () {
+    $("gate-modal").classList.add("hidden");
   });
 
   $("agent-select").addEventListener("change", function () {

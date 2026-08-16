@@ -393,6 +393,12 @@ input:focus, select:focus, textarea:focus {
 .changelog-content ul { margin: 6px 0; padding-left: 20px; }
 .changelog-content hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
 
+/* 门控短语管理弹窗 */
+.gate-phrase-list { max-height: 320px; overflow-y: auto; margin: 12px 0; border-top: 1px solid #e5e7eb; }
+.gate-phrase-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid #e5e7eb; }
+.gate-phrase-row .grow { flex: 1; word-break: break-all; }
+.gate-phrase-row input[type="text"] { flex: 1; }
+
 /* ---------- 排序与分页 ---------- */
 
 th.sortable {
