@@ -284,6 +284,36 @@ func (db *DB) Sync(dir string, client embed.Client, opts ...SyncOptions) error {
 	return nil
 }
 
+// dedupSummary 摘要与标题冗余（规范化后相同/标题复读摘要主干/共有前缀≥摘要 80%）
+// 时返回空串——渲染层兜底，存量"摘要复读标题"的条目无需回填。
+// "标题复读摘要主干"判据：规范化后标题是摘要前缀，且标题长度≥摘要 40%——
+// 仅首字偶然相同（如标题"短"与摘要"短甲……"）不算复读，摘要保留。
+func dedupSummary(title, summary string) string {
+	norm := func(s string) string {
+		return strings.TrimRight(strings.TrimSpace(s), "。．.：:，,；;、 ")
+	}
+	t, s := norm(title), norm(summary)
+	if s == "" || t == "" {
+		return summary
+	}
+	tr, sr := []rune(t), []rune(s)
+	n := 0
+	for n < len(tr) && n < len(sr) && tr[n] == sr[n] {
+		n++
+	}
+	if s == t {
+		return ""
+	}
+	// 标题是摘要前缀且覆盖摘要主干（≥40%）：尾巴只是补充说明，省略摘要
+	if n == len(tr) && float64(n) >= 0.4*float64(len(sr)) {
+		return ""
+	}
+	if float64(n) >= 0.8*float64(len(sr)) {
+		return ""
+	}
+	return summary
+}
+
 // rebuildIndex 从 entries 表重写 <dir>/../INDEX.md（标题+类型+tags+摘要的固定行格式）；
 // 草稿行标题前加【草稿】前缀。
 func (db *DB) rebuildIndex(dir string) error {
@@ -313,7 +343,11 @@ func (db *DB) rebuildIndex(dir string) error {
 		if draft != 0 {
 			title = "【草稿】" + title
 		}
-		fmt.Fprintf(&b, "- **%s** (%s) [%s] — %s\n", title, typ, tags, summary)
+		if sum := dedupSummary(title, summary); sum != "" {
+			fmt.Fprintf(&b, "- **%s** (%s) [%s] — %s\n", title, typ, tags, sum)
+		} else {
+			fmt.Fprintf(&b, "- **%s** (%s) [%s]\n", title, typ, tags)
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return err
