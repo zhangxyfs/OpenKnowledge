@@ -64,7 +64,7 @@ description: 为已存在的项目生成或增量更新 OpenKnowledge 项目 wik
   "{{EXE}}" add --title <标题> --type reference --tags wiki,<主题tag> --summary <一句话> --file <正文.md>
   ```
 - `type` 固定 `reference`；tags 第一个固定 `wiki`，第二个是主题（如 `架构`、`daemon`、`安装器`）。
-- `summary` 必填一句话——它会出现在 INDEX.md 的 Wiki 目录里。
+- `summary` 必填一句话——它会出现在 INDEX.md 的 Wiki 目录里；写标题之外的检索线索，不要复读标题。
 - 一个主题一条目，正文 300~800 字；标题即文件名（同名覆盖需 `--force`，增量流程命令已带）。
 - 内容写"为什么"和"怎么协作"，不抄代码；关键文件用 `path:行号` 引用。
 
