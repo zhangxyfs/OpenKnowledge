@@ -156,7 +156,7 @@ func Add(args []string, stdout, stderr io.Writer) int {
 	if pc == nil {
 		return code
 	}
-	body := "TODO: 在此填写正文（frontmatter 中的 summary 也请补充）"
+	body := "TODO: 在此填写正文（summary 也请补充：写标题之外的检索线索，不要复读标题）"
 	if *file != "" {
 		data, err := os.ReadFile(*file)
 		if err != nil {
