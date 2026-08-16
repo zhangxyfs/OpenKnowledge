@@ -406,8 +406,9 @@ Expected: FAIL（`dedupSummary` 未定义）。
 `internal/index/sync.go` 新增：
 
 ```go
-// dedupSummary 摘要与标题冗余（规范化后相同/标题是摘要前缀/共有前缀≥摘要 80%）
+// dedupSummary 摘要与标题冗余（规范化后相同/标题是摘要前缀且覆盖≥40%/共有前缀≥摘要 80%）
 // 时返回空串——渲染层兜底，存量"摘要复读标题"的条目无需回填。
+// 40% 主干覆盖判据（2026-08-16 用户裁决）：标题很短时裸前缀会误省含新信息的摘要。
 func dedupSummary(title, summary string) string {
 	norm := func(s string) string {
 		return strings.TrimRight(strings.TrimSpace(s), "。．.：:，,；;、 ")
@@ -416,10 +417,13 @@ func dedupSummary(title, summary string) string {
 	if s == "" || t == "" {
 		return summary
 	}
-	if s == t || strings.HasPrefix(s, t) {
+	if s == t {
 		return ""
 	}
 	tr, sr := []rune(t), []rune(s)
+	if strings.HasPrefix(s, t) && float64(len(tr)) >= 0.4*float64(len(sr)) {
+		return ""
+	}
 	n := 0
 	for n < len(tr) && n < len(sr) && tr[n] == sr[n] {
 		n++

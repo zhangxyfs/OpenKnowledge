@@ -29,7 +29,7 @@
 在 `rebuildIndex` 渲染行时做冗余判定，满足任一即省略摘要：
 
 - 规范化（去首尾空白、去末尾标点）后 summary == title；
-- 规范化后 summary 以 title 为前缀；
+- 规范化后 summary 以 title 为前缀，且 title 长度 ≥ summary 长度的 40%（rune 计）（2026-08-16 用户裁决：裸前缀规则会在标题很短时误省含新信息的摘要，与测试用例 6 矛盾，故加主干覆盖判据）；
 - title 与 summary 的共有前缀长度 ≥ summary 长度的 80%。
 
 省略后行格式退化为 `- **标题** (类型) [tags]`。
