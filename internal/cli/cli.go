@@ -353,6 +353,9 @@ func Search(args []string, stdout, stderr io.Writer) int {
 	if len(info.RecencyShifted) > 0 {
 		fmt.Fprintf(stderr, "时效衰减改变排序（%s）\n", strings.Join(info.RecencyShifted, "、"))
 	}
+	if len(info.FeedbackDemoted) > 0 {
+		fmt.Fprintf(stderr, "反馈降权（持续注入从未被读：%s）\n", strings.Join(info.FeedbackDemoted, "、"))
+	}
 	for _, h := range hits {
 		fmt.Fprintf(stdout, "%.4f\t%s (%s)\n", h.Score, h.Title, h.Filename)
 	}

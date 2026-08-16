@@ -172,6 +172,10 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 		if len(info.RecencyShifted) > 0 {
 			logErr("prompt recency: 时效衰减改变排序（%s）", strings.Join(info.RecencyShifted, "、"))
 		}
+		// 反馈降权命中（持续注入但从未被读）：记 ok.log，GUI 日志页可按"反馈"过滤
+		if len(info.FeedbackDemoted) > 0 {
+			logErr("prompt feedback: 反馈降权（%s）", strings.Join(info.FeedbackDemoted, "、"))
+		}
 		hits = h
 	}
 	if len(hits) > 0 {

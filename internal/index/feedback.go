@@ -11,7 +11,7 @@ import (
 // 强化造成条目固化，降权只修"持续噪声"这一种确定的问题）：窗口内
 // injections >= min_injections 且 adoptions == 0 → score ×= demote。
 // 与 recency 系数叠乘（0.85×0.8=0.68），不设额外下限。
-// 返回被降权条目（"filename×0.80"，按当前分数降序、标题升序的确定性顺序）。
+// 返回被降权条目（"filename×0.80"，按当前分数降序、标题升序、文件名升序的确定性顺序）。
 // fail-open：Enabled=false、stats==nil（统计查询失败）→ 不动；demote 非法
 //（<=0 或 >=1）按 0.8；minInjections<=0 按 4。
 func applyFeedback(hits map[string]*Hit, stats map[string]FeedbackStat, cfg config.RetrieveFeedback) []string {
@@ -34,7 +34,10 @@ func applyFeedback(hits map[string]*Hit, stats map[string]FeedbackStat, cfg conf
 		if sorted[i].Score != sorted[j].Score {
 			return sorted[i].Score > sorted[j].Score
 		}
-		return sorted[i].Title < sorted[j].Title
+		if sorted[i].Title != sorted[j].Title {
+			return sorted[i].Title < sorted[j].Title
+		}
+		return sorted[i].Filename < sorted[j].Filename
 	})
 	var demoted []string
 	for _, h := range sorted {

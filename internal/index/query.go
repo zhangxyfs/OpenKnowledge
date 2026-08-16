@@ -65,7 +65,8 @@ func SemanticFloor(coses []float64, floor, minGap float64) float64 {
 
 // QueryInfo 描述一次 Query 的诊断信息（供 hook 日志 / ok search 提示 / GUI 日志页
 // 展示）。语义通道字段（SemanticRejected 等）仅当语义通道参与（向量存在）且
-// 样本 ≥3 时有意义；RecencyShifted 仅当时效衰减开启且有条目因系数名次变差时非空。
+// 样本 ≥3 时有意义；RecencyShifted 仅当时效衰减开启且有条目因系数名次变差时非空；
+// FeedbackDemoted 仅当反馈闭环开启且有窗口内持续注入零采纳条目被降权时非空。
 type QueryInfo struct {
 	// SemanticRejected：语义通道参与但全部候选被门槛拒绝（无显著头部）。
 	SemanticRejected bool
