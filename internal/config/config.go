@@ -126,7 +126,7 @@ type RecencyWindows struct {
 // 窗口内持续注入但从未被读取的条目降权（v1 只降不升——加分会自我强化造成
 // 条目固化，降权只修"持续噪声"这一种确定的问题）。
 type RetrieveFeedback struct {
-	Enabled       bool    `toml:"enabled"`        // 默认 true（见 Default）
+	Enabled       bool    `toml:"enabled"`        // 默认 false（见 Default）——宿主 read 派发未接通前采纳信号恒零，降权默认关闭；事件照常记录，接通后恢复默认 true
 	WindowDays    int     `toml:"window_days"`    // 统计窗口（天），默认 30；<=0 按 30
 	MinInjections int     `toml:"min_injections"` // 触发降权的最低注入次数，默认 4；<=0 按 4
 	Demote        float64 `toml:"demote"`         // 降权系数，默认 0.8；<=0 或 >=1 按 0.8
@@ -224,7 +224,7 @@ func Default() Config {
 			Recency: RetrieveRecency{Enabled: true, Floor: 0.85, Windows: RecencyWindows{
 				Rule: []int{180, 730}, Pitfall: []int{90, 365}, Note: []int{60, 180}, Reference: []int{180, 730},
 			}},
-			Feedback: RetrieveFeedback{Enabled: true, WindowDays: 30, MinInjections: 4, Demote: 0.8}},
+			Feedback: RetrieveFeedback{Enabled: false, WindowDays: 30, MinInjections: 4, Demote: 0.8}},
 		Capture:    Capture{Mode: "propose", TurnInterval: 5},
 		Wiki:       Wiki{StaleCommits: 20},
 		Hooks:      Hooks{TimeoutSec: 10},

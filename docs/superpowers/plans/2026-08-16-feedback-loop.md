@@ -16,6 +16,7 @@
 - **归因窗口 = 本会话**：只统计"读本会话注入过的条目"；模型凭记忆（非注入）主动读条目不统计（v1 明确限制）。
 - **mandatory 粘性指针重读不计入**：mandatory 不经检索、文件名从不进 InjectedKnowledge，天然排除（不写特判代码）。
 - **v1 只降不升**：injections ≥ min_injections（默认 4）且 adoptions == 0 → score ×= demote（默认 0.8）；不做加分。
+- **终审裁决：v2.19.0 `feedback.enabled` 默认 false**——宿主 read 派发未接通前采纳信号恒零，降权默认关闭以免误伤（事件照常记录攒数据），read 派发接通后恢复默认 true。
 - **fail-open**：事件写失败、统计查询失败、状态写失败均仅 logErr，不阻断注入；FeedbackStats 失败 = 跳过降权。
 - **并发铁律**：session 状态一切写必须走 `state.Update`（锁内重放 + 原子落盘），InjectedKnowledge/AdoptedKnowledge 不例外。
 - **大小写**：`registry.NormalizePath` 会转小写——session 匹配用 `strings.EqualFold`；entry_events 与 session 两个字段一律存**原始大小写** basename（Hit.Filename 即磁盘 basename），否则 GROUP BY 统计对不上。
@@ -36,7 +37,7 @@
 - Produces（Task 5 依赖，不得改）：
   - `type RetrieveFeedback struct { Enabled bool; WindowDays int; MinInjections int; Demote float64 }`（toml `enabled`/`window_days`/`min_injections`/`demote`）
   - `Retrieve.Feedback RetrieveFeedback`（toml `feedback`）
-  - 默认：Enabled=true、WindowDays=30、MinInjections=4、Demote=0.8
+  - 默认：Enabled=true、WindowDays=30、MinInjections=4、Demote=0.8（终审裁决：v2.19.0 enabled 默认 false——read 派发未接通，接通后恢复 true）
 
 - [ ] **Step 1: 写失败测试**（追加到 `internal/config/config_test.go`，模板照抄 `TestRecencyConfigDefaultAndOverride`）
 

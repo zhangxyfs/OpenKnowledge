@@ -21,8 +21,7 @@
   - 观测：降权命中时 hook 记 ok.log `prompt feedback:` 一行、ok search 打
     stderr（GUI 日志可按"反馈"过滤）；fail-open：事件写失败/统计查询失败
     仅记日志或跳过降权；
-  - 配置 `[retrieve.feedback]` enabled（默认 true）/ window_days（30）/
-    min_injections（4）/ demote（0.8）；GUI 暴露列为跟进项。
+  - 配置 `[retrieve.feedback]` enabled（**默认 false**：现行宿主 PostTool 只派发写工具、read 不到达 TrackTouched，采纳信号暂恒零，降权默认关闭以免误伤；注入/采纳事件照常记录，待 read 派发接通后的版本恢复默认 true）/ window_days（30）/ min_injections（4）/ demote（0.8）；GUI 暴露列为跟进项。
 - **测试**：`TestRecordEventsAndStats` / `TestFeedbackStatsWindowAndPrune`
   （窗口截止 + prune 边界）/ `TestSessionAdoptedKnowledge`（去重/落盘/
   清挂账/Update 合并不丢）/ `TestAdoptionLoop`（hook 集成：注入挂账 →

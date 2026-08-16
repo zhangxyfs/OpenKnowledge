@@ -983,8 +983,8 @@ os.ReadDir(knowledge/)                # 只拿文件名，不读内容
 | `retrieve.rrf_k` | `60` | RRF 名次平滑常数（仅 fusion=rrf 生效） |
 | `retrieve.recency.enabled` / `floor` | `true` / `0.85` | 时效信号：按 mtime 新鲜度给融合分乘系数（不参与准入）；floor 为陈旧系数下限 |
 | `retrieve.recency.windows.*` | rule/reference `[180,730]`、pitfall `[90,365]`、note `[60,180]` | 各类型 `[fresh_days, stale_days]` 窗口；全零或非法 = 该类型不衰减 |
-| retrieve.feedback.enabled | `true` | 注入→采纳反馈闭环：窗口内持续注入但从未被读的条目降权（v1 只降不升） |
-| retrieve.feedback.window_days / min_injections / demote | `30` / `4` / `0.8` | 统计窗口（天）/ 触发降权的最低注入次数 / 降权系数 |
+| `retrieve.feedback.enabled` | `false` | 注入→采纳反馈闭环：窗口内持续注入但从未被读的条目降权（v1 只降不升）；默认 false——宿主 read 派发未接通前采纳信号恒零，降权默认关闭（事件照常记录），read 派发接通后恢复 `true` |
+| `retrieve.feedback.window_days` / `min_injections` / `demote` | `30` / `4` / `0.8` | 统计窗口（天）/ 触发降权的最低注入次数 / 降权系数 |
 | `retrieve.top_n` | `3` | 每次最多注入条数；调大注意挤占 `max_tokens` 预算 |
 
 ### 18.2 项目配置 `~/.openknowledge/projects/<名>/config.toml`
