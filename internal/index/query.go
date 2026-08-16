@@ -4,6 +4,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"time"
 
 	"openknowledge/internal/config"
 	"openknowledge/internal/embed"
@@ -62,8 +63,9 @@ func SemanticFloor(coses []float64, floor, minGap float64) float64 {
 	return floor
 }
 
-// QueryInfo 描述一次 Query 的语义通道诊断（供 hook 日志 / ok search 提示 / GUI
-// 日志页展示）。仅当语义通道参与（向量存在）且样本 ≥3 时有意义。
+// QueryInfo 描述一次 Query 的诊断信息（供 hook 日志 / ok search 提示 / GUI 日志页
+// 展示）。语义通道字段（SemanticRejected 等）仅当语义通道参与（向量存在）且
+// 样本 ≥3 时有意义；RecencyShifted 仅当时效衰减开启且有条目因系数名次变差时非空。
 type QueryInfo struct {
 	// SemanticRejected：语义通道参与但全部候选被门槛拒绝（无显著头部）。
 	SemanticRejected bool
@@ -71,6 +73,9 @@ type QueryInfo struct {
 	MaxCos           float64
 	MedianCos        float64
 	RelGap           float64
+	// RecencyShifted：因时效系数（retrieve.recency）名次变差的条目
+	//（"filename×0.85" 格式，按新名次排序）。
+	RecencyShifted []string
 }
 
 // Hit 是一条检索命中，携带注入所需的正文与摘要。
@@ -167,7 +172,7 @@ func (db *DB) queryAll(terms []string, queryVec []float32, cfg config.Retrieve) 
 	// 归一化为 kw/(kw+6)。
 	if match := buildMatch(terms); match != "" {
 		rows, err := db.sql.Query(
-			`SELECT e.filename, e.title, e.type, e.summary, e.body, e.tags,
+			`SELECT e.filename, e.title, e.type, e.summary, e.body, e.tags, e.mtime,
 				bm25(entries_fts, 10.0, 8.0, 3.0, 1.0) AS r
 			FROM entries_fts JOIN entries e ON e.filename = entries_fts.filename
 			WHERE entries_fts MATCH ? AND e.mandatory = 0 AND e.draft = 0`, match)
@@ -178,7 +183,7 @@ func (db *DB) queryAll(terms []string, queryVec []float32, cfg config.Retrieve) 
 			var h Hit
 			var tagsStr string
 			var rank float64
-			if err := rows.Scan(&h.Filename, &h.Title, &h.Type, &h.Summary, &h.Body, &tagsStr, &rank); err != nil {
+			if err := rows.Scan(&h.Filename, &h.Title, &h.Type, &h.Summary, &h.Body, &tagsStr, &h.Mtime, &rank); err != nil {
 				_ = rows.Close()
 				return nil, QueryInfo{}, err
 			}
@@ -205,7 +210,7 @@ func (db *DB) queryAll(terms []string, queryVec []float32, cfg config.Retrieve) 
 	// （排序用），不受语义门槛影响。
 	if len(queryVec) > 0 {
 		rows, err := db.sql.Query(
-			`SELECT e.filename, e.title, e.type, e.summary, e.body, e.tags, v.blob
+			`SELECT e.filename, e.title, e.type, e.summary, e.body, e.tags, e.mtime, v.blob
 			FROM vectors v JOIN entries e ON e.filename = v.filename
 			WHERE e.mandatory = 0 AND e.draft = 0`)
 		if err != nil {
@@ -219,8 +224,9 @@ func (db *DB) queryAll(terms []string, queryVec []float32, cfg config.Retrieve) 
 		coses := make([]float64, 0, 64)
 		for rows.Next() {
 			var filename, title, typ, summary, body, tagsStr string
+			var mtime int64
 			var blob []byte
-			if err := rows.Scan(&filename, &title, &typ, &summary, &body, &tagsStr, &blob); err != nil {
+			if err := rows.Scan(&filename, &title, &typ, &summary, &body, &tagsStr, &mtime, &blob); err != nil {
 				_ = rows.Close()
 				return nil, QueryInfo{}, err
 			}
@@ -230,7 +236,7 @@ func (db *DB) queryAll(terms []string, queryVec []float32, cfg config.Retrieve) 
 			}
 			cands = append(cands, cand{Hit{
 				Filename: filename, Title: title, Type: typ, Summary: summary, Body: body,
-				Tags: splitTags(tagsStr),
+				Tags: splitTags(tagsStr), Mtime: mtime,
 			}, cos})
 		}
 		if err := rows.Err(); err != nil {
@@ -277,6 +283,9 @@ func (db *DB) queryAll(terms []string, queryVec []float32, cfg config.Retrieve) 
 	if fusion == "rrf" {
 		applyRRF(hits, kwNorms, cosScores, cfg.RrfK)
 	}
+	// 时效信号：融合分之后乘系数、不参与准入——陈旧条目在近似同分时让位；
+	// rrf/weighted 两模式都乘。返回的名次变差清单进 QueryInfo 观测。
+	info.RecencyShifted = applyRecency(hits, time.Now().Unix(), cfg.Recency)
 
 	out := make([]Hit, 0, len(hits))
 	for _, h := range hits {
