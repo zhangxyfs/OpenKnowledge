@@ -104,6 +104,24 @@ type RetrieveGate struct {
 	ExtraPhrases []string `toml:"extra_phrases"` // 内置表之外的追加层
 }
 
+// RetrieveRecency 控制时效信号（[retrieve.recency] 子表）：按条目 mtime 新鲜度
+// 给融合分乘系数（不参与准入）——age ≤ fresh → 1.0，age ≥ stale → floor，
+// 中间线性。Floor 非法（<=0 或 >1）按 0.85。
+type RetrieveRecency struct {
+	Enabled bool           `toml:"enabled"` // 默认 true（见 Default）
+	Floor   float64        `toml:"floor"`   // 陈旧系数下限，默认 0.85
+	Windows RecencyWindows `toml:"windows"`
+}
+
+// RecencyWindows 按条目类型的 [fresh_days, stale_days] 窗口（天）。全零、
+// 长度不为 2 或 stale<=fresh 均视为该类型不衰减（fail-open）。
+type RecencyWindows struct {
+	Rule      []int `toml:"rule"`
+	Pitfall   []int `toml:"pitfall"`
+	Note      []int `toml:"note"`
+	Reference []int `toml:"reference"`
+}
+
 type Retrieve struct {
 	Alpha float64 `toml:"alpha"`
 	Beta  float64 `toml:"beta"`
@@ -132,6 +150,9 @@ type Retrieve struct {
 	// prompt 跳过检索注入与 embed 调用。Enabled 默认 true（见 Default）；
 	// ExtraPhrases 是内置短语表之外的追加层，两层取并集生效。
 	Gate RetrieveGate `toml:"gate"`
+	// Recency 是时效信号（[retrieve.recency] 子表）：陈旧条目在近似同分时让位，
+	// 不参与准入。编辑条目即刷新 mtime 新鲜度（feature）。
+	Recency RetrieveRecency `toml:"recency"`
 }
 
 type EnforceRule struct {
@@ -185,7 +206,11 @@ func Default() Config {
 	return Config{
 		Embedding:  Embedding{TimeoutSec: 5},
 		Inject:     Inject{MaxTokens: 800},
-		Retrieve:   Retrieve{Alpha: 1.0, Beta: 1.0, TopN: 2, MinScore: 0.5, MinGap: 0.25, Fusion: "rrf", RrfK: 60, Gate: RetrieveGate{Enabled: true}},
+		Retrieve:   Retrieve{Alpha: 1.0, Beta: 1.0, TopN: 2, MinScore: 0.5, MinGap: 0.25, Fusion: "rrf", RrfK: 60,
+			Gate:    RetrieveGate{Enabled: true},
+			Recency: RetrieveRecency{Enabled: true, Floor: 0.85, Windows: RecencyWindows{
+				Rule: []int{180, 730}, Pitfall: []int{90, 365}, Note: []int{60, 180}, Reference: []int{180, 730},
+			}}},
 		Capture:    Capture{Mode: "propose", TurnInterval: 5},
 		Wiki:       Wiki{StaleCommits: 20},
 		Hooks:      Hooks{TimeoutSec: 10},

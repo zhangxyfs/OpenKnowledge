@@ -302,3 +302,61 @@ func TestFusionConfigDefaultAndOverride(t *testing.T) {
 		t.Fatalf("project 缺键应继承全局 %+v", cfg.Retrieve)
 	}
 }
+
+func TestRecencyConfigDefaultAndOverride(t *testing.T) {
+	dir := t.TempDir()
+	global := filepath.Join(dir, "global.toml")
+	project := filepath.Join(dir, "project.toml")
+	// 全缺省：enabled、floor 0.85、四类型窗口
+	cfg, err := LoadMerged(project, global)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := cfg.Retrieve.Recency
+	if !r.Enabled || r.Floor != 0.85 {
+		t.Fatalf("unexpected defaults %+v", r)
+	}
+	if len(r.Windows.Note) != 2 || r.Windows.Note[0] != 60 || r.Windows.Note[1] != 180 {
+		t.Fatalf("unexpected note window %+v", r.Windows.Note)
+	}
+	if len(r.Windows.Pitfall) != 2 || r.Windows.Pitfall[0] != 90 || r.Windows.Pitfall[1] != 365 {
+		t.Fatalf("unexpected pitfall window %+v", r.Windows.Pitfall)
+	}
+	// 全局覆盖：floor + note 窗口；其余窗口继承默认
+	if err := os.WriteFile(global, []byte("[retrieve.recency]\nfloor = 0.7\n[retrieve.recency.windows]\nnote = [10, 20]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = LoadMerged(project, global)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r = cfg.Retrieve.Recency
+	if r.Floor != 0.7 || r.Windows.Note[0] != 10 || r.Windows.Note[1] != 20 {
+		t.Fatalf("global override failed %+v", r)
+	}
+	if r.Windows.Rule[1] != 730 {
+		t.Fatalf("未覆盖窗口应继承默认 %+v", r.Windows.Rule)
+	}
+	// 项目显式关闭
+	if err := os.WriteFile(project, []byte("[retrieve.recency]\nenabled = false\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = LoadMerged(project, global)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Retrieve.Recency.Enabled {
+		t.Fatalf("project override failed %+v", cfg.Retrieve.Recency)
+	}
+	// 项目清掉 → 重新继承（全局未设 enabled → 回默认 true）
+	if err := os.WriteFile(project, []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = LoadMerged(project, global)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Retrieve.Recency.Enabled || cfg.Retrieve.Recency.Floor != 0.7 {
+		t.Fatalf("project 缺键应继承 %+v", cfg.Retrieve.Recency)
+	}
+}
