@@ -76,6 +76,9 @@ type QueryInfo struct {
 	// RecencyShifted：因时效系数（retrieve.recency）名次变差的条目
 	//（"filename×0.85" 格式，按新名次排序）。
 	RecencyShifted []string
+	// FeedbackDemoted：因反馈闭环（retrieve.feedback）被降权的条目
+	//（"filename×0.80" 格式）。
+	FeedbackDemoted []string
 }
 
 // Hit 是一条检索命中，携带注入所需的正文与摘要。
@@ -165,6 +168,14 @@ func (db *DB) queryAll(terms []string, queryVec []float32, cfg config.Retrieve) 
 	floor := 0.0
 	if n, err := db.Count(); err == nil {
 		floor = MinScoreFloor(cfg.MinScore, n)
+	}
+	// 反馈统计（30 天窗口一条 GROUP BY，千级事件毫秒级）；fail-open：
+	// 查询失败仅跳过降权，不动准入。
+	var fbStats map[string]FeedbackStat
+	if cfg.Feedback.Enabled {
+		if s, err := db.FeedbackStats(cfg.Feedback.WindowDays); err == nil {
+			fbStats = s
+		}
 	}
 	var info QueryInfo
 
@@ -286,6 +297,9 @@ func (db *DB) queryAll(terms []string, queryVec []float32, cfg config.Retrieve) 
 	// 时效信号：融合分之后乘系数、不参与准入——陈旧条目在近似同分时让位；
 	// rrf/weighted 两模式都乘。返回的名次变差清单进 QueryInfo 观测。
 	info.RecencyShifted = applyRecency(hits, time.Now().Unix(), cfg.Recency)
+	// 反馈降权：持续注入但从未被读的条目 ×demote（v1 只降不升）；
+	// 叠乘在时效系数之后。
+	info.FeedbackDemoted = applyFeedback(hits, fbStats, cfg.Feedback)
 
 	out := make([]Hit, 0, len(hits))
 	for _, h := range hits {
