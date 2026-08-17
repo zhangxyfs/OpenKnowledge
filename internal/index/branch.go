@@ -27,6 +27,17 @@ func splitTags(s string) []string {
 	return out
 }
 
+// hasWikiTag 判定 tags 列是否含精确的 wiki 标签。不能用 strings.Contains/LIKE
+// '%wiki%' 子串匹配——`sewiki`/`nowiki` 这类标签会被误判为 wiki 条目。
+func hasWikiTag(tags string) bool {
+	for _, t := range splitTags(tags) {
+		if t == "wiki" {
+			return true
+		}
+	}
+	return false
+}
+
 // FilterHitsByBranch 丢弃其他分支的差异条目；branch 为空（非 git/未知）不过滤（宁多勿漏）。
 func FilterHitsByBranch(hits []Hit, branch string) []Hit {
 	if branch == "" {

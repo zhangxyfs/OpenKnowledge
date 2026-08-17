@@ -4,6 +4,7 @@ package fsx
 import (
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // WriteFile 原子写入：同目录随机临时文件 + fsync + rename 替换。
@@ -37,4 +38,17 @@ func WriteFile(path string, data []byte, perm os.FileMode) error {
 		return err
 	}
 	return os.Rename(name, path)
+}
+
+// BumpMtime 对抗秒级 mtime 粒度：写完文件后调用，若当前 mtime 与 prev（写前
+// mtime）仍在同一秒，按 mtime diff 判变化的机制（index.Sync 等）会漏掉本次
+// 写入——把 mtime 推进一秒兜底。prev 传零值（新文件/写前 stat 失败）时不动作。
+func BumpMtime(path string, prev time.Time) {
+	if prev.IsZero() {
+		return
+	}
+	if fi, err := os.Stat(path); err == nil && fi.ModTime().Unix() == prev.Unix() {
+		t := prev.Add(time.Second)
+		_ = os.Chtimes(path, t, t)
+	}
 }

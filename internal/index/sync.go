@@ -170,7 +170,11 @@ func (db *DB) Sync(dir string, client embed.Client, opts ...SyncOptions) error {
 			if !embedBlocked && !hasVector[name] {
 				e, err := readEntry(f.path)
 				if err != nil {
-					return rollback(err)
+					// 与 changed 路径同口径：损坏条目跳过、记入告警，不中止整轮
+					// 同步（同秒写坏 mtime 未变的场景会走到这里——"一个 YAML 笔误
+					// 不能压制全部注入"）
+					skipped = append(skipped, name)
+					continue
 				}
 				pending = append(pending, pendingEmbed{name, e.EmbedText()})
 			}
@@ -271,6 +275,10 @@ func (db *DB) Sync(dir string, client embed.Client, opts ...SyncOptions) error {
 	// diff 为空时跳过重写（hook 热路径除上方事件 prune 外零写盘）；INDEX.md 缺失时总是重建
 	if !changed {
 		if _, err := os.Stat(filepath.Join(filepath.Dir(dir), "INDEX.md")); err == nil {
+			// 补齐路径（未变化但缺向量）的跳过告警不能被热路径吞掉
+			if len(skipped) > 0 {
+				return &CorruptEntriesError{Files: skipped}
+			}
 			return nil
 		}
 	}
@@ -346,7 +354,7 @@ func (db *DB) rebuildIndex(dir string, maxLines int) error {
 			continue
 		}
 		// 已转正的 wiki 条目只进 Wiki 目录节（带链接），主列表不重复
-		if r.draft == 0 && strings.Contains(r.tags, "wiki") {
+		if r.draft == 0 && hasWikiTag(r.tags) {
 			continue
 		}
 		// 带 branch: 标签的条目（无论类型）不进全分支共享的主列表：

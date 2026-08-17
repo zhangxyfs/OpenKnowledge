@@ -198,6 +198,16 @@ func entryPath(w http.ResponseWriter, st *store.Store, file string) string {
 	return filepath.Join(st.KnowledgeDir(), file)
 }
 
+// syncOpts 取项目合并配置的索引渲染选项（[index] max_lines）；配置读取失败
+// 按零值（渲染层默认 50），不阻断同步。
+func syncOpts(st *store.Store) index.SyncOptions {
+	cfg, err := config.LoadMerged(st.ConfigPath(), filepath.Join(registry.Home(), "config.toml"))
+	if err != nil {
+		return index.SyncOptions{}
+	}
+	return index.SyncOptions{MaxLines: cfg.Index.MaxLines}
+}
+
 // syncIndex 以无 embedding 客户端模式同步索引库；损坏条目警告不视为失败。
 func syncIndex(st *store.Store) error {
 	db, err := index.Open(st.KbPath())
@@ -205,7 +215,7 @@ func syncIndex(st *store.Store) error {
 		return err
 	}
 	defer db.Close()
-	if err := db.Sync(st.KnowledgeDir(), nil); err != nil {
+	if err := db.Sync(st.KnowledgeDir(), nil, syncOpts(st)); err != nil {
 		var corrupt *index.CorruptEntriesError
 		if errors.As(err, &corrupt) {
 			return nil
@@ -632,13 +642,22 @@ func validateEntryRequest(w http.ResponseWriter, req *entryRequest) *store.Store
 
 // writeEntry 统一写流程：序列化 → 写盘 → 同步索引 → 返回列表项。
 // created 仅新建路径传入（YYYY-MM-DD）；更新既有条目传 ""，此时从盘上原条目
-// 继承 created，既不新写也不抹掉已有值。
+// 继承 created/draft/archived——不继承会让"编辑草稿"静默转正、"编辑归档条目"
+// 静默取消归档（entryRequest 不带这三个字段，GUI 编辑器不管生命周期标记）。
 func writeEntry(w http.ResponseWriter, st *store.Store, path string, req *entryRequest, created string) {
+	var draft, archived bool
+	var prev time.Time
 	if created == "" {
 		if data, err := os.ReadFile(path); err == nil {
 			if old, err := entry.Parse(data); err == nil {
 				created = old.Created
+				draft = old.Draft
+				archived = old.Archived
 			}
+		}
+		// 同秒连续保存会被 Sync 的秒级 mtime diff 判未变化，写后推进一秒兜底
+		if fi, err := os.Stat(path); err == nil {
+			prev = fi.ModTime()
 		}
 	}
 	e := &entry.Entry{
@@ -649,12 +668,15 @@ func writeEntry(w http.ResponseWriter, st *store.Store, path string, req *entryR
 		Summary:   req.Summary,
 		Body:      strings.TrimSpace(req.Body),
 		Created:   created,
+		Draft:     draft,
+		Archived:  archived,
 		Path:      path,
 	}
 	if err := fsx.WriteFile(path, e.Serialize(), 0o644); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	fsx.BumpMtime(path, prev)
 	if err := syncIndex(st); err != nil {
 		writeErr(w, http.StatusInternalServerError, fmt.Sprintf("索引同步失败: %v", err))
 		return
@@ -834,7 +856,7 @@ func syncApprove(st *store.Store) error {
 	}
 	defer db.Close()
 	client := embeddingClientFor(st)
-	if err := db.Sync(st.KnowledgeDir(), client); err != nil {
+	if err := db.Sync(st.KnowledgeDir(), client, syncOpts(st)); err != nil {
 		var corrupt *index.CorruptEntriesError
 		if errors.As(err, &corrupt) {
 			return nil
@@ -843,7 +865,7 @@ func syncApprove(st *store.Store) error {
 			return err
 		}
 		// embedding 失败：降级为只同步 INDEX，向量稍后 ok index 补齐
-		if err2 := db.Sync(st.KnowledgeDir(), nil); err2 != nil && !errors.As(err2, &corrupt) {
+		if err2 := db.Sync(st.KnowledgeDir(), nil, syncOpts(st)); err2 != nil && !errors.As(err2, &corrupt) {
 			return err2
 		}
 	}
@@ -884,17 +906,15 @@ func (h *Handler) apiApprove(w http.ResponseWriter, r *http.Request) {
 	e.Draft = false
 	// Sync 的 diff 按秒级 mtime 判断变化；propose 后同一秒内 approve 会被误判为
 	// 未变化而跳过重建，此时手动把 mtime 推进一秒（同 cli.Approve）。
-	oldInfo, statErr := os.Stat(path)
+	var prev time.Time
+	if fi, statErr := os.Stat(path); statErr == nil {
+		prev = fi.ModTime()
+	}
 	if err := fsx.WriteFile(path, e.Serialize(), 0o644); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if statErr == nil {
-		if newInfo, err := os.Stat(path); err == nil && newInfo.ModTime().Unix() == oldInfo.ModTime().Unix() {
-			t := oldInfo.ModTime().Add(time.Second)
-			_ = os.Chtimes(path, t, t)
-		}
-	}
+	fsx.BumpMtime(path, prev)
 	if err := syncApprove(st); err != nil {
 		writeErr(w, http.StatusInternalServerError, fmt.Sprintf("索引同步失败: %v", err))
 		return

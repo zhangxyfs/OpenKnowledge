@@ -356,10 +356,11 @@ func applyRRF(hits map[string]*Hit, kwNorms, cosScores map[string]float64, k int
 	}
 }
 
-// Mandatory 返回全部 mandatory 条目（用于基础注入）；草稿即使带 mandatory 标记也不注入。
+// Mandatory 返回全部 mandatory 条目（用于基础注入）；草稿与归档条目即使带
+// mandatory 标记也不注入——归档语义是"退出强制暴露、仍可检索"。
 func (db *DB) Mandatory() ([]Hit, error) {
 	rows, err := db.sql.Query(
-		`SELECT filename, title, type, body FROM entries WHERE mandatory = 1 AND draft = 0 ORDER BY filename`)
+		`SELECT filename, title, type, body FROM entries WHERE mandatory = 1 AND draft = 0 AND archived = 0 ORDER BY filename`)
 	if err != nil {
 		return nil, err
 	}
@@ -385,6 +386,7 @@ type WikiEntry struct {
 
 // WikiEntries 返回打 wiki 标签的已转正未归档条目（按 title 排序）。
 // 与 rebuildIndex 主列表口径一致：归档条目不进 INDEX（含 Wiki 目录节）。
+// SQL 的 LIKE 只是粗筛，精确判定在 Go 侧（hasWikiTag），防 sewiki/nowiki 误判。
 func (db *DB) WikiEntries() ([]WikiEntry, error) {
 	rows, err := db.sql.Query(`SELECT title, filename, summary, tags FROM entries WHERE draft = 0 AND archived = 0 AND tags LIKE '%wiki%' ORDER BY title`)
 	if err != nil {
@@ -397,6 +399,9 @@ func (db *DB) WikiEntries() ([]WikiEntry, error) {
 		var tagsStr string
 		if err := rows.Scan(&e.Title, &e.Filename, &e.Summary, &tagsStr); err != nil {
 			return nil, err
+		}
+		if !hasWikiTag(tagsStr) {
+			continue
 		}
 		e.Branch = BranchOf(splitTags(tagsStr))
 		out = append(out, e)
@@ -422,11 +427,14 @@ func (db *DB) HasBranchWiki(branch string) (bool, error) {
 	return false, nil
 }
 
-// WikiCount 返回 wiki 条目数（ok wiki mark 展示用）。
+// WikiCount 返回 wiki 条目数（ok wiki mark 展示用）。与 WikiEntries 同口径
+//（已转正、未归档、wiki 精确标签）——直接复用计数，防两处 SQL 各自漂移。
 func (db *DB) WikiCount() (int, error) {
-	var n int
-	err := db.sql.QueryRow(`SELECT COUNT(*) FROM entries WHERE draft = 0 AND tags LIKE '%wiki%'`).Scan(&n)
-	return n, err
+	entries, err := db.WikiEntries()
+	if err != nil {
+		return 0, err
+	}
+	return len(entries), nil
 }
 
 // HasWikiMatch 报告检索词是否有 wiki 条目（draft=0 且 tags 含 wiki）覆盖。
@@ -437,10 +445,12 @@ func (db *DB) HasWikiMatch(terms []string) (bool, error) {
 		return true, nil
 	}
 	var exists bool
+	// tags 是 ", " 拼接串，wiki 判定须按整 tag 精确匹配（防 sewiki/nowiki 误判）
 	err := db.sql.QueryRow(
 		`SELECT EXISTS(
 			SELECT 1 FROM entries_fts JOIN entries e ON e.filename = entries_fts.filename
-			WHERE entries_fts MATCH ? AND e.draft = 0 AND e.tags LIKE '%wiki%'
+			WHERE entries_fts MATCH ? AND e.draft = 0 AND
+				(e.tags = 'wiki' OR e.tags LIKE 'wiki, %' OR e.tags LIKE '%, wiki' OR e.tags LIKE '%, wiki, %')
 		)`, match).Scan(&exists)
 	if err != nil {
 		return false, err

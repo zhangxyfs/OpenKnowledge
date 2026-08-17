@@ -1102,3 +1102,23 @@ func TestIndexArchiveCandidates(t *testing.T) {
 		t.Fatalf("新条目不应入选: %q", got)
 	}
 }
+
+// registry.toml 可手工编辑：无 paths 的项目不应让 doctor 崩溃（v2.18.1 回归：
+// p.Paths[0] 曾无防护直接 index out of range）。
+func TestDoctorEmptyPathsNoPanic(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("OK_HOME", home)
+	t.Setenv("OPENAI_API_KEY", "")
+	reg := &registry.Registry{Projects: []registry.Project{{Name: "ghost"}}}
+	if err := reg.Save(registry.DefaultPath()); err != nil {
+		t.Fatal(err)
+	}
+	var out, errBuf bytes.Buffer
+	code := Doctor(nil, &out, &errBuf)
+	if code != 1 {
+		t.Fatalf("doctor code = %d, want 1（不健康）; out=%q", code, out.String())
+	}
+	if !strings.Contains(out.String(), "未登记项目路径") {
+		t.Fatalf("应报告未登记项目路径: %q", out.String())
+	}
+}

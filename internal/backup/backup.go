@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+	"openknowledge/internal/config"
 	"openknowledge/internal/entry"
 	"openknowledge/internal/fsx"
 	"openknowledge/internal/index"
@@ -179,11 +180,11 @@ func Import(r io.ReaderAt, size int64) (*Report, error) {
 			if known[p.Name] {
 				continue
 			}
-			path := ""
-			if len(p.Paths) > 0 {
-				path = p.Paths[0]
-			}
-			if err := local.AddProject(p.Name, path); err != nil {
+			if len(p.Paths) == 0 || p.Paths[0] == "" {
+				// 空路径项目按"已注册、无路径"原样还原——走 AddProject 会塞入
+				// 空串路径（Paths: [""]），按 Paths[0] 取目录的逻辑会拿到假路径
+				local.Projects = append(local.Projects, registry.Project{Name: p.Name})
+			} else if err := local.AddProject(p.Name, p.Paths[0]); err != nil {
 				return err
 			}
 			known[p.Name] = true
@@ -236,14 +237,19 @@ func Import(r io.ReaderAt, size int64) (*Report, error) {
 	}
 	sort.Strings(rep.Projects)
 
-	// 逐项目重建索引（损坏条目告警不视为失败）
+	// 逐项目重建索引（损坏条目告警不视为失败；[index] max_lines 随项目配置透传，
+	// 否则导入会把 INDEX 按默认预算重渲染、静默覆盖用户配置）
 	for _, name := range rep.Projects {
 		st := store.New(filepath.Join(registry.Home(), "projects", name))
 		db, err := index.Open(st.KbPath())
 		if err != nil {
 			return nil, err
 		}
-		syncErr := db.Sync(st.KnowledgeDir(), nil)
+		var opts index.SyncOptions
+		if cfg, err := config.LoadMerged(st.ConfigPath(), filepath.Join(registry.Home(), "config.toml")); err == nil {
+			opts.MaxLines = cfg.Index.MaxLines
+		}
+		syncErr := db.Sync(st.KnowledgeDir(), nil, opts)
 		db.Close()
 		var ce *index.CorruptEntriesError
 		if syncErr != nil && !errors.As(syncErr, &ce) {

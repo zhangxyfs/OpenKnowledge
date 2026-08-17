@@ -301,3 +301,93 @@ func TestImportTooBigAndMissingRegistry(t *testing.T) {
 		t.Fatal("missing registry.toml")
 	}
 }
+
+// 空路径项目导入后按"已注册、无路径"还原（v2.18.1 回归：曾注册成 Paths: [""]，
+// 按 Paths[0] 取目录的逻辑会拿到假空串路径）。
+func TestImportEmptyPathsProject(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("OK_HOME", home)
+	// 导出一个无 paths 的项目（模拟手工编辑过 registry.toml 的库）
+	reg := &registry.Registry{Projects: []registry.Project{{Name: "ghost"}}}
+	if err := reg.Save(registry.DefaultPath()); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(home, "projects", "ghost", "knowledge")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	md := "---\ntitle: 幽灵条目\ntype: note\ntags: [t]\nsummary: s\n---\n正文\n"
+	if err := os.WriteFile(filepath.Join(dir, "g.md"), []byte(md), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := Export(&buf, "all"); err != nil {
+		t.Fatal(err)
+	}
+
+	// 全新环境导入
+	home2 := t.TempDir()
+	t.Setenv("OK_HOME", home2)
+	if _, err := Import(bytes.NewReader(buf.Bytes()), int64(buf.Len())); err != nil {
+		t.Fatal(err)
+	}
+	reg2, err := registry.Load(registry.DefaultPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reg2.Projects) != 1 || reg2.Projects[0].Name != "ghost" {
+		t.Fatalf("registry after import: %+v", reg2.Projects)
+	}
+	if len(reg2.Projects[0].Paths) != 0 {
+		t.Fatalf("空路径项目应还原为无 paths，got %+v", reg2.Projects[0].Paths)
+	}
+	// 条目仍落盘并可索引
+	if _, err := os.Stat(filepath.Join(home2, "projects", "ghost", "knowledge", "g.md")); err != nil {
+		t.Fatalf("entry not imported: %v", err)
+	}
+}
+
+// 导入后的索引重建须透传包内项目配置的 [index] max_lines（v2.18.1 回归：
+// Import 的 Sync 曾按默认 50 渲染，静默覆盖配置）。
+func TestImportHonorsMaxLines(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("OK_HOME", home)
+	reg := &registry.Registry{}
+	if err := reg.AddProject("proj", `D:\src\proj`); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.Save(registry.DefaultPath()); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(home, "projects", "proj", "knowledge")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 5; i++ {
+		md := "---\ntitle: 条目" + string(rune('A'+i)) + "\ntype: note\ntags: [t]\nsummary: s\n---\n正文\n"
+		if err := os.WriteFile(filepath.Join(dir, string(rune('a'+i))+".md"), []byte(md), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(home, "projects", "proj", "config.toml"),
+		[]byte("[index]\nmax_lines = 3\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := Export(&buf, "all"); err != nil {
+		t.Fatal(err)
+	}
+
+	home2 := t.TempDir()
+	t.Setenv("OK_HOME", home2)
+	if _, err := Import(bytes.NewReader(buf.Bytes()), int64(buf.Len())); err != nil {
+		t.Fatal(err)
+	}
+	indexMD, err := os.ReadFile(filepath.Join(home2, "projects", "proj", "INDEX.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(indexMD), "另有 2 条未列出") {
+		t.Fatalf("导入后 max_lines=3 未生效（5 条应折叠 2 条）:\n%s", indexMD)
+	}
+}

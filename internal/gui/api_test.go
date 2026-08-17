@@ -1497,3 +1497,75 @@ func TestGateRoundTrip(t *testing.T) {
 		t.Fatalf("extra 应保留: %q", cfgData)
 	}
 }
+
+// 更新路径须继承旧条目的 draft/archived 标记（v2.18.1 回归：entryRequest 不含
+// 生命周期字段，writeEntry 曾默认 false——编辑草稿静默转正、编辑归档条目静默
+// 取消归档）。
+func TestEntryUpdatePreservesLifecycleFlags(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	mkProject(t, okHome, "demo")
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	knowledge := filepath.Join(okHome, "projects", "demo", "knowledge")
+
+	for _, tc := range []struct {
+		file, fm string
+		check    func(e *entry.Entry) bool
+	}{
+		{"draft-e.md", "draft: true\n", func(e *entry.Entry) bool { return e.Draft }},
+		{"arch-e.md", "archived: true\n", func(e *entry.Entry) bool { return e.Archived }},
+	} {
+		content := "---\ntitle: " + tc.file + "\ntype: note\n" + tc.fm + "summary: s\n---\n正文\n"
+		if err := os.WriteFile(filepath.Join(knowledge, tc.file), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		upd := entryPayload("修订 " + tc.file)
+		upd["file"] = tc.file
+		code, data := do(t, "PUT", srv.URL+"/api/entry", testToken, upd)
+		if code != 200 {
+			t.Fatalf("%s update: status = %d, body %s", tc.file, code, data)
+		}
+		raw, err := os.ReadFile(filepath.Join(knowledge, tc.file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		e, err := entry.Parse(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !tc.check(e) {
+			t.Fatalf("%s 更新后生命周期标记丢失: %+v", tc.file, e)
+		}
+		if e.Title != "修订 "+tc.file {
+			t.Fatalf("%s 标题未更新: %+v", tc.file, e)
+		}
+	}
+}
+
+// GUI 条目写路径触发的索引同步须透传项目配置的 [index] max_lines（v2.18.1 回归：
+// syncIndex 曾按默认 50 渲染，静默覆盖用户配置）。
+func TestEntryWriteHonorsMaxLines(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	mkProject(t, okHome, "demo")
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	cfgPath := filepath.Join(okHome, "projects", "demo", "config.toml")
+	if err := os.WriteFile(cfgPath, []byte("[index]\nmax_lines = 3\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 5; i++ {
+		p := entryPayload(fmt.Sprintf("条目%d", i))
+		p["title"] = fmt.Sprintf("条目%d", i)
+		code, data := do(t, "POST", srv.URL+"/api/entry", testToken, p)
+		if code != 200 {
+			t.Fatalf("create %d: status = %d, body %s", i, code, data)
+		}
+	}
+	indexMD, err := os.ReadFile(filepath.Join(okHome, "projects", "demo", "INDEX.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(indexMD), "另有 2 条未列出") {
+		t.Fatalf("max_lines=3 未生效（5 条应折叠 2 条）:\n%s", indexMD)
+	}
+}

@@ -180,10 +180,17 @@ func Add(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "条目已存在: %s\n", path)
 		return 1
 	}
+	// --force 覆盖写同样受秒级 mtime 粒度影响：同秒覆盖会被 Sync 判未变化，
+	// 写后按 Approve 同口径推进 mtime
+	var prev time.Time
+	if fi, err := os.Stat(path); err == nil {
+		prev = fi.ModTime()
+	}
 	if err := fsx.WriteFile(path, e.Serialize(), 0o644); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	fsx.BumpMtime(path, prev)
 	fmt.Fprintf(stdout, "已创建 %s\n", path)
 	return afterAdd(pc, stdout, stderr)
 }
@@ -489,17 +496,16 @@ func Archive(args []string, stdout, stderr io.Writer) int {
 		e.Archived = !*undo
 		// Sync 的 diff 按秒级 mtime 判断变化；归档与 --undo 同秒内连跑会被误判为
 		// 未变化而跳过重建，此时手动把 mtime 推进一秒（与 Approve 同口径）。
-		oldInfo, statErr := os.Stat(path)
-		if err := os.WriteFile(path, e.Serialize(), 0o644); err != nil {
+		var prev time.Time
+		if fi, statErr := os.Stat(path); statErr == nil {
+			prev = fi.ModTime()
+		}
+		// 原子写（tmp+fsync+rename）：裸 os.WriteFile 中途崩溃会留半截文件
+		if err := fsx.WriteFile(path, e.Serialize(), 0o644); err != nil {
 			fmt.Fprintf(stderr, "%s: %v\n", base, err)
 			return 1
 		}
-		if statErr == nil {
-			if newInfo, err := os.Stat(path); err == nil && newInfo.ModTime().Unix() == oldInfo.ModTime().Unix() {
-				t := oldInfo.ModTime().Add(time.Second)
-				_ = os.Chtimes(path, t, t)
-			}
-		}
+		fsx.BumpMtime(path, prev)
 	}
 	db, err := index.Open(pc.Store.KbPath())
 	if err != nil {
@@ -574,6 +580,12 @@ func Doctor(args []string, stdout, stderr io.Writer) int {
 		if _, err := os.Stat(st.KnowledgeDir()); err != nil {
 			fmt.Fprintf(stdout, "[%s] knowledge 目录缺失\n", p.Name)
 			healthy = false
+		}
+		if len(p.Paths) == 0 || p.Paths[0] == "" {
+			// registry.toml 可手工编辑；无路径项目无可检目录，不崩溃、只报告
+			fmt.Fprintf(stdout, "[%s] 未登记项目路径\n", p.Name)
+			healthy = false
+			continue
 		}
 		pc, err := project.FromCwd(p.Paths[0])
 		if err != nil {
@@ -733,17 +745,15 @@ func Approve(args []string, stdout, stderr io.Writer) int {
 	e.Draft = false
 	// Sync 的 diff 按秒级 mtime 判断变化；propose 后同一秒内 approve 会被误判为
 	// 未变化而跳过重建，此时手动把 mtime 推进一秒。
-	oldInfo, statErr := os.Stat(path)
+	var prev time.Time
+	if fi, statErr := os.Stat(path); statErr == nil {
+		prev = fi.ModTime()
+	}
 	if err := fsx.WriteFile(path, e.Serialize(), 0o644); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	if statErr == nil {
-		if newInfo, err := os.Stat(path); err == nil && newInfo.ModTime().Unix() == oldInfo.ModTime().Unix() {
-			t := oldInfo.ModTime().Add(time.Second)
-			_ = os.Chtimes(path, t, t)
-		}
-	}
+	fsx.BumpMtime(path, prev)
 	fmt.Fprintf(stdout, "已批准 %s\n", path)
 	return afterAdd(pc, stdout, stderr)
 }
