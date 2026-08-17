@@ -2,7 +2,7 @@
 ; 构建：bash scripts/build-installer.sh（先构建 dist/ 再调用 ISCC）
 
 #define AppName "OpenKnowledge"
-#define AppVersion "2.18.1"
+#define AppVersion "2.18.2"
 #define AppPublisher "OpenKnowledge"
 
 [Setup]
