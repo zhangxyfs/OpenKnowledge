@@ -1,0 +1,29 @@
+# CI：go vet + build + 全量测试，Windows/Linux 双平台矩阵。
+# 跨平台是本项目的硬约束（Windows 宿主交叉构建 Linux 包、路径/权限位历史坑多次
+# 翻车），本地只在 Windows 跑 go test 会漏掉 Linux-only 的回归——测试自带 git
+# 身份（-c user.email）与 httptest 假服务，CI 无需网络与凭据。
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      - run: go build ./...
+      - run: go test ./...

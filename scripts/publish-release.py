@@ -18,6 +18,7 @@ import json
 import re
 import subprocess
 import sys
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -33,9 +34,15 @@ def app_version():
 
 
 def cred(host):
-    p = subprocess.run(["git", "credential", "fill"], input=f"protocol=https\nhost={host}\n\n",
-                       capture_output=True, text=True, check=True)
-    return dict(l.split("=", 1) for l in p.stdout.strip().splitlines())["password"]
+    try:
+        p = subprocess.run(["git", "credential", "fill"], input=f"protocol=https\nhost={host}\n\n",
+                           capture_output=True, text=True, check=True, timeout=30)
+    except (subprocess.TimeoutExpired, subprocess.CalledProcessError) as e:
+        sys.exit(f"git credential fill 失败（{host}）: {e}")
+    fields = dict(l.split("=", 1) for l in p.stdout.strip().splitlines())
+    if "password" not in fields:
+        sys.exit(f"git credential fill 未返回 {host} 的凭据（先对该 host 做一次推送完成授权）")
+    return fields["password"]
 
 
 def req(url, token, method="GET", data=None, headers=None, raw=False):
@@ -43,9 +50,18 @@ def req(url, token, method="GET", data=None, headers=None, raw=False):
     if headers:
         h.update(headers)
     r = urllib.request.Request(url, data=data, method=method, headers=h)
-    with urllib.request.urlopen(r) as resp:
-        payload = resp.read()
-        return resp.status, (payload if raw else json.loads(payload))
+    # 4xx/5xx 以 (status, 原始字节) 返回而非抛 HTTPError：幂等续传依赖 422（release
+    # 已存在）这类"业务冲突"状态做分支——urlopen 对它们抛异常会让分支永远不可达
+    try:
+        with urllib.request.urlopen(r, timeout=300) as resp:
+            payload = resp.read()
+            return resp.status, (payload if raw else json.loads(payload))
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
+
+
+def snippet(b):
+    return b[:300].decode("utf-8", "replace")
 
 
 def publish(host, api_base, upload_kind, tag, body, assets, dry_run):
@@ -54,21 +70,36 @@ def publish(host, api_base, upload_kind, tag, body, assets, dry_run):
         print(f"[dry-run] {host}: 建/复用 release {tag}，传 {[a.name for a in assets]}")
         return
     token = cred(host)
-    status, rel = req(f"{api_base}/repos/{repo}/releases", token, "POST",
-                      data=json.dumps({"tag_name": tag, "name": tag, "body": body}).encode(),
-                      headers={"Content-Type": "application/json"})
-    if status == 422:  # 已存在 → 查出来复用（续传产物）
-        _, rel = req(f"{api_base}/repos/{repo}/releases/tags/{tag}", token)
-        print(f"{host}: release 已存在 id={rel['id']}，复用")
-    else:
+    status, resp = req(f"{api_base}/repos/{repo}/releases", token, "POST",
+                       data=json.dumps({"tag_name": tag, "name": tag, "body": body}).encode(),
+                       headers={"Content-Type": "application/json"})
+    if status in (200, 201):
+        rel = resp
         print(f"{host}: release 创建 id={rel['id']} ({status})")
+    else:  # 422（GitHub/Gitea 的"tag 已存在"）→ 查出来复用（续传产物）
+        status2, rel = req(f"{api_base}/repos/{repo}/releases/tags/{tag}", token)
+        if status2 != 200:
+            sys.exit(f"{host}: release 创建失败 HTTP {status}，按 tag 复查也失败 HTTP {status2}: {snippet(resp)}")
+        print(f"{host}: release 已存在 id={rel['id']}，复用")
     if upload_kind == "gitea":
-        upload_url = f"{api_base}/repos/{repo}/releases/{rel['id']}/assets"
+        assets_url = f"{api_base}/repos/{repo}/releases/{rel['id']}/assets"
+        upload_url = assets_url
     else:
+        assets_url = rel["assets_url"]
         upload_url = rel["upload_url"].split("{")[0]
+    # 幂等续传：先列已有产物，同名跳过——断点重跑不重复上传
+    existing = set()
+    status, lst = req(f"{assets_url}?limit=100", token)
+    if status == 200 and isinstance(lst, list):
+        existing = {a["name"] for a in lst if isinstance(a, dict) and "name" in a}
     for a in assets:
-        status, _ = req(f"{upload_url}?name={a.name}", token, "POST", data=a.read_bytes(),
-                        headers={"Content-Type": "application/octet-stream"}, raw=True)
+        if a.name in existing:
+            print(f"{host}: {a.name} 已存在，跳过")
+            continue
+        status, resp = req(f"{upload_url}?name={a.name}", token, "POST", data=a.read_bytes(),
+                           headers={"Content-Type": "application/octet-stream"}, raw=True)
+        if status not in (200, 201):
+            sys.exit(f"{host}: {a.name} 上传失败 HTTP {status}: {snippet(resp)}")
         print(f"{host}: {a.name} → {status}")
 
 
