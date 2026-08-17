@@ -169,7 +169,7 @@ func Add(args []string, stdout, stderr io.Writer) int {
 	if sum == "" {
 		sum = *title
 	}
-	e := &entry.Entry{Title: *title, Type: *typ, Mandatory: *mandatory, Summary: sum, Body: strings.TrimSpace(body)}
+	e := &entry.Entry{Title: *title, Type: *typ, Mandatory: *mandatory, Summary: sum, Body: strings.TrimSpace(body), Created: time.Now().Format("2006-01-02")}
 	if *tags != "" {
 		for _, t := range strings.Split(*tags, ",") {
 			e.Tags = append(e.Tags, strings.TrimSpace(t))
@@ -658,7 +658,7 @@ func Propose(args []string, stdout, stderr io.Writer) int {
 	if sum == "" {
 		sum = *title
 	}
-	e := &entry.Entry{Title: *title, Type: *typ, Draft: true, Summary: sum, Body: strings.TrimSpace(content)}
+	e := &entry.Entry{Title: *title, Type: *typ, Draft: true, Summary: sum, Body: strings.TrimSpace(content), Created: time.Now().Format("2006-01-02")}
 	if *tags != "" {
 		for _, t := range strings.Split(*tags, ",") {
 			e.Tags = append(e.Tags, strings.TrimSpace(t))

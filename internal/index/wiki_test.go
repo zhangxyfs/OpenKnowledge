@@ -87,3 +87,52 @@ func TestRebuildIndexNoWikiSection(t *testing.T) {
 		t.Fatalf("no wiki entries should mean no section:\n%s", data)
 	}
 }
+
+// 归档的 wiki 条目不进 INDEX.md 的 "Wiki 目录" 节（WikiEntries 过滤 archived），
+// 但仍留在库中计入 Count，可检索、可取消归档。
+func TestRebuildIndexWikiSectionSkipsArchived(t *testing.T) {
+	root := t.TempDir()
+	kdir := filepath.Join(root, "knowledge")
+	writeEntryFile(t, kdir, "live.md", "---\ntitle: 活wiki\ntype: reference\ntags: [wiki]\nsummary: 活着的\ndraft: false\nmandatory: false\n---\n正文\n")
+	writeEntryFile(t, kdir, "arch.md", "---\ntitle: 归档wiki\ntype: reference\ntags: [wiki]\nsummary: 已归档\narchived: true\ndraft: false\nmandatory: false\n---\n正文\n")
+
+	db, err := Open(filepath.Join(root, "kb.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := db.Sync(kdir, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// WikiEntries 排除归档 wiki 条目
+	entries, err := db.WikiEntries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Title != "活wiki" {
+		t.Fatalf("WikiEntries: %+v", entries)
+	}
+
+	// INDEX.md 的 Wiki 目录节与主列表都不含归档条目
+	data, err := os.ReadFile(filepath.Join(root, "INDEX.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(data)
+	i := strings.Index(s, "## Wiki 目录")
+	if i < 0 {
+		t.Fatalf("INDEX.md missing wiki section:\n%s", s)
+	}
+	if strings.Contains(s[i:], "归档wiki") {
+		t.Fatalf("archived wiki entry should not appear in wiki section:\n%s", s[i:])
+	}
+	if strings.Contains(s[:i], "归档wiki") {
+		t.Fatalf("archived wiki entry should not appear in main list:\n%s", s[:i])
+	}
+
+	// 归档条目仍在库中：Count 计入
+	if n, _ := db.Count(); n != 2 {
+		t.Fatalf("Count = %d, want 2", n)
+	}
+}

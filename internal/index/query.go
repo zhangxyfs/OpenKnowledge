@@ -383,9 +383,10 @@ type WikiEntry struct {
 	Branch   string
 }
 
-// WikiEntries 返回打 wiki 标签的已转正条目（按 title 排序）。
+// WikiEntries 返回打 wiki 标签的已转正未归档条目（按 title 排序）。
+// 与 rebuildIndex 主列表口径一致：归档条目不进 INDEX（含 Wiki 目录节）。
 func (db *DB) WikiEntries() ([]WikiEntry, error) {
-	rows, err := db.sql.Query(`SELECT title, filename, summary, tags FROM entries WHERE draft = 0 AND tags LIKE '%wiki%' ORDER BY title`)
+	rows, err := db.sql.Query(`SELECT title, filename, summary, tags FROM entries WHERE draft = 0 AND archived = 0 AND tags LIKE '%wiki%' ORDER BY title`)
 	if err != nil {
 		return nil, err
 	}

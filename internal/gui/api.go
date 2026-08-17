@@ -629,7 +629,16 @@ func validateEntryRequest(w http.ResponseWriter, req *entryRequest) *store.Store
 }
 
 // writeEntry 统一写流程：序列化 → 写盘 → 同步索引 → 返回列表项。
-func writeEntry(w http.ResponseWriter, st *store.Store, path string, req *entryRequest) {
+// created 仅新建路径传入（YYYY-MM-DD）；更新既有条目传 ""，此时从盘上原条目
+// 继承 created，既不新写也不抹掉已有值。
+func writeEntry(w http.ResponseWriter, st *store.Store, path string, req *entryRequest, created string) {
+	if created == "" {
+		if data, err := os.ReadFile(path); err == nil {
+			if old, err := entry.Parse(data); err == nil {
+				created = old.Created
+			}
+		}
+	}
 	e := &entry.Entry{
 		Title:     strings.TrimSpace(req.Title),
 		Type:      req.Type,
@@ -637,6 +646,7 @@ func writeEntry(w http.ResponseWriter, st *store.Store, path string, req *entryR
 		Mandatory: req.Mandatory,
 		Summary:   req.Summary,
 		Body:      strings.TrimSpace(req.Body),
+		Created:   created,
 		Path:      path,
 	}
 	if err := fsx.WriteFile(path, e.Serialize(), 0o644); err != nil {
@@ -715,7 +725,7 @@ func (h *Handler) apiEntryCreate(w http.ResponseWriter, r *http.Request) {
 			req.Tags = append(req.Tags, bt)
 		}
 	}
-	writeEntry(w, st, path, &req)
+	writeEntry(w, st, path, &req, time.Now().Format("2006-01-02"))
 }
 
 func (h *Handler) apiEntryUpdate(w http.ResponseWriter, r *http.Request) {
@@ -735,7 +745,7 @@ func (h *Handler) apiEntryUpdate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "条目不存在")
 		return
 	}
-	writeEntry(w, st, path, &req)
+	writeEntry(w, st, path, &req, "")
 }
 
 func (h *Handler) apiEntryDelete(w http.ResponseWriter, r *http.Request) {

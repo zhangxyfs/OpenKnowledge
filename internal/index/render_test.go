@@ -48,7 +48,6 @@ summary: s
 	if archived != 1 {
 		t.Fatalf("archived=%d, want 1", archived)
 	}
-	_ = strings.TrimSpace("") // 占位防未用导入，后续任务测试会用 strings
 }
 
 func TestDedupSummary(t *testing.T) {
@@ -56,7 +55,7 @@ func TestDedupSummary(t *testing.T) {
 		{"Git 提交规范", "Git 提交规范", ""},                       // 完全复读
 		{"Git 提交规范", "Git 提交规范。", ""},                      // 末尾标点归一后复读
 		{"Bun.spawn 无内建 timeout", "Bun.spawn 无内建 timeout：opencode 插件须手动 kill 防挂死", ""}, // 标题为摘要前缀
-		{"索引膨胀治理方案", "索引膨胀治理方案分三级", ""},           // 共有前缀 8/10 ≥80%
+		{"索引膨胀治理方案", "索引膨胀治理方案分三级", ""},           // 标题是摘要前缀且覆盖 8/11≥40%
 		{"Git 提交规范", "提交信息格式", "提交信息格式"},              // 摘要补充新信息，保留
 		{"短", "短甲长得多得多的补充说明", "短甲长得多得多的补充说明"}, // 共有前缀<80%，保留
 		{"任意标题", "", ""},                                        // 空摘要原样
