@@ -531,25 +531,27 @@ func (h *Handler) apiProjectDelete(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "缺少 project 参数")
 		return
 	}
-	reg, err := registry.Load(registry.DefaultPath())
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
+	// 锁内读-改-写：与并发的 ok init / 备份恢复互斥，防止互相覆盖丢注册
 	found := false
-	for _, p := range reg.Projects {
-		if p.Name == name {
-			name = p.Name // 以注册表登记名为准
-			found = true
-			break
+	err := registry.Update(func(reg *registry.Registry) error {
+		for _, p := range reg.Projects {
+			if p.Name == name {
+				name = p.Name // 以注册表登记名为准
+				found = true
+				break
+			}
 		}
-	}
-	if !found {
-		writeErr(w, http.StatusNotFound, fmt.Sprintf("项目未注册: %q", name))
-		return
-	}
-	reg.RemoveProject(name)
-	if err := reg.Save(registry.DefaultPath()); err != nil {
+		if !found {
+			return fmt.Errorf("项目未注册: %q", name)
+		}
+		reg.RemoveProject(name)
+		return nil
+	})
+	if err != nil {
+		if !found {
+			writeErr(w, http.StatusNotFound, err.Error())
+			return
+		}
 		writeErr(w, http.StatusInternalServerError, fmt.Sprintf("注册表保存失败（未删除任何数据）: %v", err))
 		return
 	}

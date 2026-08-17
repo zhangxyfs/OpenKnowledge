@@ -130,3 +130,47 @@ func TestSessionAdoptedKnowledge(t *testing.T) {
 		t.Fatalf("Update 合并失败: %+v", st)
 	}
 }
+
+// 崩溃残留的锁（mtime 早于抢占阈值）不得卡住后续 Update：应被抢占后正常执行，
+// 否则一次 hook 进程被杀留下的锁文件会让该会话此后每次 Update 都白等 5s 进
+// fail-open 无锁直写。
+func TestUpdatePreemptsStaleLock(t *testing.T) {
+	dir := t.TempDir()
+	lp := filepath.Join(dir, fileName("s1")+".lock")
+	if err := os.WriteFile(lp, []byte("dead-holder"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	past := time.Now().Add(-time.Minute)
+	if err := os.Chtimes(lp, past, past); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- Update(dir, "s1", func(s *Session) { s.AddTouched("a.go") })
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("stale lock not preempted")
+	}
+	if s := Load(dir, "s1"); len(s.Touched) != 1 {
+		t.Fatalf("update lost: %+v", s)
+	}
+}
+
+// 损坏的状态文件按空状态加载（自愈），不得返回半解析结果——半截 Session 被回写
+// 会把损坏"洗白"成错误状态（如 BaseInjected=false 触发 mandatory 重注入）。
+func TestLoadCorruptFileSelfHeals(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, fileName("s1"))
+	if err := os.WriteFile(p, []byte(`{"session_id":"s1","base_injected":tr`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := Load(dir, "s1")
+	if s.BaseInjected || len(s.Touched) != 0 || len(s.BlockedRules) != 0 {
+		t.Fatalf("corrupt state must load as empty: %+v", s)
+	}
+}

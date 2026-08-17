@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
 )
@@ -87,5 +88,34 @@ func TestRemoveProject(t *testing.T) {
 	}
 	if len(back.Projects) != 1 || back.Projects[0].Name != "beta" {
 		t.Fatalf("unexpected projects after remove: %+v", back.Projects)
+	}
+}
+
+// Update 并发写不丢注册：多个进程（ok init / GUI / 备份恢复）各自 AddProject
+// 时，最终注册表必须包含全部项目——无锁的 Load→改→Save 后写者会吃掉先写者，
+// 被覆盖项目的 hooks 从此全部失效且无报错。
+func TestUpdateConcurrentWritersKeepAll(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("OK_HOME", dir)
+	const writers = 8
+	done := make(chan error, writers)
+	for i := 0; i < writers; i++ {
+		go func(i int) {
+			done <- Update(func(reg *Registry) error {
+				return reg.AddProject(fmt.Sprintf("p%d", i), fmt.Sprintf("D:/src/p%d", i))
+			})
+		}(i)
+	}
+	for i := 0; i < writers; i++ {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+	reg, err := Load(DefaultPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reg.Projects) != writers {
+		t.Fatalf("lost updates: %d projects, want %d", len(reg.Projects), writers)
 	}
 }

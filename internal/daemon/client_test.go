@@ -98,26 +98,31 @@ func TestForwardHookVersionMismatch(t *testing.T) {
 	}
 }
 
-func TestForwardHookTimeout(t *testing.T) {
+// 超时=daemon 已收到且处理不可取消 → handled=true：本地兜底会造成同一次事件
+// 双执行（entry_events 双份、采纳双倍入账）。宁缺毋双，该轮注入缺失可接受。
+func TestForwardHookTimeoutHandled(t *testing.T) {
 	t.Setenv("OK_HOME", t.TempDir())
 	_ = stubSpawn(t)
+	old := forwardTimeout
+	forwardTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { forwardTimeout = old })
 	fp, _ := daemonx.ExeFingerprint()
 	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/health" {
 			json.NewEncoder(w).Encode(map[string]string{"fingerprint": fp})
 			return
 		}
-		time.Sleep(12 * time.Second)
+		time.Sleep(500 * time.Millisecond)
 	}))
 	defer slow.Close()
 	saveInfo(t, slow.Listener.Addr().(*net.TCPAddr).Port, fp)
 	var out bytes.Buffer
 	start := time.Now()
 	handled, code := ForwardHook("prompt", "", []byte(`{}`), &out, &out)
-	if handled || code != 0 {
-		t.Fatalf("timeout should fail-open: handled=%v code=%d", handled, code)
+	if !handled || code != 0 {
+		t.Fatalf("timeout means daemon received it: handled=%v code=%d", handled, code)
 	}
-	if time.Since(start) > 10*time.Second {
-		t.Fatal("forward should time out at 9s")
+	if time.Since(start) > time.Second {
+		t.Fatal("forward should time out promptly")
 	}
 }

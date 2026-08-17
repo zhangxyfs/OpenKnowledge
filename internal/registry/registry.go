@@ -118,3 +118,19 @@ func HooksDisabled() bool {
 	_, err := os.Stat(filepath.Join(Home(), "hooks-disabled"))
 	return err == nil
 }
+
+// Update 在跨进程锁内完成注册表的读-改-写。并发的 ok init、GUI 删除项目、备份
+// 恢复各自 Load→改→Save 会互相覆盖（后写者吃掉先写者的项目注册——该项目的
+// hooks 从此全部失效且无任何报错），锁与 state 会话锁同款（fsx.WithFileLock）。
+func Update(fn func(*Registry) error) error {
+	return fsx.WithFileLock(DefaultPath(), func() error {
+		reg, err := Load(DefaultPath())
+		if err != nil {
+			return err
+		}
+		if err := fn(reg); err != nil {
+			return err
+		}
+		return reg.Save(DefaultPath())
+	})
+}

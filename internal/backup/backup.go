@@ -168,34 +168,29 @@ func Import(r io.ReaderAt, size int64) (*Report, error) {
 		return nil, fmt.Errorf("%w: 包内无有效条目", ErrBadPackage)
 	}
 
-	// 注册缺失项目（同名已注册则跳过——条目按项目名合并进现有目录）
-	local, err := registry.Load(registry.DefaultPath())
-	if err != nil {
-		return nil, err
-	}
+	// 注册缺失项目（同名已注册则跳过——条目按项目名合并进现有目录）。
+	// 锁内读-改-写：与并发的 ok init / GUI 删除互斥，防止互相覆盖丢注册
 	known := map[string]bool{}
-	for _, p := range local.Projects {
-		known[p.Name] = true
-	}
-	changed := false
-	for _, p := range zreg.Projects {
-		if known[p.Name] {
-			continue
+	if err := registry.Update(func(local *registry.Registry) error {
+		for _, p := range local.Projects {
+			known[p.Name] = true
 		}
-		path := ""
-		if len(p.Paths) > 0 {
-			path = p.Paths[0]
+		for _, p := range zreg.Projects {
+			if known[p.Name] {
+				continue
+			}
+			path := ""
+			if len(p.Paths) > 0 {
+				path = p.Paths[0]
+			}
+			if err := local.AddProject(p.Name, path); err != nil {
+				return err
+			}
+			known[p.Name] = true
 		}
-		if err := local.AddProject(p.Name, path); err != nil {
-			return nil, err
-		}
-		known[p.Name] = true
-		changed = true
-	}
-	if changed {
-		if err := local.Save(registry.DefaultPath()); err != nil {
-			return nil, err
-		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 
 	rep := &Report{}

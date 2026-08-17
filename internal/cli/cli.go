@@ -73,16 +73,11 @@ func Init(args []string, stdout, stderr io.Writer) int {
 	if fs.NArg() == 1 {
 		name = fs.Arg(0)
 	}
-	reg, err := registry.Load(registry.DefaultPath())
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	if err := reg.AddProject(name, cwd); err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	if err := reg.Save(registry.DefaultPath()); err != nil {
+	// 锁内读-改-写：并发 ok init / GUI 删除 / 备份恢复各自 Load→Save 会互相
+	// 覆盖，项目注册静默丢失（hooks 对该项目全部失效）
+	if err := registry.Update(func(reg *registry.Registry) error {
+		return reg.AddProject(name, cwd)
+	}); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}

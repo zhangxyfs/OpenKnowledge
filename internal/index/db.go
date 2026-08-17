@@ -55,8 +55,12 @@ type DB struct {
 // Open 打开（必要时创建）索引库并建表；若同目录存在旧版 vectors.json
 // 且 vectors 表为空，则导入其向量并将该文件改名为 vectors.json.bak。
 func Open(path string) (*DB, error) {
-	// busy_timeout：daemon 与本地兜底路径短暂并发写时等待而非立即 SQLITE_BUSY
-	dsn := "file:" + filepath.ToSlash(path) + "?_pragma=busy_timeout(3000)"
+	// busy_timeout：daemon 与本地兜底路径短暂并发写时等待而非立即 SQLITE_BUSY；
+	// WAL：读写不互斥（注入查询不再被同步写事务挡住，多进程并发下 busy 大幅减少）；
+	// synchronous=NORMAL：WAL 下的推荐配对（断电至多丢最后一个已提交事务，不损坏
+	// 库；索引可由条目文件重建，可接受）
+	dsn := "file:" + filepath.ToSlash(path) +
+		"?_pragma=busy_timeout(3000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)"
 	sqldb, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
