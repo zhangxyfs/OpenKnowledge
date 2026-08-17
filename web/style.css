@@ -293,6 +293,7 @@ input:focus, select:focus, textarea:focus {
   color: #666;
 }
 .form-inline input[type="number"] { width: 4em; }
+#mandatory-max-tokens { width: 6.5em; } /* 5 位数字 + 步进按钮 */
 
 .badge {
   display: inline-block;

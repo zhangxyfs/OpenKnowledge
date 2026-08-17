@@ -129,12 +129,32 @@
           <p class="card-desc muted">一键启停全部 hooks，关闭期间完全静默。</p>
           <div class="card-actions"><button id="btn-toggle" type="button" class="btn">关闭</button></div>
         </div>
-        <div class="card card-wide">
+        <div class="card">
           <div class="card-head"><h3>embedding 语义检索</h3><span id="badge-embedding" class="badge badge-off">未配置</span></div>
           <p id="emb-current" class="card-desc muted">未启用（仅关键词检索）</p>
           <div class="card-actions"><button id="btn-embedding-config" type="button" class="btn">配置…</button></div>
         </div>
-        <div class="card card-wide">
+        <div class="card">
+          <div class="card-head"><h3>泛化门控</h3><span id="badge-gate" class="badge badge-on">启用</span></div>
+          <p id="gate-status" class="card-desc muted">门控：…</p>
+          <div class="card-actions">
+            <label><input id="gate-enabled" type="checkbox"> 启用泛化 prompt 门控（"继续"/"好的"类跳过检索注入）</label>
+            <button id="btn-gate-save" type="button" class="btn">保存</button>
+            <button id="btn-gate-phrases" type="button" class="btn">管理短语表</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>规则配置</h3></div>
+          <p class="card-desc muted">mandatory（必守规约）全文随首轮基础注入，是唯一不被注入预算截断的段；全文超上限时注入告警行提醒精简（默认 2000 token）。</p>
+          <div class="card-actions">
+            <span class="form-inline">
+              <label for="mandatory-max-tokens">最大 token</label>
+              <input id="mandatory-max-tokens" type="number" min="100" max="100000" value="2000">
+              <button id="btn-mandatory-save" type="button" class="btn">保存</button>
+            </span>
+          </div>
+        </div>
+        <div class="card">
           <div class="card-head"><h3>经验沉淀</h3></div>
           <p id="capture-status" class="card-desc muted">当前模式：…</p>
           <p id="capture-mode-note" class="card-desc muted"></p>
@@ -147,14 +167,6 @@
               <button id="btn-capture-interval" type="button" class="btn">保存</button>
             </span>
             <label class="capture-auto-born"><input id="auto-born" type="checkbox"> 自动记录出生分支</label>
-          </div>
-        </div>
-        <div class="card card-wide">
-          <div class="card-head"><h3>泛化门控</h3><span id="badge-gate" class="badge badge-on">启用</span></div>
-          <p id="gate-status" class="card-desc muted">门控：…</p>
-          <div class="card-actions">
-            <label><input id="gate-enabled" type="checkbox"> 启用泛化 prompt 门控（"继续"/"好的"类跳过检索注入）</label>
-            <button id="btn-gate-phrases" type="button" class="btn">管理短语表</button>
           </div>
         </div>
         <div class="card card-danger">

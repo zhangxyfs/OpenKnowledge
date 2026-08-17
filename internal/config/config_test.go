@@ -17,6 +17,9 @@ func TestLoadMissingReturnsDefault(t *testing.T) {
 	if cfg.Index.MaxLines != 50 {
 		t.Fatalf("default index.max_lines = %v, want 50", cfg.Index.MaxLines)
 	}
+	if cfg.Inject.MandatoryMaxTokens != 2000 {
+		t.Fatalf("default inject.mandatory_max_tokens = %v, want 2000", cfg.Inject.MandatoryMaxTokens)
+	}
 	if cfg.Retrieve.MinScore != 0.5 {
 		t.Fatalf("default min_score = %v, want 0.5", cfg.Retrieve.MinScore)
 	}

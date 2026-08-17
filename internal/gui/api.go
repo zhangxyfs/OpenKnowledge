@@ -76,6 +76,8 @@ func NewHandler(webDir, token string, beats chan<- struct{}) *Handler {
 	api("POST /api/capture", h.apiCaptureSet)
 	api("GET /api/gate", h.apiGateGet)
 	api("POST /api/gate", h.apiGateSet)
+	api("GET /api/inject", h.apiInjectGet)
+	api("POST /api/inject", h.apiInjectSet)
 	api("GET /api/project/branch-info", h.apiProjectBranchInfo)
 	api("POST /api/heartbeat", h.apiHeartbeat)
 	api("POST /api/shutdown", h.apiShutdown)
@@ -1190,6 +1192,50 @@ func cleanGatePhrases(in []string) ([]string, error) {
 		out = append(out, folded)
 	}
 	return out, nil
+}
+
+// apiInjectGet 返回项目合并配置中的注入预算：mandatory 全文 token 上限
+//（[inject] mandatory_max_tokens，默认 2000）。
+func (h *Handler) apiInjectGet(w http.ResponseWriter, r *http.Request) {
+	st := resolveProject(w, r.URL.Query().Get("project"))
+	if st == nil {
+		return
+	}
+	cfg, err := config.LoadMerged(st.ConfigPath(), filepath.Join(registry.Home(), "config.toml"))
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	limit := cfg.Inject.MandatoryMaxTokens
+	if limit <= 0 {
+		limit = 2000
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"mandatory_max_tokens": limit})
+}
+
+// apiInjectSet 设置 mandatory 全文 token 上限（100~100000，非法 400）；
+// 落盘走 config.SetInjectMandatoryMax（[inject] 小节内单键 upsert，其余键保留）。
+func (h *Handler) apiInjectSet(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Project            string `json:"project"`
+		MandatoryMaxTokens int    `json:"mandatory_max_tokens"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	st := resolveProject(w, req.Project)
+	if st == nil {
+		return
+	}
+	if req.MandatoryMaxTokens < 100 || req.MandatoryMaxTokens > 100000 {
+		writeErr(w, http.StatusBadRequest, "mandatory_max_tokens 必须在 100~100000 之间")
+		return
+	}
+	if err := config.SetInjectMandatoryMax(st.ConfigPath(), req.MandatoryMaxTokens); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "mandatory_max_tokens": req.MandatoryMaxTokens})
 }
 
 // apiProjectBranchInfo 返回项目的分支上下文：基准分支（wiki.json）、

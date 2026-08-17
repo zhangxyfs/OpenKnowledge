@@ -301,6 +301,66 @@ func TestReinjectTurnsPeriodic(t *testing.T) {
 	}
 }
 
+// TestMandatoryPointerFollowsGate 门控命中的无信息量轮次不注 mandatory 粘性指针
+//（基础注入不受门控影响）；门控外的正常轮次仍注指针。
+func TestMandatoryPointerFollowsGate(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	writeEntry(t, kbRoot, "规约.md", "---\ntitle: 架构规约\ntype: rule\nmandatory: true\nsummary: s\n---\n\n永远先跑 gofmt。\n")
+	// 登记独特泛化短语 → 第二轮 prompt 必命中门控
+	cfg := "[retrieve.gate]\nenabled = true\nextra_phrases = [\"泛泛而谈\"]\n"
+	if err := os.WriteFile(filepath.Join(kbRoot, "config.toml"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pc, err := project.FromCwd(projDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out := InjectForPrompt(pc, "s-gp", projDir, "第一次正常问题"); !strings.Contains(out, "永远先跑 gofmt") {
+		t.Fatalf("首轮基础注入应含 mandatory 全文，got: %q", out)
+	}
+	if out := InjectForPrompt(pc, "s-gp", projDir, "泛泛而谈"); strings.Contains(out, "必守规约") {
+		t.Fatalf("门控命中轮不应注入粘性指针，got: %q", out)
+	}
+	if out := InjectForPrompt(pc, "s-gp", projDir, "第三次正常问题"); !strings.Contains(out, "必守规约") {
+		t.Fatalf("门控外轮次应恢复粘性指针，got: %q", out)
+	}
+}
+
+// TestMandatoryBudgetWarn mandatory 全文超 mandatory_max_tokens 时注入告警行
+//（不硬截断，正文仍完整）；未超限时无告警。
+func TestMandatoryBudgetWarn(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	longBody := strings.Repeat("甲", 3000) // CJK 1 字 1 token → 约 3000 token
+	writeEntry(t, kbRoot, "rule.md", "---\ntitle: 长规约\ntype: rule\nmandatory: true\nsummary: s\n---\n\n"+longBody+"\n")
+	writeEntry(t, kbRoot, "短规约.md", "---\ntitle: 短规约\ntype: rule\nmandatory: true\nsummary: s\n---\n\n短。\n")
+	if err := os.WriteFile(filepath.Join(kbRoot, "config.toml"), []byte("[inject]\nmandatory_max_tokens = 2000\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pc, err := project.FromCwd(projDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := InjectForPrompt(pc, "s-budget", projDir, "随便问问")
+	if !strings.Contains(out, "超预算上限 2000") {
+		t.Fatalf("超限应注入告警行，got: %q", out[len(out)-min(200, len(out)):])
+	}
+	if !strings.Contains(out, longBody) {
+		t.Fatalf("告警不得截断 mandatory 正文，len(out)=%d", len(out))
+	}
+
+	// 对照：上限放宽到 5000 → 无告警
+	if err := os.WriteFile(filepath.Join(kbRoot, "config.toml"), []byte("[inject]\nmandatory_max_tokens = 5000\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pc2, err := project.FromCwd(projDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out2 := InjectForPrompt(pc2, "s-budget2", projDir, "随便问问"); strings.Contains(out2, "超预算上限") {
+		t.Fatalf("未超限不应有告警行，got: %q", out2)
+	}
+}
+
 // TestInjectRRFIgnoresAlphaBetaHint rrf 模式下配置了非默认 alpha/beta 时，
 // 注入流程应记一行 ok.log 提示被忽略（仅 weighted 生效）。
 func TestInjectRRFIgnoresAlphaBetaHint(t *testing.T) {

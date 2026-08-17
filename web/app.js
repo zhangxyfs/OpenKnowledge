@@ -209,6 +209,7 @@
     refreshCapture();
     state.gate = null; // 项目切换：清空旧项目短语缓存，防弹窗展示/串写旧项目数据
     refreshGate();
+    refreshInject();
   });
 
   $("branch-filter").addEventListener("change", function () {
@@ -694,6 +695,7 @@
     $("btn-toggle").textContent = s.disabled ? "开启" : "关闭";
     refreshCapture();
     refreshGate();
+    refreshInject();
   }
 
   // renderRxEnforce 三档卡仅 agent=reasonix 时显示，并回填当前保存的档位。
@@ -803,6 +805,15 @@
 
   // ---------- 引导页：泛化门控卡片 ----------
 
+  function gateDirty() {
+    return !!(state.gate) && $("gate-enabled").checked !== !!state.gate.enabled;
+  }
+
+  function updateGateSaveBtn() {
+    // 有未保存改动时高亮保存按钮
+    $("btn-gate-save").className = gateDirty() ? "btn btn-primary" : "btn";
+  }
+
   function refreshGate() {
     var project = captureProject();
     var statusEl = $("gate-status");
@@ -815,6 +826,7 @@
     api("/api/gate?project=" + encodeURIComponent(project)).then(function (g) {
       state.gate = g;
       $("gate-enabled").checked = !!g.enabled;
+      updateGateSaveBtn();
       $("badge-gate").className = "badge " + (g.enabled ? "badge-on" : "badge-off");
       $("badge-gate").textContent = g.enabled ? "启用" : "停用";
       statusEl.textContent = "门控：" + (g.enabled ? "启用" : "停用") +
@@ -824,17 +836,55 @@
   }
 
   $("gate-enabled").addEventListener("change", function () {
-    var project = captureProject();
-    if (!project) {
+    if (!captureProject()) {
       showError("尚无已注册项目，请先 ok init");
       this.checked = !this.checked;
       return;
     }
+    updateGateSaveBtn(); // 勾选只改本地状态，点保存才提交
+  });
+
+  $("btn-gate-save").addEventListener("click", function () {
+    var project = captureProject();
+    if (!project) {
+      showError("尚无已注册项目，请先 ok init");
+      return;
+    }
+    if (!gateDirty()) return;
     api("/api/gate", {
       method: "POST",
-      body: { project: project, enabled: this.checked }
+      body: { project: project, enabled: $("gate-enabled").checked }
     }).then(refreshGate)
       .catch(function (err) { showError(err.message); refreshGate(); });
+  });
+
+  // ---------- 引导页：规则配置卡（mandatory 预算上限） ----------
+
+  function refreshInject() {
+    var project = captureProject();
+    if (!project) return;
+    api("/api/inject?project=" + encodeURIComponent(project)).then(function (cfg) {
+      $("mandatory-max-tokens").value = cfg.mandatory_max_tokens;
+    }).catch(function (err) { showError(err.message); });
+  }
+
+  $("btn-mandatory-save").addEventListener("click", function () {
+    var project = captureProject();
+    if (!project) {
+      showError("尚无已注册项目，请先 ok init");
+      return;
+    }
+    var n = parseInt($("mandatory-max-tokens").value, 10);
+    if (!n || n < 100 || n > 100000) {
+      showError("最大 token 必须在 100~100000 之间");
+      refreshInject();
+      return;
+    }
+    api("/api/inject", {
+      method: "POST",
+      body: { project: project, mandatory_max_tokens: n }
+    }).then(refreshInject)
+      .catch(function (err) { showError(err.message); refreshInject(); });
   });
 
   // ---- 短语管理弹窗 ----

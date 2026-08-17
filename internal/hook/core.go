@@ -113,17 +113,34 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 	}); err != nil {
 		logErr("prompt save state: %v", err)
 	}
+	// 门控判定提前：检索段与 mandatory 粘性指针都消费它（基础注入不受门控影响）
+	gated := pc.Config.Retrieve.Gate.Enabled && retrieve.Gated(promptText, pc.Config.Retrieve.Gate.ExtraPhrases)
 	if doBase {
 		_ = state.Clean(pc.Store.StateDir(), 7*24*time.Hour)
 		for _, h := range mandatory {
 			fmt.Fprintf(&mandatoryText, "## %s\n\n%s\n\n", h.Title, h.Body)
 		}
+		// mandatory 预算护栏：它是唯一不被 max_tokens 截断的段，全文超限只告警
+		// 不硬截断（截断"必守"条目违背语义）——告警行进注入文本 + ok.log，
+		// 由人收敛条目或上调 [inject] mandatory_max_tokens（GUI 引导页可配）。
+		if mandatoryText.Len() > 0 {
+			limit := pc.Config.Inject.MandatoryMaxTokens
+			if limit <= 0 {
+				limit = 2000
+			}
+			if est := store.EstimateTokens(mandatoryText.String()); est > limit {
+				fmt.Fprintf(&mandatoryText, "⚠️ mandatory 全文约 %d token，超预算上限 %d（[inject] mandatory_max_tokens），请精简 mandatory 条目\n", est, limit)
+				logErr("prompt mandatory budget: 全文约 %d token 超上限 %d，请精简 mandatory 条目", est, limit)
+			}
+		}
 		if idxText != "" {
 			restText.WriteString(idxText)
 		}
-	} else if len(mandatory) > 0 {
+	} else if len(mandatory) > 0 && !gated {
 		// L3 粘性指针：全文只在基础注入轮出现，其余每轮仅注标题 + 路径（几十 token），
 		// 即使宿主压缩上下文把首轮全文摘要掉/沉入 lost-middle，模型仍能据此重读原文。
+		// 门控命中的无信息量轮次（"继续"/"好的"类）不注指针——全文在历史轮在场，
+		// 这类 prompt 不需要规约提醒。
 		mandatoryText.WriteString("## 必守规约（全文见文件，必要时读取）\n\n")
 		for _, h := range mandatory {
 			p := filepath.ToSlash(filepath.Join(pc.Store.KnowledgeDir(), h.Filename))
@@ -134,10 +151,10 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 	var queryVec []float32
 	var embedWarn string
 	var hits []index.Hit
-	if pc.Config.Retrieve.Gate.Enabled && retrieve.Gated(promptText, pc.Config.Retrieve.Gate.ExtraPhrases) {
-		// 泛化门控：无信息量 prompt（"继续"/"好的"类）跳过检索注入段——连 embed
-		// 调用都省（每轮一次网络往返）；mandatory/INDEX/wiki nudge 不受影响。
-		// GUI 日志页可按"门控"过滤。
+	if gated {
+		// 泛化门控：无信息量 prompt（"继续"/"好的"类）跳过检索注入段与 mandatory
+		// 粘性指针——连 embed 调用都省（每轮一次网络往返）；基础注入与 wiki
+		// nudge 不受影响。GUI 日志页可按"门控"过滤。
 		logErr("prompt gate: 门控命中，泛化 prompt 跳过检索与 embed")
 	} else {
 		if pc.Config.Retrieve.Fusion != "weighted" &&

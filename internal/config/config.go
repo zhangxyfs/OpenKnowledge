@@ -95,6 +95,11 @@ type Inject struct {
 	// 上下文压缩把首轮全文摘要掉后，模型仍可靠粘性指针重读文件；需要
 	// "硬约束始终在场"的宿主可设 >0 周期性重注入全文。
 	ReinjectTurns int `toml:"reinject_turns"`
+	// MandatoryMaxTokens mandatory 全文（首轮基础注入）的 token 预算上限，
+	// 默认 2000；<=0 按 2000（注入处归一）。mandatory 是唯一不被
+	// max_tokens 截断的段，超限时注入告警行提醒精简，不硬截断
+	// （截断"必守"条目违背语义）。
+	MandatoryMaxTokens int `toml:"mandatory_max_tokens"`
 }
 
 // Index 控制 INDEX.md 渲染预算。
@@ -224,7 +229,7 @@ type Config struct {
 func Default() Config {
 	return Config{
 		Embedding:  Embedding{TimeoutSec: 5},
-		Inject:     Inject{MaxTokens: 800},
+		Inject:     Inject{MaxTokens: 800, MandatoryMaxTokens: 2000},
 		Retrieve:   Retrieve{Alpha: 1.0, Beta: 1.0, TopN: 2, MinScore: 0.5, MinGap: 0.25, Fusion: "rrf", RrfK: 60,
 			Gate:    RetrieveGate{Enabled: true},
 			Recency: RetrieveRecency{Enabled: true, Floor: 0.85, Windows: RecencyWindows{

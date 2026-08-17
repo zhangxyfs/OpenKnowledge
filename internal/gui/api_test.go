@@ -1498,6 +1498,68 @@ func TestGateRoundTrip(t *testing.T) {
 	}
 }
 
+// /api/inject：mandatory_max_tokens 的 GET 默认值 / POST 落盘 / 非法值 400 / 重复设置幂等。
+func TestInjectMandatoryMaxRoundTrip(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	mkProject(t, okHome, "demo")
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	cfgPath := filepath.Join(okHome, "projects", "demo", "config.toml")
+
+	code, data := do(t, "GET", srv.URL+"/api/inject?project=demo", testToken, nil)
+	if code != 200 {
+		t.Fatalf("inject get: status = %d, body %s", code, data)
+	}
+	var view struct {
+		MandatoryMaxTokens int `json:"mandatory_max_tokens"`
+	}
+	if err := json.Unmarshal([]byte(data), &view); err != nil {
+		t.Fatal(err)
+	}
+	if view.MandatoryMaxTokens != 2000 {
+		t.Fatalf("默认应为 2000, got %d", view.MandatoryMaxTokens)
+	}
+
+	code, _ = do(t, "POST", srv.URL+"/api/inject", testToken,
+		map[string]any{"project": "demo", "mandatory_max_tokens": 3000})
+	if code != 200 {
+		t.Fatalf("inject set: status = %d", code)
+	}
+	cfgData, _ := os.ReadFile(cfgPath)
+	if !strings.Contains(string(cfgData), "mandatory_max_tokens = 3000") {
+		t.Fatalf("config 应含 mandatory_max_tokens = 3000: %q", cfgData)
+	}
+	code, data = do(t, "GET", srv.URL+"/api/inject?project=demo", testToken, nil)
+	if code != 200 {
+		t.Fatalf("inject re-get: status = %d", code)
+	}
+	if err := json.Unmarshal([]byte(data), &view); err != nil {
+		t.Fatal(err)
+	}
+	if view.MandatoryMaxTokens != 3000 {
+		t.Fatalf("GET 应反映 3000, got %d", view.MandatoryMaxTokens)
+	}
+
+	// 非法值：过小 / 过大 → 400
+	for _, bad := range []int{0, 50, 100001} {
+		code, _ = do(t, "POST", srv.URL+"/api/inject", testToken,
+			map[string]any{"project": "demo", "mandatory_max_tokens": bad})
+		if code != 400 {
+			t.Fatalf("mandatory_max_tokens=%d 应 400, got %d", bad, code)
+		}
+	}
+	// 重复设置幂等：键行唯一
+	code, _ = do(t, "POST", srv.URL+"/api/inject", testToken,
+		map[string]any{"project": "demo", "mandatory_max_tokens": 1500})
+	if code != 200 {
+		t.Fatalf("inject re-set: status = %d", code)
+	}
+	cfgData, _ = os.ReadFile(cfgPath)
+	if strings.Count(string(cfgData), "mandatory_max_tokens") != 1 {
+		t.Fatalf("重复设置应幂等替换: %q", cfgData)
+	}
+}
+
 // 更新路径须继承旧条目的 draft/archived 标记（v2.18.1 回归：entryRequest 不含
 // 生命周期字段，writeEntry 曾默认 false——编辑草稿静默转正、编辑归档条目静默
 // 取消归档）。
