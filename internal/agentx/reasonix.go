@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 
+	"openknowledge/internal/fsx"
 	"openknowledge/internal/version"
 )
 
@@ -169,7 +170,7 @@ func writeReasonixManifest(exe string) error {
 	if err := os.MkdirAll(reasonixPluginDir(), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(reasonixManifestPath(), append(data, '\n'), 0o644)
+	return fsx.WriteFile(reasonixManifestPath(), append(data, '\n'), 0o644)
 }
 
 // reasonixCurrent 报告插件登记与 manifest 是否均为当前期望形态

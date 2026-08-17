@@ -175,9 +175,13 @@ func (m *Manager) stopLocked() {
 		_, _ = m.cmd.Process.Wait()
 		m.cmd = nil
 	} else if st := LoadState(); st != nil {
-		// 跨进程残留（daemon 重启后 m.cmd 为空）：按 PID 杀
-		if p, err := os.FindProcess(st.PID); err == nil {
-			_ = p.Kill()
+		// 跨进程残留（daemon 重启后 m.cmd 为空）：按 PID 杀。仅当端口仍在正常
+		// 应答（Healthy）才杀——sidecar 已死而 Windows 复用了该 PID 时，盲杀会
+		// 误伤无关进程；不健康/不应答说明原进程大概率已退出，只清状态文件。
+		if st.Healthy() {
+			if p, err := os.FindProcess(st.PID); err == nil {
+				_ = p.Kill()
+			}
 		}
 	}
 	_ = os.Remove(statePath())

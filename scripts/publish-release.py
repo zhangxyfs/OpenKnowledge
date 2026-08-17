@@ -87,9 +87,12 @@ def publish(host, api_base, upload_kind, tag, body, assets, dry_run):
     else:
         assets_url = rel["assets_url"]
         upload_url = rel["upload_url"].split("{")[0]
-    # 幂等续传：先列已有产物，同名跳过——断点重跑不重复上传
+    # 幂等续传：先列已有产物，同名跳过——断点重跑不重复上传。
+    # 分页参数两家不同：Gitea 认 limit，GitHub 认 per_page（给 limit 会被忽略、
+    # 每页默认 30——产物多于一页时同名跳过会失效）
+    page_param = "limit" if upload_kind == "gitea" else "per_page"
     existing = set()
-    status, lst = req(f"{assets_url}?limit=100", token)
+    status, lst = req(f"{assets_url}?{page_param}=100", token)
     if status == 200 and isinstance(lst, list):
         existing = {a["name"] for a in lst if isinstance(a, dict) and "name" in a}
     for a in assets:

@@ -16,12 +16,18 @@ import (
 )
 
 // Client 返回使用中（active）profile 的客户端；未配置/暂不可用返回 nil。
+// timeout_sec 显式配 0/负数时钳回默认 5s——零值在 http.Client 语义里是"永不超时"，
+// hook 检索 / ok search / ok doctor 的 ping 会无限挂起直到 TCP 自身放弃。
 func Client(cfg config.Config) embed.Client {
 	p := cfg.Embedding.ActiveProfile()
 	if p == nil {
 		return nil
 	}
-	return ClientForProfile(*p, time.Duration(cfg.Embedding.TimeoutSec)*time.Second)
+	sec := cfg.Embedding.TimeoutSec
+	if sec <= 0 {
+		sec = 5
+	}
+	return ClientForProfile(*p, time.Duration(sec)*time.Second)
 }
 
 // ClientForIndex 是索引/重建路径的构造：与 Client 同语义，但超时下限 120s

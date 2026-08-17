@@ -237,3 +237,29 @@ func TestTestEmbeddingProfileBuiltinNoRuntime(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+
+// 并发保存不同 profile 不得互相覆盖丢更新（v2.18.2 回归：Save* 曾裸读改写无锁）。
+func TestConcurrentSaveEmbeddingProfile(t *testing.T) {
+	t.Setenv("OK_HOME", t.TempDir())
+	const n = 8
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		go func(i int) {
+			errs <- SaveEmbeddingProfile(config.EmbeddingProfile{
+				Name: "p" + string(rune('a'+i)), Type: "openai", BaseURL: "http://h/v1", Model: "m",
+			}, false)
+		}(i)
+	}
+	for i := 0; i < n; i++ {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg, err := config.LoadMerged("", filepath.Join(os.Getenv("OK_HOME"), "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Embedding.Profiles) != n {
+		t.Fatalf("并发保存丢更新: %d/%d 个 profile", len(cfg.Embedding.Profiles), n)
+	}
+}

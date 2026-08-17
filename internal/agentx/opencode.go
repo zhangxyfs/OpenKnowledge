@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"openknowledge/internal/fsx"
 )
 
 //go:embed opencode_plugin.ts
@@ -91,7 +93,7 @@ func (opencodeAgent) InstallHooks(exe string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(path, []byte(renderOpencodePlugin(exe)), 0o644)
+	return fsx.WriteFile(path, []byte(renderOpencodePlugin(exe)), 0o644)
 }
 
 func (opencodeAgent) RemoveHooks() (bool, error) {
@@ -128,5 +130,5 @@ func (opencodeAgent) EnsureHooks(exe string) error {
 	if string(data) == rendered {
 		return nil
 	}
-	return os.WriteFile(path, []byte(rendered), 0o644)
+	return fsx.WriteFile(path, []byte(rendered), 0o644)
 }

@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"openknowledge/internal/fsx"
 )
 
 //go:embed pi_extension.ts
@@ -77,7 +79,7 @@ func (piAgent) InstallHooks(exe string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(path, []byte(renderPiExtension(exe)), 0o644)
+	return fsx.WriteFile(path, []byte(renderPiExtension(exe)), 0o644)
 }
 
 func (piAgent) RemoveHooks() (bool, error) {
@@ -113,5 +115,5 @@ func (piAgent) EnsureHooks(exe string) error {
 	if string(data) == rendered {
 		return nil
 	}
-	return os.WriteFile(path, []byte(rendered), 0o644)
+	return fsx.WriteFile(path, []byte(rendered), 0o644)
 }

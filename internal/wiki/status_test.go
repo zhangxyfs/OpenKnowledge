@@ -279,7 +279,8 @@ func TestCheckStatusLegacyEmptyCommit(t *testing.T) {
 }
 
 func TestCheckStatusLegacyCommitMissing(t *testing.T) {
-	// Legacy 指向不存在的 commit（40 位假 hash）→ 旧行为路径
+	// Legacy 指向不存在的 commit（40 位假 hash）→ 归属不可判，报 legacy_orphan
+	//（v2.18.2 起；此前与"git 不可判"混同、BranchState 空、nudge 永不触发）
 	dir := initRepo(t, 1)
 	sd := t.TempDir()
 	legacy := `{"last_commit":"deadbeefdeadbeefdeadbeefdeadbeefdeadbeef","generated_at":"2026-08-08T09:00:00+08:00","entry_count":3}`
@@ -287,8 +288,8 @@ func TestCheckStatusLegacyCommitMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 	st := CheckStatus(sd, dir, 1)
-	if !st.HasWiki || st.Behind != -1 || st.BranchState != "" {
-		t.Fatalf("commit 不存在的 legacy 应走旧行为路径: %+v", st)
+	if !st.HasWiki || st.Behind != -1 || st.BranchState != "legacy_orphan" {
+		t.Fatalf("commit 不存在的 legacy 应报 legacy_orphan: %+v", st)
 	}
 }
 

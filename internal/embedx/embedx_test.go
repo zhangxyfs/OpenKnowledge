@@ -143,3 +143,16 @@ func TestBuiltinClientNotReadyWritesWant(t *testing.T) {
 		t.Fatal("应写 want 请求 daemon 拉起")
 	}
 }
+
+// timeout_sec 显式配 0 时钳回默认 5s（v2.18.2 回归：http.Client 零值=永不超时，
+// hook 检索 / ok search / ok doctor 会无限挂起）。
+func TestClientZeroTimeoutClamped(t *testing.T) {
+	cfg := config.Config{Embedding: config.Embedding{
+		Active: "a", TimeoutSec: 0,
+		Profiles: []config.EmbeddingProfile{{Name: "a", Type: "openai", BaseURL: "http://h/v1", Model: "m"}},
+	}}
+	oc, ok := Client(cfg).(*embed.OpenAIClient)
+	if !ok || oc.Timeout != 5*time.Second {
+		t.Fatalf("timeout_sec=0 应钳回 5s: %+v", oc)
+	}
+}

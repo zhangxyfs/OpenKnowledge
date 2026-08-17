@@ -136,18 +136,25 @@ func CheckStatus(stateDir, srcDir string, threshold int) *Status {
 	if s.Legacy != nil {
 		lc := s.Legacy.LastCommit
 		switch {
-		case branch == "" || !commitExists(srcDir, lc):
-			// git 不可判：保持旧行为（直接用 legacy 算，失败则 Behind=-1）
+		case branch == "" || lc == "":
+			// git 不可判 / 空游标（非 git mark 的时间戳游标）：保持旧行为
+			//（直接用 legacy 算，失败则 Behind=-1；空游标不算 behind）
 			st.HasWiki = true
 			st.LastCommit = lc
 			if lc == "" {
-				// 空游标（非 git mark 的时间戳游标）：旧版提前返回，不算 behind
 				return st
 			}
 			if n, err := countCommits(srcDir, lc+"..HEAD"); err == nil {
 				st.Behind = n
 				st.Stale = threshold > 0 && n >= threshold
 			}
+			return st
+		case !commitExists(srcDir, lc):
+			// 游标 commit 存在分支但不可达（历史被改写/空仓重建）：此前落入
+			// "git 不可判"分支，BranchState 空、nudge 永不触发；报 legacy_orphan
+			st.HasWiki = true
+			st.LastCommit = lc
+			st.BranchState = "legacy_orphan"
 			return st
 		case isAncestor(srcDir, lc, "HEAD"):
 			// 可达 → 视同归入当前分支（内存升级，不落盘）

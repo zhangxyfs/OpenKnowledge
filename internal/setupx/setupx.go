@@ -21,6 +21,7 @@ import (
 	"openknowledge/internal/embed"
 	"openknowledge/internal/embedsidecar"
 	"openknowledge/internal/embedx"
+	"openknowledge/internal/fsx"
 	"openknowledge/internal/registry"
 )
 
@@ -76,7 +77,7 @@ func InstallSkills(exe string) error {
 				return err
 			}
 			content := strings.ReplaceAll(tpl, "{{EXE}}", filepath.ToSlash(exe))
-			if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o644); err != nil {
+			if err := fsx.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o644); err != nil {
 				return err
 			}
 		}
@@ -84,104 +85,105 @@ func InstallSkills(exe string) error {
 	return nil
 }
 
-// saveGlobalConfig 把配置写回全局 config.toml（0600）。Save* 系列共用。
-func saveGlobalConfig(cfg config.Config) error {
+// updateGlobalConfig 跨进程锁内 读-改-写 全局 config.toml（0600）：LoadMerged 取
+// 合并态 → fn 修改 → fsx.WriteFile 原子落盘。GUI 并发两个 Save*（如保存 profile
+// 的同时切换 active）裸读改写会互相覆盖丢更新；非原子写崩溃留半截文件会让
+// LoadMerged 失败、GUI/CLI 报错。Save* 系列全部走这里。
+// 注意：整档重编码不保留注释与未知键（已接受的取舍——全局配置由 GUI/CLI 托管）。
+func updateGlobalConfig(fn func(*config.Config) error) error {
 	globalPath := filepath.Join(registry.Home(), "config.toml")
-	var buf strings.Builder
-	if err := toml.NewEncoder(&buf).Encode(cfg); err != nil {
-		return fmt.Errorf("全局配置编码失败: %w", err)
-	}
-	if err := os.MkdirAll(registry.Home(), 0o755); err != nil {
-		return err
-	}
-	if err := os.WriteFile(globalPath, []byte(buf.String()), 0o600); err != nil {
-		return fmt.Errorf("全局配置写入失败: %w", err)
-	}
-	return nil
+	return fsx.WithFileLock(globalPath, func() error {
+		cfg, err := config.LoadMerged("", globalPath)
+		if err != nil {
+			return fmt.Errorf("全局配置读取失败: %w", err)
+		}
+		if err := fn(&cfg); err != nil {
+			return err
+		}
+		var buf strings.Builder
+		if err := toml.NewEncoder(&buf).Encode(cfg); err != nil {
+			return fmt.Errorf("全局配置编码失败: %w", err)
+		}
+		if err := os.MkdirAll(registry.Home(), 0o755); err != nil {
+			return err
+		}
+		if err := fsx.WriteFile(globalPath, []byte(buf.String()), 0o600); err != nil {
+			return fmt.Errorf("全局配置写入失败: %w", err)
+		}
+		return nil
+	})
 }
 
 // SaveEmbeddingProfile 保存（同名覆盖）一个 profile 到全局配置；activate 时
 // 同时置为使用中。api_key/api_key_env 留空 = 保留同名旧值（GUI 密文不回传语义）。
 func SaveEmbeddingProfile(p config.EmbeddingProfile, activate bool) error {
-	globalPath := filepath.Join(registry.Home(), "config.toml")
-	cfg, err := config.LoadMerged("", globalPath)
-	if err != nil {
-		return fmt.Errorf("全局配置读取失败，跳过 embedding: %w", err)
-	}
-	for i := range cfg.Embedding.Profiles {
-		if cfg.Embedding.Profiles[i].Name == p.Name {
-			if p.APIKey == "" {
-				p.APIKey = cfg.Embedding.Profiles[i].APIKey
+	return updateGlobalConfig(func(cfg *config.Config) error {
+		for i := range cfg.Embedding.Profiles {
+			if cfg.Embedding.Profiles[i].Name == p.Name {
+				if p.APIKey == "" {
+					p.APIKey = cfg.Embedding.Profiles[i].APIKey
+				}
+				if p.APIKeyEnv == "" {
+					p.APIKeyEnv = cfg.Embedding.Profiles[i].APIKeyEnv
+				}
+				cfg.Embedding.Profiles[i] = p
+				if activate {
+					cfg.Embedding.Active = p.Name
+				}
+				return nil
 			}
-			if p.APIKeyEnv == "" {
-				p.APIKeyEnv = cfg.Embedding.Profiles[i].APIKeyEnv
-			}
-			cfg.Embedding.Profiles[i] = p
-			if activate {
-				cfg.Embedding.Active = p.Name
-			}
-			return saveGlobalConfig(cfg)
 		}
-	}
-	cfg.Embedding.Profiles = append(cfg.Embedding.Profiles, p)
-	if activate {
-		cfg.Embedding.Active = p.Name
-	}
-	return saveGlobalConfig(cfg)
+		cfg.Embedding.Profiles = append(cfg.Embedding.Profiles, p)
+		if activate {
+			cfg.Embedding.Active = p.Name
+		}
+		return nil
+	})
 }
 
 // SetActiveEmbedding 切换使用中 profile；name 空串 = 停用（纯关键词检索）。
 func SetActiveEmbedding(name string) error {
-	globalPath := filepath.Join(registry.Home(), "config.toml")
-	cfg, err := config.LoadMerged("", globalPath)
-	if err != nil {
-		return fmt.Errorf("全局配置读取失败: %w", err)
-	}
-	if name != "" {
-		found := false
-		for _, p := range cfg.Embedding.Profiles {
-			if p.Name == name {
-				found = true
+	return updateGlobalConfig(func(cfg *config.Config) error {
+		if name != "" {
+			found := false
+			for _, p := range cfg.Embedding.Profiles {
+				if p.Name == name {
+					found = true
+				}
+			}
+			if !found {
+				return fmt.Errorf("profile 不存在: %s", name)
 			}
 		}
-		if !found {
-			return fmt.Errorf("profile 不存在: %s", name)
-		}
-	}
-	cfg.Embedding.Active = name
-	return saveGlobalConfig(cfg)
+		cfg.Embedding.Active = name
+		return nil
+	})
 }
 
 // DeleteEmbeddingProfile 删除 profile；删除使用中项时 Active 置空（退回纯关键词）。
 func DeleteEmbeddingProfile(name string) error {
-	globalPath := filepath.Join(registry.Home(), "config.toml")
-	cfg, err := config.LoadMerged("", globalPath)
-	if err != nil {
-		return fmt.Errorf("全局配置读取失败: %w", err)
-	}
-	kept := cfg.Embedding.Profiles[:0]
-	for _, p := range cfg.Embedding.Profiles {
-		if p.Name != name {
-			kept = append(kept, p)
+	return updateGlobalConfig(func(cfg *config.Config) error {
+		kept := cfg.Embedding.Profiles[:0]
+		for _, p := range cfg.Embedding.Profiles {
+			if p.Name != name {
+				kept = append(kept, p)
+			}
 		}
-	}
-	cfg.Embedding.Profiles = kept
-	if cfg.Embedding.Active == name {
-		cfg.Embedding.Active = ""
-	}
-	return saveGlobalConfig(cfg)
+		cfg.Embedding.Profiles = kept
+		if cfg.Embedding.Active == name {
+			cfg.Embedding.Active = ""
+		}
+		return nil
+	})
 }
 
 // SaveEmbeddingModelsDir 把内置模型目录写入全局配置 [embedding] models_dir；
 // 空串 = 恢复默认（<ok.exe 所在目录>/models）。调用方负责校验/创建目录。
 func SaveEmbeddingModelsDir(path string) error {
-	globalPath := filepath.Join(registry.Home(), "config.toml")
-	cfg, err := config.LoadMerged("", globalPath)
-	if err != nil {
-		return fmt.Errorf("全局配置读取失败: %w", err)
-	}
-	cfg.Embedding.ModelsDir = path
-	return saveGlobalConfig(cfg)
+	return updateGlobalConfig(func(cfg *config.Config) error {
+		cfg.Embedding.ModelsDir = path
+		return nil
+	})
 }
 
 // TestEmbeddingProfile 以 timeout 做 profile 连通性检查。
@@ -246,13 +248,10 @@ func ListOllamaModels(baseURL string) ([]string, error) {
 // SaveHooksTimeout 把 hooks 超时（秒）写入全局配置 [hooks] timeout_sec；
 // 下次写入/自愈 hooks 块（含 GUI 引导页安装）时生效。
 func SaveHooksTimeout(sec int) error {
-	globalPath := filepath.Join(registry.Home(), "config.toml")
-	cfg, err := config.LoadMerged("", globalPath)
-	if err != nil {
-		return fmt.Errorf("全局配置读取失败: %w", err)
-	}
-	cfg.Hooks.TimeoutSec = sec
-	return saveGlobalConfig(cfg)
+	return updateGlobalConfig(func(cfg *config.Config) error {
+		cfg.Hooks.TimeoutSec = sec
+		return nil
+	})
 }
 
 // ReasonixEnforceMode 返回 reasonix sidecar 的强制检查表达方式：
@@ -278,13 +277,10 @@ func SaveReasonixEnforceMode(mode string) error {
 	default:
 		return fmt.Errorf("enforce_mode 必须是 soft|hard|mixed: %q", mode)
 	}
-	globalPath := filepath.Join(registry.Home(), "config.toml")
-	cfg, err := config.LoadMerged("", globalPath)
-	if err != nil {
-		return fmt.Errorf("全局配置读取失败: %w", err)
-	}
-	cfg.Reasonix.EnforceMode = mode
-	return saveGlobalConfig(cfg)
+	return updateGlobalConfig(func(cfg *config.Config) error {
+		cfg.Reasonix.EnforceMode = mode
+		return nil
+	})
 }
 
 // DisabledFlagPath 返回 hooks 全局关闭标志文件路径。

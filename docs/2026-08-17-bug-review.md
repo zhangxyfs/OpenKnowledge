@@ -113,3 +113,141 @@
 - config 三层合并（Default ← global ← project）——BurntSushi 只覆盖已定义键，
   数组合并逻辑正确。
 - race 检测器未能运行（本机无 gcc，`-race` 依赖 CGO）；相关包人工核查无死锁路径。
+
+## 第二轮排查（v2.18.1 修复后补充，2026-08-17）
+
+覆盖上轮未细读区域：wiki 包、cli/setup、embed、setupx、embedsidecar、rxext、agentx 公共层。
+全量测试仍绿。新发现按严重度排序：
+
+### 11. saveGlobalConfig 整档重编码丢注释/未知键 + 并发写无锁 + 非原子写（中）
+
+- 位置：`internal/setupx/setupx.go:88-101`（`saveGlobalConfig`）
+- 三层问题：
+  a) `LoadMerged("", globalPath)` 读入的是 Default+global 合并结果，`toml.NewEncoder`
+     整档重写——用户写在全局 config.toml 里的**注释全部丢失**，未知键（手写/未来版本
+     的高级键）被**静默删除**。同文件里 SetCapture/SetGate/setProvenanceAutoBorn 都是
+     注释保留的小节重写，embedding/hooks-timeout/reasonix 的 Save* 却走整档重编码。
+  b) 读-改-写无跨请求互斥：GUI 并发两个 Save*（如保存 profile 的同时切换 active）
+     后写者覆盖先写者。registry/state 的同类竞态 a86bb27 已用 fsx.WithFileLock 修过，
+     全局 config 漏网。
+  c) `os.WriteFile` 非原子——正是 fsx.WriteFile 注释点名"曾被这样写坏"的模式，
+     崩溃留半截文件会让 LoadMerged 失败、GUI/CLI 报错。
+- 修法建议：改 fsx.WriteFile 原子写；要么包一层文件锁（与 registry.Update 同款），
+  要么按小节重写保留注释（工作量更大）。
+
+### 12. timeout_sec=0 时 embedding 调用无任何超时（低中）
+
+- 位置：`internal/embedx/embedx.go:24`、`internal/embed/embed.go:81-85`
+- Default 是 5s，但用户显式写 `timeout_sec = 0` 后 `OpenAIClient.Timeout=0` →
+  `embedBatch` 不设 deadline。`ClientForIndex` 有 `sec<120 → 120` 钳制（索引路径安全），
+  但 `embedx.Client`（hook 检索 / `ok search` / `ok doctor` 的 ping）路径会无限挂起，
+  直到 TCP 自身放弃；`ok doctor`/`ok search` 无宿主超时兜底，可长时间卡死。
+- 修法建议：`embedx.Client` 对 `TimeoutSec<=0` 钳回默认 5s（fail-open 与其余默认值一致）。
+
+### 13. sidecar 跨进程 kill 无身份校验（低）
+
+- 位置：`internal/embedsidecar/manager.go:177-182`（`stopLocked` else 分支）
+- daemon 重启后 `m.cmd` 为空，凭状态文件 PID 杀进程；若 sidecar 已死且 Windows
+  复用了该 PID，会误杀无关进程。杀前既不查 `Healthy()` 也不校验进程映像名。
+- 修法建议：kill 前先 `st.Healthy()`（不健康才杀），或校验进程可执行文件名。
+
+### 14. wiki 旧格式游标指向已改写 commit 时报告含糊（低）
+
+- 位置：`internal/wiki/wiki.go:139-151`
+- `branch != "" && !commitExists(srcDir, lc)` 落进"git 不可判"分支：HasWiki=true、
+  Behind=-1、无 BranchState——不像新格式路径那样报 "gone"，nudge 永不触发。
+  仅影响 legacy wiki.json + 历史改写场景。
+- 修法建议：该分支内再判 `!commitExists` → 报 `legacy_orphan`。
+
+### 15. 零散记录（可不修）
+
+- `ok setup` 交互输 API key 终端回显明文（`cli/setup.go:148-150`）；常规做法
+  golang.org/x/term.ReadPassword，CLI 工具常见妥协。
+- rxext `onInput` 全程持 mu（含 embed 网络调用与 SQLite 写），tool.after 排队其后
+  （`rxext/serve.go:61`）——注释声明的设计取舍，embed 慢时会拖迟触摸记录。
+- `DiffSummary` 的 rename（R 状态）不计入目录增删统计——展示层选择。
+- 上轮 nit 未变：`HasWikiMatch` SQL LIKE 对 ASCII 大小写不敏感，与 Go 侧精确匹配
+  不一致（仅影响 ok search 提示行，非回归）。
+
+### 第二轮排除的疑点
+
+- agentx 各 XxxHome 用 `os.UserHomeDir()` 跟随 HOME 重定向——`codex.go:19` 注释明确
+  有意（与宿主自身解析一致）；`registry.Home` 免疫重定向是数据根的另一套要求，设计正确。
+- `Manager.Reconcile` 无锁访问 lastDesired/failCount——单 janitor goroutine 独占，安全。
+- `Ensure` 中 `Process.Wait` 与 `cmd.Wait` 并发——一方拿状态一方拿 error，无害。
+- `embed.Download` 续传/416/sha256/原子改名链路正确。
+- `enforce.EvalChangelog`、`config.SetCapture` 小节重写逻辑正确。
+
+## 第三轮排查（全量补查，2026-08-17）
+
+应"不得抽查、全查"要求，把前两轮未逐行过的剩余源码全部读完：
+agentx 全部 10 个适配器（kimi/pi/opencode/claude/zcode/reasonix/deepharness/qoder/qoderide/codex，
+含 codex 信任哈希公式与 TOML 行级手术）、rxext SDK（sdk.go/wire.go/types_ext.go 通读，
+types_generated.go 为生成镜像扫描）、tray（Win32 消息循环）、gui 窗口/浏览器层、
+embed manifest/download、embedsidecar spawn、setupx autostart、logx/procx/version/
+console、web/app.js 全文 1522 行（含与 index.html 的元素 ID 交叉核验，无缺失）、
+发布脚本全套（build.py/publish-release.py/sync-version.sh/build-dist/build-installer/
+build-linux/verify-deb）。
+
+**结论：无新增中高危问题。** 第二轮的 #11（saveGlobalConfig）与 #12（timeout_sec=0）
+仍是当前最值得修的两处。本轮新记录如下（均为低危）：
+
+### 16. agentx 插件/技能类小文件写路径非原子（低）
+
+- 位置：`pi.go:80`、`opencode.go:94`、`deepharness.go:127`、`reasonix.go:172`（manifest）、
+  `setupx/setupx.go:79`（SKILL.md）、`setupx/autostart_unix.go:22`
+- 主配置文件（kimi/claude/zcode/qoder/codex 的 settings/hooks）都已走 fsx.WriteFile
+  原子写，但 TS 插件、JS 插件、manifest、SKILL.md、desktop 文件用裸 os.WriteFile。
+  中途崩溃留半截文件——影响低（下次 setup/自愈幂等重写覆盖），与 fsx 注释"曾被这样
+  写坏"教训同类，可顺手统一。`.bak-openknowledge` 备份文件裸写无妨（不怕半截）。
+
+### 17. UpsertHooksBlock 双标记块残留（低，防御性）
+
+- 位置：`internal/agentx/kimi.go:138-139`
+- 手工粘贴等原因导致文件中出现两个完整标记块时，第一个被原位替换，第二个连同其
+  hooks 原样残留 → 同一 hook 重复执行（双注入/双计数）。现有去重逻辑只认标记块外
+  的 legacy 表。防御性缺口，正常安装/自愈路径不会产生双块。
+
+### 18. publish-release.py 对 GitHub 用了错误的分页参数（低，当前无影响）
+
+- 位置：`scripts/publish-release.py:92`（`?limit=100`）
+- GitHub 的分页参数是 `per_page`，`limit` 被忽略（默认 30 条/页）；Gitea 认 `limit`。
+  本项目每 release 只传 3 个产物，无实际影响。顺手改为按 host 分叉即可。
+
+### 19. GUI 无归档入口（功能缺口，非 bug）
+
+- v2.18.0 的 ok archive 只有 CLI；GUI 条目行无"归档"操作，entrySummaryJSON 不含
+  archived 字段（gui/api.go summaryOf），界面无法展示/操作归档状态。后端编辑路径
+  已正确继承该标记（f9b0ad6），此处仅是功能待补。
+
+### 20. 零散 nit（可不修）
+
+- `sidecar.State.Healthy()`（embedsidecar/sidecar.go:59）只探端口不验身份：状态文件
+  stale 且端口被无关本地服务占用时，builtinClient 会拿到假 BaseURL（与 #13 的 kill
+  侧同类，读侧）。触发条件极窄。
+- `scripts/build.py:73` 的嵌套条件表达式（`if Path(winres).exists() if not
+  shutil.which(...) else True:`）功能正确但可读性差。
+- `embed/download.go`：manifest Size 钉错时 written>m.Size 每轮全量重下（清单受控，
+  理论场景）。
+- setup 交互输 API key 终端回显（cli/setup.go:148）——见第二轮 #15，维持记录。
+
+### 第三轮排除的疑点
+
+- agentx 各适配器合并写策略（strip→append、备份、按内容识别归属、codex 信任哈希
+  双向验证、Windows .cmd 包装解耦 exe 路径）——逐行核对无误，与知识库已沉淀的
+  各适配器坑一一对应且有测试。
+- rxext SDK（vendored）：握手屏障、有界队列、panic 恢复、content-ref SHA-256 校验
+  链路完整；types_generated.go 是生成镜像（DO NOT EDIT），扫描无异常。
+- tray Win32 消息循环（LockOSThread、WM_QUIT、NIM_DELETE 清理、菜单收起 WM_NULL
+  惯例）正确。
+- web/app.js：esc() 全覆盖无 XSS 面、搜索竞态有 seq 防护、心跳版本防抖、401 自动
+  刷新防循环、删除项目三重确认；与 index.html 的元素 ID 交叉核验零缺失。
+- 发布脚本：iss 单一事实源提取、winres 四段式、tar --mode 钉权限、ar 归档 2 字节
+  对齐解析均正确（已知坑都有对应防御）。
+
+## 覆盖声明
+
+三轮合计：internal/ 与 cmd/ 下全部 86 个 Go 源文件（不含 _test.go，测试以运行结果
+为准）、web/app.js 全文、web/index.html 结构核验、rxext SDK（generated 扫描）、
+scripts/ 全部 7 个发布脚本。未逐行审阅的仅剩 _test.go 文件与 site/（官网静态页）、
+installer/nfpm.yaml（配置）、web/index.html 的静态排版——均非运行时逻辑。

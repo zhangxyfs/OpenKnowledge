@@ -1569,3 +1569,77 @@ func TestEntryWriteHonorsMaxLines(t *testing.T) {
 		t.Fatalf("max_lines=3 未生效（5 条应折叠 2 条）:\n%s", indexMD)
 	}
 }
+
+// 归档端点：翻转 archived 标记并同步索引（v2.18.2 新增 GUI 归档入口）。
+// 归档后条目从 INDEX 主列表消失、summary 携带 archived=true；undo 恢复。
+func TestEntryArchive(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	mkProject(t, okHome, "demo")
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	code, data := do(t, "POST", srv.URL+"/api/entry", testToken, entryPayload("待归档条目"))
+	if code != 200 {
+		t.Fatalf("create: status = %d, body %s", code, data)
+	}
+	var created struct {
+		File string `json:"file"`
+	}
+	if err := json.Unmarshal(data, &created); err != nil {
+		t.Fatal(err)
+	}
+
+	// 归档
+	code, data = do(t, "POST", srv.URL+"/api/entry/archive", testToken, map[string]any{
+		"project": "demo", "file": created.File,
+	})
+	if code != 200 {
+		t.Fatalf("archive: status = %d, body %s", code, data)
+	}
+	var resp struct {
+		Archived bool `json:"archived"`
+	}
+	if err := json.Unmarshal(data, &resp); err != nil {
+		t.Fatal(err)
+	}
+	if !resp.Archived {
+		t.Fatalf("响应应 archived=true: %s", data)
+	}
+	// 落盘标记 + INDEX 主列表剔除
+	raw, err := os.ReadFile(filepath.Join(okHome, "projects", "demo", "knowledge", created.File))
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, err := entry.Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !e.Archived {
+		t.Fatal("盘上条目未置 archived")
+	}
+	indexMD, err := os.ReadFile(filepath.Join(okHome, "projects", "demo", "INDEX.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(indexMD), "待归档条目") {
+		t.Fatalf("归档条目不应出现在 INDEX:\n%s", indexMD)
+	}
+
+	// 恢复
+	code, data = do(t, "POST", srv.URL+"/api/entry/archive", testToken, map[string]any{
+		"project": "demo", "file": created.File, "undo": true,
+	})
+	if code != 200 {
+		t.Fatalf("unarchive: status = %d, body %s", code, data)
+	}
+	if err := json.Unmarshal(data, &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Archived {
+		t.Fatalf("恢复后应 archived=false: %s", data)
+	}
+	indexMD, _ = os.ReadFile(filepath.Join(okHome, "projects", "demo", "INDEX.md"))
+	if !strings.Contains(string(indexMD), "待归档条目") {
+		t.Fatalf("恢复后条目应回到 INDEX:\n%s", indexMD)
+	}
+}

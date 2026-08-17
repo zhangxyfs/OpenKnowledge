@@ -5,6 +5,8 @@ package setupx
 import (
 	"os"
 	"path/filepath"
+
+	"openknowledge/internal/fsx"
 )
 
 // autostartPath 返回 XDG 自启文件路径（~/.config/autostart/openknowledge.desktop）。
@@ -19,7 +21,7 @@ func WriteAutostart(exe string) error {
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(p, []byte(AutostartDesktop(exe)), 0o644)
+	return fsx.WriteFile(p, []byte(AutostartDesktop(exe)), 0o644)
 }
 
 // RemoveAutostart 移除登录自启项；不存在不视为错误。

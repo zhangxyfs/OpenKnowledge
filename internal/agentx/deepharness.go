@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"openknowledge/internal/fsx"
 )
 
 //go:embed dsh_plugin.js
@@ -124,7 +126,7 @@ func (dshAgent) InstallHooks(exe string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(path, []byte(renderDSHPlugin(exe)), 0o644); err != nil {
+	if err := fsx.WriteFile(path, []byte(renderDSHPlugin(exe)), 0o644); err != nil {
 		return err
 	}
 	// patch 行（标记块幂等 upsert；# 标记在 YAML 是合法注释；UpsertHooksBlock
@@ -181,7 +183,7 @@ func (dshAgent) RemoveHooks() (bool, error) {
 		return removed, err
 	default:
 		if out, ok := removeDSHMarkerBlock(string(data)); ok {
-			if err := os.WriteFile(patch, []byte(out), 0o644); err != nil {
+			if err := fsx.WriteFile(patch, []byte(out), 0o644); err != nil {
 				return removed, fmt.Errorf("移除 patch 行: %w", err)
 			}
 			removed = true

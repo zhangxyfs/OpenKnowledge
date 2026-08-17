@@ -304,8 +304,10 @@ input:focus, select:focus, textarea:focus {
 .badge-on { background: var(--ok); }
 .badge-off { background: var(--off); }
 .badge-draft { background: #d97706; }
+.badge-arch { background: var(--off); }
 
-.entries .badge-draft { padding: 1px 8px; vertical-align: 1px; }
+.entries .badge-draft, .entries .badge-arch { padding: 1px 8px; vertical-align: 1px; }
+.entries tr.arch-row td { opacity: 0.55; }
 
 .capture-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 

@@ -375,6 +375,7 @@
     pageItems.forEach(function (e) {
       var tr = document.createElement("tr");
       if (state.hitFiles && state.hitFiles[e.file]) tr.classList.add("hit-row");
+      if (e.archived) tr.classList.add("arch-row");
       // 分支格双徽标：born（出生分支，溯源）+ scope（branch: 作用域标签）
       var born = bornOf(e), scope = entryBranch(e);
       var branchCell = "";
@@ -383,7 +384,8 @@
       tr.innerHTML =
         '<td class="muted">' + fmtTime(e.mtime) + "</td>" +
         '<td>' + branchCell + "</td>" +
-        "<td>" + esc(e.title) + (e.draft ? ' <span class="badge badge-draft">草稿</span>' : "") + "</td>" +
+        "<td>" + esc(e.title) + (e.draft ? ' <span class="badge badge-draft">草稿</span>' : "") +
+        (e.archived ? ' <span class="badge badge-arch">归档</span>' : "") + "</td>" +
         "<td>" + esc(typeLabel(e.type)) + "</td>" +
         "<td>" + esc((e.tags || []).join(", ")) + "</td>" +
         "<td>" + (e.mandatory ? "✓" : "") + "</td>" +
@@ -392,6 +394,9 @@
         '<button type="button" data-act="view">查看</button> ' +
         '<button type="button" data-act="edit">编辑</button> ' +
         (e.draft ? '<button type="button" data-act="approve">采纳</button> ' : "") +
+        (e.archived
+          ? '<button type="button" data-act="unarchive">恢复</button> '
+          : '<button type="button" data-act="archive">归档</button> ') +
         '<button type="button" data-act="del" class="danger-link">删除</button>' +
         "</td>";
       var sumEl = tr.querySelector(".summary-clip");
@@ -404,6 +409,8 @@
           if (act === "view") openForm(e, true);
           else if (act === "edit") openForm(e, false);
           else if (act === "approve") approveEntry(e);
+          else if (act === "archive") archiveEntry(e, false);
+          else if (act === "unarchive") archiveEntry(e, true);
           else delEntry(e);
         });
       });
@@ -611,6 +618,16 @@
     api("/api/approve", {
       method: "POST",
       body: { project: state.project, file: e.file }
+    }).then(loadEntries)
+      .catch(function (err) { showError(err.message); });
+  }
+
+  // 归档/恢复：归档后不进 INDEX 与 Wiki 目录、不参与 mandatory 注入，仍可检索
+  function archiveEntry(e, undo) {
+    if (!undo && !confirm("归档条目「" + e.title + "」？归档后退出 INDEX 与强制注入，仍可被检索命中。")) return;
+    api("/api/entry/archive", {
+      method: "POST",
+      body: { project: state.project, file: e.file, undo: !!undo }
     }).then(loadEntries)
       .catch(function (err) { showError(err.message); });
   }

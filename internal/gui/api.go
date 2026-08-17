@@ -71,6 +71,7 @@ func NewHandler(webDir, token string, beats chan<- struct{}) *Handler {
 	api("DELETE /api/project", h.apiProjectDelete)
 	api("GET /api/search", h.apiSearch)
 	api("POST /api/approve", h.apiApprove)
+	api("POST /api/entry/archive", h.apiEntryArchive)
 	api("GET /api/capture", h.apiCaptureGet)
 	api("POST /api/capture", h.apiCaptureSet)
 	api("GET /api/gate", h.apiGateGet)
@@ -273,6 +274,7 @@ type entrySummaryJSON struct {
 	Tags      []string `json:"tags"`
 	Mandatory bool     `json:"mandatory"`
 	Draft     bool     `json:"draft"`
+	Archived  bool     `json:"archived"`
 	Summary   string   `json:"summary"`
 	Mtime     int64    `json:"mtime"` // 文件修改时间（unix 秒），界面排序/展示用
 }
@@ -311,6 +313,7 @@ func summaryOf(e *entry.Entry) entrySummaryJSON {
 		Tags:      tags,
 		Mandatory: e.Mandatory,
 		Draft:     e.Draft,
+		Archived:  e.Archived,
 		Summary:   e.Summary,
 		Mtime:     mtime,
 	}
@@ -916,6 +919,55 @@ func (h *Handler) apiApprove(w http.ResponseWriter, r *http.Request) {
 	}
 	fsx.BumpMtime(path, prev)
 	if err := syncApprove(st); err != nil {
+		writeErr(w, http.StatusInternalServerError, fmt.Sprintf("索引同步失败: %v", err))
+		return
+	}
+	e.Path = path
+	writeJSON(w, http.StatusOK, summaryOf(e))
+}
+
+// apiEntryArchive 等价 ok archive [--undo]：翻转条目的归档标记（归档不进 INDEX
+// 主列表与 Wiki 目录、不参与 mandatory 注入，仍可检索）→ 同步索引 → 返回更新后条目。
+func (h *Handler) apiEntryArchive(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Project string `json:"project"`
+		File    string `json:"file"`
+		Undo    bool   `json:"undo"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	st := resolveProject(w, req.Project)
+	if st == nil {
+		return
+	}
+	path := entryPath(w, st, req.File)
+	if path == "" {
+		return
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, fmt.Sprintf("条目不存在: %s", req.File))
+		return
+	}
+	e, err := entry.Parse(data)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	e.Archived = !req.Undo
+	// 同秒连点归档/恢复会被 Sync 秒级 mtime diff 判未变化，写后推进一秒（同 Approve）
+	var prev time.Time
+	if fi, statErr := os.Stat(path); statErr == nil {
+		prev = fi.ModTime()
+	}
+	if err := fsx.WriteFile(path, e.Serialize(), 0o644); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	fsx.BumpMtime(path, prev)
+	// 归档只改标记不改正文，向量无需重算，无 embedding 客户端同步即可
+	if err := syncIndex(st); err != nil {
 		writeErr(w, http.StatusInternalServerError, fmt.Sprintf("索引同步失败: %v", err))
 		return
 	}

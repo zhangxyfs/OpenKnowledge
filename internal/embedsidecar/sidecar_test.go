@@ -177,3 +177,18 @@ func TestWantFlagRoundTrip(t *testing.T) {
 		t.Fatal("清除后无 want")
 	}
 }
+
+// 跨进程停杀：状态文件的 PID 对应进程已死（端口无应答）时只清状态文件、不盲杀
+//（v2.18.2 回归：PID 复用场景下曾会误杀无关进程）。
+func TestStopSkipsKillWhenUnhealthy(t *testing.T) {
+	t.Setenv("OK_HOME", t.TempDir())
+	st := &State{PID: 424242, Port: 9, ModelID: "m"} // 端口 9(discard)必不应答
+	if err := writeState(st); err != nil {
+		t.Fatal(err)
+	}
+	m := &Manager{}
+	m.Stop() // 不 panic、不挂起即过
+	if LoadState() != nil {
+		t.Fatal("状态文件应已清除")
+	}
+}
