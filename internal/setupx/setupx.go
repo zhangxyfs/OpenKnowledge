@@ -177,6 +177,66 @@ func DeleteEmbeddingProfile(name string) error {
 	})
 }
 
+// SaveLLMProfile 保存（同名覆盖）一个 llm profile 到全局配置；activate 时同时置为
+// 使用中。api_key 留空 = 保留同名旧值（GUI 密文不回传语义，同 SaveEmbeddingProfile）。
+func SaveLLMProfile(p config.LLMProfile, activate bool) error {
+	return updateGlobalConfig(func(cfg *config.Config) error {
+		for i := range cfg.LLM.Profiles {
+			if cfg.LLM.Profiles[i].Name == p.Name {
+				if p.APIKey == "" {
+					p.APIKey = cfg.LLM.Profiles[i].APIKey
+				}
+				cfg.LLM.Profiles[i] = p
+				if activate {
+					cfg.LLM.Active = p.Name
+				}
+				return nil
+			}
+		}
+		cfg.LLM.Profiles = append(cfg.LLM.Profiles, p)
+		if activate {
+			cfg.LLM.Active = p.Name
+		}
+		return nil
+	})
+}
+
+// SetActiveLLM 切换使用中 llm profile；name 空串 = 停用（优化功能不可用）。
+func SetActiveLLM(name string) error {
+	return updateGlobalConfig(func(cfg *config.Config) error {
+		if name != "" {
+			found := false
+			for _, p := range cfg.LLM.Profiles {
+				if p.Name == name {
+					found = true
+				}
+			}
+			if !found {
+				return fmt.Errorf("profile 不存在: %s", name)
+			}
+		}
+		cfg.LLM.Active = name
+		return nil
+	})
+}
+
+// DeleteLLMProfile 删除 llm profile；删除使用中项时 Active 置空。
+func DeleteLLMProfile(name string) error {
+	return updateGlobalConfig(func(cfg *config.Config) error {
+		kept := cfg.LLM.Profiles[:0]
+		for _, p := range cfg.LLM.Profiles {
+			if p.Name != name {
+				kept = append(kept, p)
+			}
+		}
+		cfg.LLM.Profiles = kept
+		if cfg.LLM.Active == name {
+			cfg.LLM.Active = ""
+		}
+		return nil
+	})
+}
+
 // SaveEmbeddingModelsDir 把内置模型目录写入全局配置 [embedding] models_dir；
 // 空串 = 恢复默认（<ok.exe 所在目录>/models）。调用方负责校验/创建目录。
 func SaveEmbeddingModelsDir(path string) error {

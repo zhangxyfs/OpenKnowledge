@@ -70,6 +70,7 @@
       </div>
       <div id="entries-footer" class="entries-footer">
         <span id="entries-total" class="muted"></span>
+        <span id="entries-project-path" class="muted project-path" title=""></span>
         <span class="pager">
           <button id="btn-prev" type="button" class="btn">上一页</button>
           <span id="entries-page" class="muted"></span>
@@ -169,6 +170,11 @@
             <label class="capture-auto-born"><input id="auto-born" type="checkbox"> 自动记录出生分支</label>
           </div>
         </div>
+        <div class="card">
+          <div class="card-head"><h3>模型配置</h3><span id="badge-llm" class="badge badge-off">未配置</span></div>
+          <p id="llm-current" class="card-desc muted">未启用（条目优化不可用）</p>
+          <div class="card-actions"><button id="btn-llm-config" type="button" class="btn">配置…</button></div>
+        </div>
         <div class="card card-danger">
           <div class="card-head"><h3>卸载</h3></div>
           <p class="card-desc muted">移除 hooks 配置、技能与全局 embedding 配置；<strong>知识库数据（条目、索引、注册表）全部保留</strong>，重装即恢复。</p>
@@ -266,6 +272,7 @@
         <div class="modal-actions">
           <button id="f-save" type="submit" class="btn btn-primary">保存</button>
           <button id="f-cancel" type="button" class="btn">关闭</button>
+          <button id="f-optimize" type="button" class="btn btn-optimize">✨ 优化</button>
         </div>
       </form>
     </div>
@@ -364,6 +371,40 @@
             <button id="emb-delete" type="button" class="btn btn-danger">删除</button>
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 模型配置弹窗（全局 [llm]，卡片列表 + 行内展开编辑） -->
+  <div id="llm-modal" class="modal hidden">
+    <div class="modal-box llm-box">
+      <h3 class="llm-title">模型配置 <button id="llm-close" type="button" class="emb-x" aria-label="关闭">×</button></h3>
+      <button id="llm-add" type="button" class="btn btn-dashed">＋ 添加配置</button>
+      <div id="llm-list"></div>
+    </div>
+  </div>
+
+  <!-- 优化对照预览弹窗 -->
+  <div id="cmp-modal" class="modal hidden">
+    <div class="modal-box cmp-box">
+      <h3 class="llm-title">优化对照预览 <span id="cmp-basis" class="muted cmp-basis"></span></h3>
+      <div id="cmp-fields"></div>
+      <div class="modal-actions">
+        <button id="cmp-apply" type="button" class="btn btn-primary">回填表单</button>
+        <button id="cmp-discard" type="button" class="btn">放弃</button>
+        <span class="muted cmp-note">回填只改表单，点「保存」才写入 .md</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 未配置模型提示 -->
+  <div id="llm-needed-modal" class="modal hidden">
+    <div class="modal-box" style="width:400px">
+      <h3>尚未配置模型</h3>
+      <p class="muted" style="font-size:13px;line-height:1.6">「优化」需要调用大模型。请先到 <strong>引导页 → 模型配置</strong> 添加一个 OpenAI 兼容或 Anthropic 兼容服务。</p>
+      <div class="modal-actions">
+        <button id="llm-needed-go" type="button" class="btn btn-primary">去配置</button>
+        <button id="llm-needed-ok" type="button" class="btn">知道了</button>
       </div>
     </div>
   </div>

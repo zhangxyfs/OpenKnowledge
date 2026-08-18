@@ -1705,3 +1705,33 @@ func TestEntryArchive(t *testing.T) {
 		t.Fatalf("恢复后条目应回到 INDEX:\n%s", indexMD)
 	}
 }
+
+// TestAPILogsUnchanged 日志轮询优化：带相同 sig 再请求 → unchanged=true 且不携带
+// lines（省读取/传输/前端重绘）；文件变化后 sig 失效重新返回全量。
+func TestAPILogsUnchanged(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	if err := os.WriteFile(filepath.Join(okHome, "ok.log"), []byte("2026-08-15 10:00:00 line1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var res struct {
+		Sig string `json:"sig"`
+	}
+	_, data := do(t, "GET", srv.URL+"/api/logs?tail=3", testToken, nil)
+	if err := json.Unmarshal(data, &res); err != nil || res.Sig == "" {
+		t.Fatalf("应返回 sig: %s", data)
+	}
+	_, data = do(t, "GET", srv.URL+"/api/logs?tail=3&sig="+res.Sig, testToken, nil)
+	if !strings.Contains(string(data), `"unchanged":true`) || strings.Contains(string(data), `"lines"`) {
+		t.Fatalf("sig 一致应只回 unchanged: %s", data)
+	}
+	f, _ := os.OpenFile(filepath.Join(okHome, "ok.log"), os.O_APPEND|os.O_WRONLY, 0o644)
+	fmt.Fprintln(f, "2026-08-15 10:02:00 line2")
+	f.Close()
+	_, data = do(t, "GET", srv.URL+"/api/logs?tail=3&sig="+res.Sig, testToken, nil)
+	if strings.Contains(string(data), `"unchanged":true`) || !strings.Contains(string(data), "line2") {
+		t.Fatalf("文件变化后应返回新全量: %s", data)
+	}
+}

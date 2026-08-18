@@ -78,6 +78,12 @@ func NewHandler(webDir, token string, beats chan<- struct{}) *Handler {
 	api("POST /api/gate", h.apiGateSet)
 	api("GET /api/inject", h.apiInjectGet)
 	api("POST /api/inject", h.apiInjectSet)
+	api("GET /api/llm", h.apiLLMGet)
+	api("POST /api/llm/profile", h.apiLLMProfileSave)
+	api("POST /api/llm/delete", h.apiLLMProfileDelete)
+	api("POST /api/llm/active", h.apiLLMActive)
+	api("POST /api/llm/test", h.apiLLMTest)
+	api("POST /api/entry/optimize", h.apiEntryOptimize)
 	api("GET /api/project/branch-info", h.apiProjectBranchInfo)
 	api("POST /api/heartbeat", h.apiHeartbeat)
 	api("POST /api/shutdown", h.apiShutdown)
@@ -394,6 +400,8 @@ func (h *Handler) apiStatus(w http.ResponseWriter, _ *http.Request) {
 // apiLogs 返回三类日志（ok / daemon / sidecar）的尾部行，供"日志"页轮询展示。
 // 每行带来源（src）与语义标记（含 semantic/embed 关键字）；过滤与高亮在前端做。
 // 只读、最多回传 tail 行（1~2000，默认 400），不提供清空/写入。
+// 轮询优化：客户端带 sig（上轮各文件 size-mtime 签名）且与当前一致时，
+// 只回 {unchanged:true}——大文件下省去重复的 256KB 读取、整包传输与前端全量重绘。
 func (h *Handler) apiLogs(w http.ResponseWriter, r *http.Request) {
 	tail := 400
 	if v := r.URL.Query().Get("tail"); v != "" {
@@ -405,22 +413,33 @@ func (h *Handler) apiLogs(w http.ResponseWriter, r *http.Request) {
 	sources := []struct{ key, file string }{
 		{"ok", "ok.log"}, {"daemon", "daemon.log"}, {"sidecar", "embed-sidecar.log"},
 	}
+	// 先 stat 出签名：不读内容（分隔符用 . 与 ,，避开 URL query 里 ; 的解析歧义）
 	files := make([]map[string]any, 0, len(sources))
-	lines := make([]map[string]any, 0, tail)
+	var sigB strings.Builder
 	for _, s := range sources {
 		p := filepath.Join(home, s.file)
 		fi, err := os.Stat(p)
 		if err != nil {
 			files = append(files, map[string]any{"name": s.key, "exists": false})
+			fmt.Fprintf(&sigB, "%s.-,", s.key)
 			continue
 		}
 		files = append(files, map[string]any{
 			"name": s.key, "exists": true,
 			"size": fi.Size(), "mtime": fi.ModTime().UnixMilli(),
 		})
-		lines = append(lines, tailLines(p, tail, s.key)...)
+		fmt.Fprintf(&sigB, "%s.%d-%d,", s.key, fi.Size(), fi.ModTime().UnixMilli())
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"files": files, "lines": lines})
+	sig := sigB.String()
+	if r.URL.Query().Get("sig") == sig {
+		writeJSON(w, http.StatusOK, map[string]any{"unchanged": true, "files": files, "sig": sig})
+		return
+	}
+	lines := make([]map[string]any, 0, tail)
+	for _, s := range sources {
+		lines = append(lines, tailLines(filepath.Join(home, s.file), tail, s.key)...)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"files": files, "lines": lines, "sig": sig})
 }
 
 // tailLines 读文件尾部（最多 256KB）并按行返回，丢弃截断的首行。

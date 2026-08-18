@@ -71,6 +71,38 @@ func (e Embedding) ActiveProfile() *EmbeddingProfile {
 	return nil
 }
 
+// LLMProfile 一个大模型服务配置（生成场景：条目优化等）。Kind 仅两种：
+// openai（/chat/completions 兼容）| anthropic（/v1/messages 兼容）。
+type LLMProfile struct {
+	Name        string `toml:"name"`
+	Kind        string `toml:"kind"` // openai | anthropic
+	BaseURL     string `toml:"base_url"`
+	Model       string `toml:"model"`
+	APIKey      string `toml:"api_key,omitempty"`
+	Temperature string `toml:"temperature,omitempty"` // 高级参数；空=不传（字符串存储避开 0 值歧义）
+	MaxTokens   int    `toml:"max_tokens,omitempty"`  // 高级参数；0=用调用方默认
+}
+
+// LLM 全局大模型配置（[llm] 段，仅存全局 config.toml，跨项目共用）。
+type LLM struct {
+	Active     string       `toml:"active,omitempty"`   // 使用中 profile 名；空=未配置
+	TimeoutSec int          `toml:"timeout_sec"`        // 生成调用超时；<=0 由调用方按场景定（ping 测试 30s / 条目优化 120s）
+	Profiles   []LLMProfile `toml:"profiles,omitempty"` // TOML 落盘为 [[llm.profiles]]
+}
+
+// ActiveProfile 返回使用中 profile；未配置或 active 悬空返回 nil。
+func (l LLM) ActiveProfile() *LLMProfile {
+	if l.Active == "" {
+		return nil
+	}
+	for i := range l.Profiles {
+		if l.Profiles[i].Name == l.Active {
+			return &l.Profiles[i]
+		}
+	}
+	return nil
+}
+
 // migrateLegacy 把 ≤v2.13 的平铺字段迁移为 "默认" openai profile（内存态；
 // 下次保存配置时自然落盘）。
 func (e *Embedding) migrateLegacy() {
@@ -224,6 +256,7 @@ type Config struct {
 	Reasonix   Reasonix      `toml:"reasonix"`
 	Provenance Provenance    `toml:"provenance"`
 	Index      Index         `toml:"index"`
+	LLM        LLM           `toml:"llm"`
 }
 
 func Default() Config {

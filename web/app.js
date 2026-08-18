@@ -25,7 +25,13 @@
 
   function showError(msg) {
     $("banner-text").textContent = msg;
+    $("banner").classList.remove("hidden", "info");
+  }
+  // showInfo 中性提示（非错误）：蓝色横幅，如「无需优化」
+  function showInfo(msg) {
+    $("banner-text").textContent = msg;
     $("banner").classList.remove("hidden");
+    $("banner").classList.add("info");
   }
   $("banner-close").addEventListener("click", function () {
     $("banner").classList.add("hidden");
@@ -159,6 +165,7 @@
   function renderProjectSelect(projects) {
     var sel = $("project-select");
     var prev = state.project;
+    state.projects = projects || []; // 供分页栏项目路径展示等复用
     sel.innerHTML = "";
     projects.forEach(function (p) {
       var opt = document.createElement("option");
@@ -195,13 +202,38 @@
         del.appendChild(o);
       });
     }
+    renderProjectPath();
     loadEntries();
+  }
+
+  // elideMiddle 路径过长时省略中间：保留头尾，中间插 …（title 悬停看全路径）
+  function elideMiddle(s, max) {
+    if (!s || s.length <= max) return s || "";
+    var head = Math.ceil((max - 1) / 2);
+    var tail = max - 1 - head;
+    return s.slice(0, head) + "…" + s.slice(s.length - tail);
+  }
+
+  // renderProjectPath 在分页栏中间显示当前项目目录（多个目录取第一个 + 「+N」）
+  function renderProjectPath() {
+    var el = $("entries-project-path");
+    if (!el) return;
+    var list = state.projects || [];
+    var cur = null;
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].name === state.project) { cur = list[i]; break; }
+    }
+    var paths = (cur && cur.paths) || [];
+    if (!paths.length) { el.textContent = ""; el.title = ""; return; }
+    el.textContent = elideMiddle(paths[0], 64) + (paths.length > 1 ? "（+" + (paths.length - 1) + "）" : "");
+    el.title = paths.join("\n");
   }
 
   $("project-select").addEventListener("change", function () {
     state.project = this.value;
     state.page = 1;
     state.lastVersion = 0;
+    renderProjectPath();
     renderBranchFilter(); // 项目切换：先按现有条目重聚合分支选项（loadEntries 完成后会再次聚合）
     renderBranchInfo(); // 分支上下文随项目联动（loadEntries 完成后会再刷一次）
     loadEntries();
@@ -494,7 +526,10 @@
     $("f-save").classList.toggle("hidden", ro);
   }
 
-  function closeForm() { $("entry-modal").classList.add("hidden"); }
+  function closeForm() {
+    if (optAbort) optAbort.abort(); // 优化进行中关闭弹窗 = 取消本次优化（服务端随连接断开一并取消）
+    $("entry-modal").classList.add("hidden");
+  }
 
   // ---------- 更新日志 ----------
 
@@ -606,6 +641,123 @@
     });
   });
 
+  // ---------- 编辑弹窗：✨ 优化（对照预览确认回填，保存才落盘） ----------
+
+  var OPTIMIZE_TIP = "结合项目真实代码与相关条目据实润色标题/标签/摘要/正文（类型与 mandatory 不动）；先出对照预览，确认回填后点保存才生效。";
+  var optBtn = $("f-optimize");
+  optBtn.addEventListener("mouseenter", function (ev) { showTip(OPTIMIZE_TIP, ev.clientX, ev.clientY); });
+  optBtn.addEventListener("mousemove", function (ev) { moveTip(ev.clientX, ev.clientY); });
+  optBtn.addEventListener("mouseleave", hideTip);
+
+  var cmpOld = null, cmpNew = null;
+  var optAbort = null; // 优化进行中的 AbortController；关闭编辑弹窗即取消
+  var CMP_FIELDS = [
+    ["title", "标题", "f-title"],
+    ["tags", "tags", "f-tags"],
+    ["summary", "摘要", "f-summary"],
+    ["body", "正文", "f-body"]
+  ];
+
+  function openCmpModal(oldV, newV) {
+    cmpOld = oldV; cmpNew = newV;
+    $("cmp-basis").textContent = "依据：条目引用的真实代码 + 相关条目 + INDEX 摘录";
+    var box = $("cmp-fields");
+    box.innerHTML = "";
+    CMP_FIELDS.forEach(function (f) {
+      var key = f[0], label = f[1];
+      var oldText = key === "tags" ? (oldV.tags || "") : (oldV[key] || "");
+      var newText = key === "tags" ? (newV.tags || []).join(", ") : (newV[key] || "");
+      var div = document.createElement("div");
+      div.className = "cmp-field";
+      div.innerHTML = '<div class="cmp-name"><span>' + label + '</span>' +
+        '<button type="button" class="btn cmp-fill" data-field="' + key + '">回填</button></div>' +
+        '<div class="cmp-old"><span class="cmp-tag old">原数据</span></div>' +
+        '<div class="cmp-new"><span class="cmp-tag new">优化后</span></div>';
+      div.querySelector(".cmp-old").appendChild(document.createTextNode(oldText));
+      div.querySelector(".cmp-new").appendChild(document.createTextNode(newText));
+      box.appendChild(div);
+    });
+    $("cmp-modal").classList.remove("hidden");
+  }
+
+  // 单字段回填：只把该字段的优化值写回表单（不关弹窗，可逐字段挑选）
+  function cmpFillField(key) {
+    if (!cmpNew) return "";
+    if (key === "tags") return (cmpNew.tags || []).join(", ");
+    if (key === "title") return cmpNew.title || cmpOld.title;
+    return cmpNew[key] || "";
+  }
+
+  $("cmp-fields").addEventListener("click", function (ev) {
+    var key = ev.target.getAttribute && ev.target.getAttribute("data-field");
+    if (!key) return;
+    CMP_FIELDS.forEach(function (f) {
+      if (f[0] === key) $(f[2]).value = cmpFillField(key);
+    });
+    ev.target.textContent = "已回填";
+  });
+
+  $("cmp-discard").addEventListener("click", function () { $("cmp-modal").classList.add("hidden"); });
+  $("cmp-apply").addEventListener("click", function () {
+    if (cmpNew) {
+      CMP_FIELDS.forEach(function (f) { $(f[2]).value = cmpFillField(f[0]); });
+    }
+    $("cmp-modal").classList.add("hidden");
+  });
+
+  $("llm-needed-ok").addEventListener("click", function () { $("llm-needed-modal").classList.add("hidden"); });
+  $("llm-needed-go").addEventListener("click", function () {
+    $("llm-needed-modal").classList.add("hidden");
+    closeForm();
+    switchTab("guide");
+    openLLMModal();
+  });
+
+  optBtn.addEventListener("click", function () {
+    if (!state.project) {
+      showError("尚无已注册项目，请先 ok init");
+      return;
+    }
+    if (!$("f-body").value.trim()) {
+      showError("正文为空，无可优化内容");
+      return;
+    }
+    hideTip();
+    optBtn.disabled = true;
+    var oldText = optBtn.textContent;
+    optBtn.textContent = "优化中…";
+    optAbort = new AbortController();
+    api("/api/entry/optimize", {
+      method: "POST",
+      signal: optAbort.signal,
+      body: {
+        project: state.project,
+        file: state.editingFile || "",
+        title: $("f-title").value,
+        tags: $("f-tags").value,
+        summary: $("f-summary").value,
+        body: $("f-body").value
+      }
+    }).then(function (out) {
+      if (out.no_change) {
+        showInfo("模型判断：当前内容已足够简练准确，无需优化");
+        return;
+      }
+      openCmpModal({ title: $("f-title").value, tags: $("f-tags").value, summary: $("f-summary").value, body: $("f-body").value }, out);
+    }).catch(function (err) {
+      if (optAbort && optAbort.signal.aborted) return; // 关闭弹窗主动取消，静默
+      if (err.status === 409) {
+        $("llm-needed-modal").classList.remove("hidden");
+      } else {
+        showError(err.message);
+      }
+    }).finally(function () {
+      optAbort = null;
+      optBtn.disabled = false;
+      optBtn.textContent = oldText;
+    });
+  });
+
   function delEntry(e) {
     if (!confirm("确定删除条目「" + e.title + "」？")) return;
     api("/api/entry?project=" + encodeURIComponent(state.project) +
@@ -696,6 +848,7 @@
     refreshCapture();
     refreshGate();
     refreshInject();
+    refreshLLM();
   }
 
   // renderRxEnforce 三档卡仅 agent=reasonix 时显示，并回填当前保存的档位。
@@ -886,6 +1039,176 @@
     }).then(refreshInject)
       .catch(function (err) { showError(err.message); refreshInject(); });
   });
+
+  // ---------- 引导页：模型配置卡 + 弹窗（全局 [llm]，卡片列表 + 行内展开） ----------
+
+  function refreshLLM() {
+    api("/api/llm").then(function (cfg) {
+      state.llm = cfg;
+      var active = null;
+      (cfg.profiles || []).forEach(function (p) { if (p.active) active = p; });
+      if (active) {
+        $("badge-llm").className = "badge badge-on";
+        $("badge-llm").textContent = "已配置";
+        $("llm-current").textContent = "使用中：" + active.name + " · " + active.model +
+          "（" + (active.kind === "anthropic" ? "Anthropic 兼容" : "OpenAI 兼容") + "）";
+      } else {
+        $("badge-llm").className = "badge badge-off";
+        $("badge-llm").textContent = cfg.profiles && cfg.profiles.length ? "未启用" : "未配置";
+        $("llm-current").textContent = cfg.profiles && cfg.profiles.length
+          ? "已有 " + cfg.profiles.length + " 个配置但未设「使用中」，条目优化不可用"
+          : "未启用（条目优化不可用）";
+      }
+    }).catch(function (err) { showError(err.message); });
+  }
+
+  // llmExpanded：当前展开编辑的卡（profile 名；"__new__" = 添加中的新卡）
+  var llmExpanded = null;
+
+  function openLLMModal() {
+    refreshLLM();
+    renderLLMCards();
+    $("llm-modal").classList.remove("hidden");
+  }
+
+  function llmFormHTML(p) {
+    return '<form onsubmit="return false">' +
+      '<label>名称 <input type="text" data-f="name" value="' + esc(p.name || "") + '" autocomplete="off"></label>' +
+      '<label>类型 <select data-f="kind">' +
+      '<option value="openai"' + (p.kind !== "anthropic" ? " selected" : "") + '>OpenAI 兼容（/chat/completions）</option>' +
+      '<option value="anthropic"' + (p.kind === "anthropic" ? " selected" : "") + '>Anthropic 兼容（/v1/messages）</option>' +
+      '</select></label>' +
+      '<label>base_url <input type="text" data-f="base_url" value="' + esc(p.base_url || "") + '" placeholder="https://api.openai.com/v1" autocomplete="off"></label>' +
+      '<label>模型 <input type="text" data-f="model" value="' + esc(p.model || "") + '" autocomplete="off"></label>' +
+      '<label>api_key <input type="password" data-f="api_key" value="' + esc(p.api_key || "") + '" placeholder="留空或掩码 = 保留原值" autocomplete="off"></label>' +
+      '<div class="modal-actions" style="margin-top:8px">' +
+      '<button type="button" class="btn btn-primary" data-act="save">保存</button>' +
+      '<button type="button" class="btn" data-act="test">测试</button>' +
+      '<button type="button" class="btn" data-act="adv">高级</button>' +
+      '<span class="grow"></span>' +
+      '<button type="button" class="btn btn-danger" data-act="delete">删除</button>' +
+      '</div>' +
+      // 高级参数：某些模型锁死特定参数值（如 Kimi k3 temperature=1），按服务要求显式覆盖
+      '<div class="llm-adv hidden">' +
+      '<label>temperature <input type="text" data-f="temperature" value="' + esc(p.temperature || "") + '" placeholder="留空 = 服务端默认（0~2）" autocomplete="off"></label>' +
+      '<label>max_tokens <input type="text" data-f="max_tokens" value="' + (p.max_tokens || "") + '" placeholder="0 或留空 = 默认" autocomplete="off"></label>' +
+      '</div>' +
+      '<p class="llm-msg" data-msg></p>' +
+      '</form>';
+  }
+
+  function renderLLMCards() {
+    var list = $("llm-list");
+    list.innerHTML = "";
+    var profiles = (state.llm && state.llm.profiles) || [];
+    if (llmExpanded === "__new__") profiles = profiles.concat([{ name: "", kind: "openai", base_url: "", model: "", api_key: "", _new: true }]);
+    profiles.forEach(function (p) {
+      var key = p._new ? "__new__" : p.name;
+      var card = document.createElement("div");
+      card.className = "llm-card";
+      var head = '<div class="llm-card-head">' +
+        '<span class="emb-dot' + (p.active ? "" : " off") + '"></span>' +
+        '<span class="llm-card-name">' + esc(p.name || "（新配置）") + '</span>' +
+        '<span class="llm-tag' + (p.kind === "anthropic" ? " anthropic" : "") + '">' +
+        (p.kind === "anthropic" ? "Anthropic 兼容" : "OpenAI 兼容") + '</span>';
+      if (p.active) {
+        head += '<span class="llm-using">使用中</span>';
+      }
+      head += '<span class="grow"></span>';
+      if (!p.active && !p._new) {
+        head += '<button type="button" class="btn" data-act="activate">设为使用中</button>';
+      }
+      head += '<button type="button" class="btn" data-act="toggle">' + (llmExpanded === key ? "收起" : "编辑") + '</button></div>';
+      card.innerHTML = head;
+      if (!p._new) {
+        var meta = document.createElement("p");
+        meta.className = "llm-card-meta";
+        meta.textContent = (p.model || "—") + " · " + (p.base_url || "—");
+        card.appendChild(meta);
+      }
+      if (llmExpanded === key) {
+        var wrap = document.createElement("div");
+        wrap.innerHTML = llmFormHTML(p);
+        card.appendChild(wrap.firstChild);
+        // 类型下拉切换时同步卡头徽标（未保存只改显示，表单值仍以保存为准）
+        var kindSel = card.querySelector('[data-f="kind"]');
+        var kindTag = card.querySelector(".llm-tag");
+        kindSel.addEventListener("change", function () {
+          var anth = kindSel.value === "anthropic";
+          kindTag.textContent = anth ? "Anthropic 兼容" : "OpenAI 兼容";
+          kindTag.classList.toggle("anthropic", anth);
+        });
+      }
+      card.addEventListener("click", function (ev) {
+        var act = ev.target.getAttribute && ev.target.getAttribute("data-act");
+        if (!act) return;
+        llmCardAction(act, key, card);
+      });
+      list.appendChild(card);
+    });
+  }
+
+  function llmCardForm(card) {
+    var v = {};
+    card.querySelectorAll("[data-f]").forEach(function (el) { v[el.getAttribute("data-f")] = el.value; });
+    return v;
+  }
+
+  function llmCardMsg(card, text, cls) {
+    var m = card.querySelector("[data-msg]");
+    if (m) { m.textContent = text; m.className = "llm-msg" + (cls ? " " + cls : ""); }
+  }
+
+  function llmCardAction(act, key, card) {
+    if (act === "toggle") {
+      llmExpanded = llmExpanded === key ? null : key;
+      renderLLMCards();
+      return;
+    }
+    if (act === "activate") {
+      api("/api/llm/active", { method: "POST", body: { name: key } })
+        .then(function (cfg) { state.llm = cfg; refreshLLM(); renderLLMCards(); })
+        .catch(function (err) { showError(err.message); });
+      return;
+    }
+    if (act === "delete") {
+      if (!confirm("删除配置「" + key + "」？")) return;
+      api("/api/llm/delete", { method: "POST", body: { name: key } })
+        .then(function (cfg) { state.llm = cfg; if (llmExpanded === key) llmExpanded = null; refreshLLM(); renderLLMCards(); })
+        .catch(function (err) { showError(err.message); });
+      return;
+    }
+    if (act === "adv") {
+      var adv = card.querySelector(".llm-adv");
+      if (adv) adv.classList.toggle("hidden");
+      return;
+    }
+    var f = llmCardForm(card);
+    f.max_tokens = parseInt(f.max_tokens, 10) || 0;
+    if (act === "test") {
+      llmCardMsg(card, "测试中…");
+      api("/api/llm/test", { method: "POST", body: { name: f.name, kind: f.kind, base_url: f.base_url, model: f.model, api_key: f.api_key, temperature: f.temperature, max_tokens: f.max_tokens } })
+        .then(function () { llmCardMsg(card, "连接成功", "ok"); })
+        .catch(function (err) { llmCardMsg(card, err.message, "err"); });
+      return;
+    }
+    if (act === "save") {
+      api("/api/llm/profile", { method: "POST", body: {
+        name: f.name, kind: f.kind, base_url: f.base_url, model: f.model, api_key: f.api_key,
+        temperature: f.temperature, max_tokens: f.max_tokens, activate: false
+      } })
+        .then(function (cfg) {
+          state.llm = cfg;
+          llmExpanded = f.name; // 新卡保存后定位到实名卡
+          refreshLLM(); renderLLMCards();
+        })
+        .catch(function (err) { llmCardMsg(card, err.message, "err"); });
+    }
+  }
+
+  $("btn-llm-config").addEventListener("click", openLLMModal);
+  $("llm-close").addEventListener("click", function () { $("llm-modal").classList.add("hidden"); });
+  $("llm-add").addEventListener("click", function () { llmExpanded = "__new__"; renderLLMCards(); });
 
   // ---- 短语管理弹窗 ----
   function renderGatePhrases() {
@@ -1502,6 +1825,7 @@
     filter: "",
     poll: null,
     stickBottom: true,
+    sig: "", // 上轮日志文件签名（size-mtime），用于 unchanged 跳过重绘
   };
 
   function logActive() {
@@ -1510,8 +1834,13 @@
 
   function logPollOnce() {
     if (!logActive() || !$("log-autorefresh").checked) return;
-    api("/api/logs?tail=400").then(function (data) {
-      logState.lines = (data && data.lines) || [];
+    // 带上轮签名：文件没变时服务端只回 unchanged，跳过重绘（大文件下避免每 2s 全量渲染）
+    var url = "/api/logs?tail=400" + (logState.sig ? "&sig=" + encodeURIComponent(logState.sig) : "");
+    api(url).then(function (data) {
+      if (!data) return;
+      logState.sig = data.sig || logState.sig;
+      if (data.unchanged) return;
+      logState.lines = data.lines || [];
       logRender();
     }).catch(function () { /* 轮询静默失败 */ });
   }
