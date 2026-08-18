@@ -172,6 +172,7 @@ func TestEntryOptimizeOK(t *testing.T) {
 			"choices": []map[string]any{{"message": map[string]string{
 				"content": "```json\n{\"title\":\"新标题\",\"tags\":[\"x\"],\"summary\":\"新摘要\",\"body\":\"新正文\"}\n```",
 			}}},
+			"usage": map[string]any{"prompt_tokens": 100, "completion_tokens": 42},
 		})
 	}))
 	defer fake.Close()
@@ -196,12 +197,19 @@ func TestEntryOptimizeOK(t *testing.T) {
 		Title string   `json:"title"`
 		Tags  []string `json:"tags"`
 		Body  string   `json:"body"`
+		Usage struct {
+			Prompt     int `json:"prompt"`
+			Completion int `json:"completion"`
+		} `json:"usage"`
 	}
 	if err := json.Unmarshal(data, &out); err != nil {
 		t.Fatal(err)
 	}
 	if out.Title != "新标题" || len(out.Tags) != 1 || out.Body != "新正文" {
 		t.Fatalf("围栏 JSON 应被剥壳解析: %+v", out)
+	}
+	if out.Usage.Prompt != 100 || out.Usage.Completion != 42 {
+		t.Fatalf("usage 应透传: %+v", out.Usage)
 	}
 
 	// 优化不写盘：.md 内容与 mtime 均不变
@@ -255,6 +263,49 @@ func TestEntryOptimizeNoChange(t *testing.T) {
 	}
 }
 
+// TestEntryOptimizeNoChangeFuzzy 语义级相同也判 no_change：全半角标点差异、
+// 多余换行/空格、tags 顺序变化都不算有效优化。
+func TestEntryOptimizeNoChangeFuzzy(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	mkProject(t, okHome, "demo")
+
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]string{
+				// 与表单值仅差：全角标点、多余换行、tags 乱序
+				"content": `{"title":"旧标题","tags":["设计裁决","hook"],"summary":"旧摘要。","body":"旧正文：\n\n第二行"}`,
+			}}},
+		})
+	}))
+	defer fake.Close()
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	code, _ := do(t, "POST", srv.URL+"/api/llm/profile", testToken, map[string]any{
+		"name": "s", "kind": "openai", "base_url": fake.URL, "model": "m", "api_key": "k", "activate": true,
+	})
+	if code != 200 {
+		t.Fatalf("save profile: %d", code)
+	}
+	code, data := do(t, "POST", srv.URL+"/api/entry/optimize", testToken, map[string]any{
+		"project": "demo", "title": "旧标题", "tags": "hook, 设计裁决", "summary": "旧摘要。", "body": "旧正文: 第二行",
+	})
+	if code != 200 {
+		t.Fatalf("optimize: %d, %s", code, data)
+	}
+	if !strings.Contains(string(data), `"no_change":true`) {
+		t.Fatalf("标点/空白/tags 顺序差异应判定 no_change: %s", data)
+	}
+
+	// 对照组：body 有实质文字差异 → 不判 no_change
+	code, data = do(t, "POST", srv.URL+"/api/entry/optimize", testToken, map[string]any{
+		"project": "demo", "title": "旧标题", "tags": "hook, 设计裁决", "summary": "旧摘要。", "body": "旧正文: 第三行",
+	})
+	if code != 200 || strings.Contains(string(data), `"no_change":true`) {
+		t.Fatalf("实质差异不应判定 no_change: %d %s", code, data)
+	}
+}
+
 // TestExcerptLines 行号窗口截取：带行号取窗口、无行号取头部、越界钳制。
 func TestExcerptLines(t *testing.T) {
 	var sb strings.Builder
@@ -262,13 +313,37 @@ func TestExcerptLines(t *testing.T) {
 		sb.WriteString("line\n")
 	}
 	src := sb.String()
-	if got := excerptLines(src, "50-52"); len(strings.Split(strings.TrimRight(got, "\n"), "\n")) != 13 { // 45..57
+	if got := excerptLines(src, "50-52", nil); len(strings.Split(strings.TrimRight(got, "\n"), "\n")) != 13 { // 45..57
 		t.Fatalf("窗口行数不对: %d", len(strings.Split(got, "\n")))
 	}
-	if got := excerptLines(src, ""); len(strings.Split(strings.TrimRight(got, "\n"), "\n")) != 80 {
+	if got := excerptLines(src, "", nil); len(strings.Split(strings.TrimRight(got, "\n"), "\n")) != 80 {
 		t.Fatalf("无行号应取头 80 行")
 	}
-	if got := excerptLines("a\nb\n", "99"); !strings.Contains(got, "a") {
+	if got := excerptLines("a\nb\n", "99", nil); !strings.Contains(got, "a") {
 		t.Fatalf("越界应钳制: %q", got)
+	}
+}
+
+// TestExcerptLinesHints 无行号时：头 80 行之外，正文中反引号标识符的深处命中
+// 行窗口（±5）补进摘录；已在头部覆盖的不重复；同一标识符只取首个命中。
+func TestExcerptLinesHints(t *testing.T) {
+	var sb strings.Builder
+	for i := 1; i <= 200; i++ {
+		sb.WriteString("line\n")
+	}
+	sb.WriteString("") // 占位保持行号
+	lines := strings.Split(strings.TrimRight(sb.String(), "\n"), "\n")
+	lines[119] = "if old == mtime { // L120 深处的关键判定" // 索引 119 = 第 120 行
+	src := strings.Join(lines, "\n")
+
+	got := excerptLines(src, "", []string{"old == mtime"})
+	if !strings.Contains(got, "old == mtime") || !strings.Contains(got, "L115-125") {
+		t.Fatalf("深处命中行窗口应补进摘录: 尾部 %q", got[len(got)-200:])
+	}
+	// 命中行在头 80 行内时不重复追加
+	lines[9] = "head hit: old == mtime // L10"
+	got = excerptLines(strings.Join(lines, "\n"), "", []string{"old == mtime"})
+	if !strings.Contains(got, "head hit: old == mtime") || strings.Count(got, "if old == mtime {") != 1 {
+		t.Fatalf("头部命中不重复、深处命中保留: %q", got[len(got)-260:])
 	}
 }

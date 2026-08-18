@@ -23,16 +23,20 @@ func TestChatOpenAI(t *testing.T) {
 		_ = json.Unmarshal(raw, &gotBody)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"choices": []map[string]any{{"message": map[string]string{"content": "pong", "reasoning_content": "想了下"}}},
+			"usage": map[string]any{"prompt_tokens": 12, "completion_tokens": 3},
 		})
 	}))
 	defer srv.Close()
 	c := New(config.LLMProfile{Kind: "openai", BaseURL: srv.URL + "/v1/", Model: "m1", APIKey: "k1"}, 0)
-	out, reasoning, err := c.Chat(context.Background(), "sys", "usr", 100)
-	if err != nil || out != "pong" {
-		t.Fatalf("got (%q, %v)", out, err)
+	rep, err := c.Chat(context.Background(), "sys", "usr", 100)
+	if err != nil || rep.Text != "pong" {
+		t.Fatalf("got (%q, %v)", rep.Text, err)
 	}
-	if reasoning != "想了下" {
-		t.Fatalf("reasoning_content 应被捕获, got %q", reasoning)
+	if rep.Reasoning != "想了下" {
+		t.Fatalf("reasoning_content 应被捕获, got %q", rep.Reasoning)
+	}
+	if rep.Usage.Prompt != 12 || rep.Usage.Completion != 3 {
+		t.Fatalf("usage 应被归一捕获, got %+v", rep.Usage)
 	}
 	if gotPath != "/v1/chat/completions" {
 		t.Fatalf("path = %q（base_url 尾部斜杠应被规整）", gotPath)
@@ -61,9 +65,9 @@ func TestChatAnthropic(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := New(config.LLMProfile{Kind: "anthropic", BaseURL: srv.URL, Model: "claude-x", APIKey: "ak"}, 0)
-	out, _, err := c.Chat(context.Background(), "sys", "usr", 100)
-	if err != nil || out != "pong" {
-		t.Fatalf("got (%q, %v)", out, err)
+	rep2, err := c.Chat(context.Background(), "sys", "usr", 100)
+	if err != nil || rep2.Text != "pong" {
+		t.Fatalf("got (%q, %v)", rep2.Text, err)
 	}
 	if gotPath != "/v1/messages" || gotKey != "ak" || gotVer != "2023-06-01" {
 		t.Fatalf("path=%q key=%q ver=%q", gotPath, gotKey, gotVer)
@@ -80,7 +84,7 @@ func TestChatHTTPError(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := New(config.LLMProfile{Kind: "openai", BaseURL: srv.URL, Model: "m", APIKey: "bad"}, 0)
-	_, _, err := c.Chat(context.Background(), "s", "u", 10)
+	_, err := c.Chat(context.Background(), "s", "u", 10)
 	if err == nil || !strings.Contains(err.Error(), "401") {
 		t.Fatalf("应透传状态码, got %v", err)
 	}
@@ -88,7 +92,7 @@ func TestChatHTTPError(t *testing.T) {
 
 func TestUnknownKind(t *testing.T) {
 	c := New(config.LLMProfile{Kind: "gemini"}, 0)
-	if _, _, err := c.Chat(context.Background(), "s", "u", 10); err == nil {
+	if _, err := c.Chat(context.Background(), "s", "u", 10); err == nil {
 		t.Fatal("未知 kind 应报错")
 	}
 }
@@ -132,7 +136,7 @@ func TestAdvancedParams(t *testing.T) {
 
 	// 缺省：不带 temperature，max_tokens 用调用方值
 	c := New(config.LLMProfile{Kind: "openai", BaseURL: srv.URL, Model: "m"}, 0)
-	if _, _, err := c.Chat(context.Background(), "s", "u", 100); err != nil {
+	if _, err := c.Chat(context.Background(), "s", "u", 100); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := gotBody["temperature"]; ok {
@@ -144,7 +148,7 @@ func TestAdvancedParams(t *testing.T) {
 
 	// 显式配置：temperature 透传，MaxTokens 覆盖调用方
 	c = New(config.LLMProfile{Kind: "openai", BaseURL: srv.URL, Model: "m", Temperature: "1", MaxTokens: 512}, 0)
-	if _, _, err := c.Chat(context.Background(), "s", "u", 100); err != nil {
+	if _, err := c.Chat(context.Background(), "s", "u", 100); err != nil {
 		t.Fatal(err)
 	}
 	if gotBody["temperature"] != float64(1) {
@@ -156,7 +160,7 @@ func TestAdvancedParams(t *testing.T) {
 
 	// 非法 temperature（手改 config.toml 的情况）应报错
 	c = New(config.LLMProfile{Kind: "openai", BaseURL: srv.URL, Model: "m", Temperature: "abc"}, 0)
-	if _, _, err := c.Chat(context.Background(), "s", "u", 100); err == nil {
+	if _, err := c.Chat(context.Background(), "s", "u", 100); err == nil {
 		t.Fatal("非法 temperature 应报错")
 	}
 }

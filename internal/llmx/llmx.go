@@ -32,10 +32,23 @@ func New(p config.LLMProfile, timeout time.Duration) *Client {
 	return &Client{p: p, timeout: timeout, hc: &http.Client{Timeout: timeout}}
 }
 
-// Chat 单轮非流式对话：system + user 进，正文出；reasoning 为模型的思考过程
-//（openai 的 reasoning_content / anthropic 的 thinking 块，无则为空），供日志记录。
+// Usage token 消耗：openai 的 prompt/completion_tokens 与 anthropic 的
+// input/output_tokens 归一到这两个字段；服务不回 usage 时为零值。
+type Usage struct {
+	Prompt     int `json:"prompt"`
+	Completion int `json:"completion"`
+}
+
+// Reply 一次生成的完整结果：正文 + 思考过程 + token 消耗。
+type Reply struct {
+	Text      string
+	Reasoning string // 思考过程（reasoning_content / thinking 块），无则空
+	Usage     Usage
+}
+
+// Chat 单轮非流式对话：system + user 进，Reply 出。
 // profile.MaxTokens>0 时覆盖调用方 maxTokens（用户显式配置优先）。
-func (c *Client) Chat(ctx context.Context, system, user string, maxTokens int) (text, reasoning string, err error) {
+func (c *Client) Chat(ctx context.Context, system, user string, maxTokens int) (Reply, error) {
 	if c.p.MaxTokens > 0 {
 		maxTokens = c.p.MaxTokens
 	}
@@ -45,13 +58,13 @@ func (c *Client) Chat(ctx context.Context, system, user string, maxTokens int) (
 	case "anthropic":
 		return c.chatAnthropic(ctx, system, user, maxTokens)
 	default:
-		return "", "", fmt.Errorf("未知 llm 类型: %q（openai|anthropic）", c.p.Kind)
+		return Reply{}, fmt.Errorf("未知 llm 类型: %q（openai|anthropic）", c.p.Kind)
 	}
 }
 
 // Test 连通性检查：发一条极短请求验证地址/鉴权/模型名。
 func (c *Client) Test(ctx context.Context) error {
-	_, _, err := c.Chat(ctx, "ping", "ping", 1)
+	_, err := c.Chat(ctx, "ping", "ping", 1)
 	return err
 }
 
@@ -105,7 +118,7 @@ func (c *Client) doJSON(ctx context.Context, url string, headers map[string]stri
 	return json.Unmarshal(raw, out)
 }
 
-func (c *Client) chatOpenAI(ctx context.Context, system, user string, maxTokens int) (string, string, error) {
+func (c *Client) chatOpenAI(ctx context.Context, system, user string, maxTokens int) (Reply, error) {
 	body := map[string]any{
 		"model": c.p.Model,
 		"messages": []map[string]string{
@@ -117,7 +130,7 @@ func (c *Client) chatOpenAI(ctx context.Context, system, user string, maxTokens 
 		// 用户在高级参数里显式配置时才带上。
 	}
 	if err := c.applyTemperature(body); err != nil {
-		return "", "", err
+		return Reply{}, err
 	}
 	var out struct {
 		Choices []struct {
@@ -126,18 +139,26 @@ func (c *Client) chatOpenAI(ctx context.Context, system, user string, maxTokens 
 				ReasoningContent string `json:"reasoning_content"` // 思考过程（DeepSeek/Kimi 等推理模型）
 			} `json:"message"`
 		} `json:"choices"`
+		Usage struct {
+			Prompt     int `json:"prompt_tokens"`
+			Completion int `json:"completion_tokens"`
+		} `json:"usage"`
 	}
 	if err := c.doJSON(ctx, c.endpoint("/chat/completions"),
 		map[string]string{"Authorization": "Bearer " + c.p.APIKey}, body, &out); err != nil {
-		return "", "", err
+		return Reply{}, err
 	}
 	if len(out.Choices) == 0 {
-		return "", "", fmt.Errorf("openai 响应无 choices")
+		return Reply{}, fmt.Errorf("openai 响应无 choices")
 	}
-	return out.Choices[0].Message.Content, out.Choices[0].Message.ReasoningContent, nil
+	return Reply{
+		Text:      out.Choices[0].Message.Content,
+		Reasoning: out.Choices[0].Message.ReasoningContent,
+		Usage:     Usage{Prompt: out.Usage.Prompt, Completion: out.Usage.Completion},
+	}, nil
 }
 
-func (c *Client) chatAnthropic(ctx context.Context, system, user string, maxTokens int) (string, string, error) {
+func (c *Client) chatAnthropic(ctx context.Context, system, user string, maxTokens int) (Reply, error) {
 	body := map[string]any{
 		"model":      c.p.Model,
 		"system":     system,
@@ -145,7 +166,7 @@ func (c *Client) chatAnthropic(ctx context.Context, system, user string, maxToke
 		"max_tokens": maxTokens,
 	}
 	if err := c.applyTemperature(body); err != nil {
-		return "", "", err
+		return Reply{}, err
 	}
 	var out struct {
 		Content []struct {
@@ -153,12 +174,16 @@ func (c *Client) chatAnthropic(ctx context.Context, system, user string, maxToke
 			Text     string `json:"text"`
 			Thinking string `json:"thinking"` // 扩展思考块（thinking 开启时）
 		} `json:"content"`
+		Usage struct {
+			Input  int `json:"input_tokens"`
+			Output int `json:"output_tokens"`
+		} `json:"usage"`
 	}
 	if err := c.doJSON(ctx, c.endpoint("/v1/messages"), map[string]string{
 		"x-api-key":         c.p.APIKey,
 		"anthropic-version": "2023-06-01",
 	}, body, &out); err != nil {
-		return "", "", err
+		return Reply{}, err
 	}
 	var text, reasoning string
 	for _, b := range out.Content {
@@ -172,7 +197,11 @@ func (c *Client) chatAnthropic(ctx context.Context, system, user string, maxToke
 		}
 	}
 	if text == "" && len(out.Content) == 0 {
-		return "", "", fmt.Errorf("anthropic 响应无 content")
+		return Reply{}, fmt.Errorf("anthropic 响应无 content")
 	}
-	return text, reasoning, nil
+	return Reply{
+		Text:      text,
+		Reasoning: reasoning,
+		Usage:     Usage{Prompt: out.Usage.Input, Completion: out.Usage.Output},
+	}, nil
 }

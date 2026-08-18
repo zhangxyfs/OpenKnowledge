@@ -40,12 +40,6 @@ body {
   border-bottom: 1px solid #fecaca;
 }
 
-.banner.info {
-  background: #eff6ff;
-  color: #1d4ed8;
-  border-bottom-color: #bfdbfe;
-}
-
 .banner button {
   background: none;
   border: none;
@@ -432,6 +426,7 @@ input:focus, select:focus, textarea:focus {
 .btn-optimize { border-color: #8b5cf6; color: #8b5cf6; }
 .cmp-box { width: 760px; max-width: 94vw; }
 .cmp-basis { font-size: 12px; font-weight: 400; }
+.cmp-notice { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; border-radius: 6px; padding: 8px 10px; margin-bottom: 10px; font-size: 13px; line-height: 1.5; }
 .cmp-note { font-size: 12px; align-self: center; }
 .cmp-field { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
 .cmp-name { font-size: 12px; color: var(--muted); margin-bottom: 6px; font-weight: 600; display: flex; justify-content: space-between; align-items: center; }

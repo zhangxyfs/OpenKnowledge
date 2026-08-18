@@ -27,12 +27,6 @@
     $("banner-text").textContent = msg;
     $("banner").classList.remove("hidden", "info");
   }
-  // showInfo 中性提示（非错误）：蓝色横幅，如「无需优化」
-  function showInfo(msg) {
-    $("banner-text").textContent = msg;
-    $("banner").classList.remove("hidden");
-    $("banner").classList.add("info");
-  }
   $("banner-close").addEventListener("click", function () {
     $("banner").classList.add("hidden");
   });
@@ -658,15 +652,32 @@
     ["body", "正文", "f-body"]
   ];
 
+  // usageText 格式化 token 消耗；服务未回 usage（双零）时返回空串不显示
+  function usageText(u) {
+    if (!u || (!u.prompt && !u.completion)) return "";
+    return "消耗 " + (u.prompt + u.completion) + " token（入 " + u.prompt + " / 出 " + u.completion + "）";
+  }
+
   function openCmpModal(oldV, newV) {
     cmpOld = oldV; cmpNew = newV;
     $("cmp-basis").textContent = "依据：条目引用的真实代码 + 相关条目 + INDEX 摘录";
+    $("cmp-usage").textContent = usageText(newV.usage);
+    var notice = $("cmp-notice");
+    if (newV.no_change) {
+      var ut = usageText(newV.usage);
+      notice.textContent = "模型判断：当前内容已足够简练准确，无需优化。如下仍有差异仅为排版/标点，可逐字段回填或直接放弃。" + (ut ? "（" + ut + "）" : "");
+      notice.classList.remove("hidden");
+    } else {
+      notice.classList.add("hidden");
+    }
     var box = $("cmp-fields");
     box.innerHTML = "";
     CMP_FIELDS.forEach(function (f) {
       var key = f[0], label = f[1];
       var oldText = key === "tags" ? (oldV.tags || "") : (oldV[key] || "");
       var newText = key === "tags" ? (newV.tags || []).join(", ") : (newV[key] || "");
+      // 模型自报 no_change 时不回字段，"优化后" 回退显示原值，避免空行
+      if (newV.no_change && !newText) newText = oldText;
       var div = document.createElement("div");
       div.className = "cmp-field";
       div.innerHTML = '<div class="cmp-name"><span>' + label + '</span>' +
@@ -681,11 +692,14 @@
   }
 
   // 单字段回填：只把该字段的优化值写回表单（不关弹窗，可逐字段挑选）
+  // 空值回退原值：no_change 场景模型可能不回字段，回填不得清空表单
   function cmpFillField(key) {
     if (!cmpNew) return "";
-    if (key === "tags") return (cmpNew.tags || []).join(", ");
-    if (key === "title") return cmpNew.title || cmpOld.title;
-    return cmpNew[key] || "";
+    if (key === "tags") {
+      var t = (cmpNew.tags || []).join(", ");
+      return t || cmpOld.tags || "";
+    }
+    return cmpNew[key] || cmpOld[key] || "";
   }
 
   $("cmp-fields").addEventListener("click", function (ev) {
@@ -739,10 +753,7 @@
         body: $("f-body").value
       }
     }).then(function (out) {
-      if (out.no_change) {
-        showInfo("模型判断：当前内容已足够简练准确，无需优化");
-        return;
-      }
+      // 优化完成一律打开对照弹窗；no_change 提示在弹窗内展示
       openCmpModal({ title: $("f-title").value, tags: $("f-tags").value, summary: $("f-summary").value, body: $("f-body").value }, out);
     }).catch(function (err) {
       if (optAbort && optAbort.signal.aborted) return; // 关闭弹窗主动取消，静默
