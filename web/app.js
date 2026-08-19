@@ -664,8 +664,8 @@
     $("cmp-usage").textContent = usageText(newV.usage);
     var notice = $("cmp-notice");
     if (newV.no_change) {
-      var ut = usageText(newV.usage);
-      notice.textContent = "模型判断：当前内容已足够简练准确，无需优化。如下仍有差异仅为排版/标点，可逐字段回填或直接放弃。" + (ut ? "（" + ut + "）" : "");
+      // token 消耗已在 cmp-usage 行展示，提示文案里不再重复
+      notice.textContent = "模型判断：当前内容已足够简练准确，无需优化。如下仍有差异仅为排版/标点，可逐字段回填或直接放弃。";
       notice.classList.remove("hidden");
     } else {
       notice.classList.add("hidden");

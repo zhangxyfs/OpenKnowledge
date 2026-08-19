@@ -272,8 +272,8 @@ func TestEntryOptimizeNoChangeFuzzy(t *testing.T) {
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"choices": []map[string]any{{"message": map[string]string{
-				// 与表单值仅差：全角标点、多余换行、tags 乱序
-				"content": `{"title":"旧标题","tags":["设计裁决","hook"],"summary":"旧摘要。","body":"旧正文：\n\n第二行"}`,
+				// 与表单值仅差：全半角标点（《》/……/～/％/：）、多余换行、tags 乱序
+				"content": `{"title":"旧标题","tags":["设计裁决","hook"],"summary":"旧摘要《v2》……","body":"旧正文：\n\n第2行～50％"}`,
 			}}},
 		})
 	}))
@@ -288,7 +288,7 @@ func TestEntryOptimizeNoChangeFuzzy(t *testing.T) {
 		t.Fatalf("save profile: %d", code)
 	}
 	code, data := do(t, "POST", srv.URL+"/api/entry/optimize", testToken, map[string]any{
-		"project": "demo", "title": "旧标题", "tags": "hook, 设计裁决", "summary": "旧摘要。", "body": "旧正文: 第二行",
+		"project": "demo", "title": "旧标题", "tags": "hook, 设计裁决", "summary": "旧摘要<v2>...", "body": "旧正文: 第2行~50%",
 	})
 	if code != 200 {
 		t.Fatalf("optimize: %d, %s", code, data)
@@ -299,7 +299,7 @@ func TestEntryOptimizeNoChangeFuzzy(t *testing.T) {
 
 	// 对照组：body 有实质文字差异 → 不判 no_change
 	code, data = do(t, "POST", srv.URL+"/api/entry/optimize", testToken, map[string]any{
-		"project": "demo", "title": "旧标题", "tags": "hook, 设计裁决", "summary": "旧摘要。", "body": "旧正文: 第三行",
+		"project": "demo", "title": "旧标题", "tags": "hook, 设计裁决", "summary": "旧摘要<v2>...", "body": "旧正文: 第三行",
 	})
 	if code != 200 || strings.Contains(string(data), `"no_change":true`) {
 		t.Fatalf("实质差异不应判定 no_change: %d %s", code, data)

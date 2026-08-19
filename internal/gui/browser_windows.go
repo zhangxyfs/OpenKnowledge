@@ -15,6 +15,9 @@ import (
 // 注：maximizeWindowByTitle 必须同步调用：ok gui 开浏览器即退（daemon 托管生命周期），
 // 协程会随进程退出而被杀——v2.1 的"不自动最大化"回归正源于此。
 func OpenBrowser(url string) uintptr {
+	if !safeAppURL(url) {
+		return 0 // 非回环 http(s) 或含击穿引号的 URL：拒绝进入 PowerShell 命令串
+	}
 	for _, browser := range []string{"msedge", "chrome"} {
 		ps := fmt.Sprintf("Start-Process %s -ArgumentList '--app=%s' -WindowStyle Maximized", browser, url)
 		cmd := exec.Command("powershell", "-NoProfile", "-Command", ps)

@@ -8,3 +8,4 @@ cmd/ok/*.syso
 /.superpowers/
 /.reasonix/
 .worktrees/
+.mimosa/

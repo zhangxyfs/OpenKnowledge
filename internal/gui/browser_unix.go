@@ -12,6 +12,9 @@ import (
 // 无窗口句柄概念，恒返回 0（与 window_other.go 的 IsWindow=false 配套）。
 // Start 后异步 Wait：调用方是常驻 daemon，不 reap 会累积僵尸进程。
 func OpenBrowser(url string) uintptr {
+	if !safeAppURL(url) {
+		return 0 // 与 Windows 版同一守卫：只放行本机回环 http(s) URL
+	}
 	cmd := exec.Command("xdg-open", url)
 	if err := cmd.Start(); err != nil {
 		fmt.Println("请在浏览器打开:", url)

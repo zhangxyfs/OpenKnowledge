@@ -172,10 +172,14 @@ func findProject(name string) (st *store.Store, found bool, err error) {
 	return nil, false, nil
 }
 
-// resolveProject 是 findProject 的 HTTP 层封装：缺参 400、未注册 404。
+// resolveProject 是 findProject 的 HTTP 层封装：缺参 400、形状非法 400、未注册 404。
 func resolveProject(w http.ResponseWriter, name string) *store.Store {
 	if name == "" {
 		writeErr(w, http.StatusBadRequest, "缺少 project 参数")
+		return nil
+	}
+	if !validProjectName(name) {
+		writeErr(w, http.StatusBadRequest, fmt.Sprintf("非法项目名: %q", name))
 		return nil
 	}
 	st, found, err := findProject(name)
@@ -188,6 +192,19 @@ func resolveProject(w http.ResponseWriter, name string) *store.Store {
 		return nil
 	}
 	return st
+}
+
+// validProjectName 校验项目名形状：必须是不含路径分隔符与盘符的基本名。
+// 注册表名字来自 ok init 的裸输入（无形状约束），registry.toml 也可能被手改；
+// GUI 层拿名字拼 projects/<name>/ 前，穿越段名字（../、绝对路径、C: 盘符）一律拒绝。
+func validProjectName(name string) bool {
+	if name == "" || name == "." || name == ".." {
+		return false
+	}
+	if name != filepath.Base(name) {
+		return false
+	}
+	return !strings.ContainsAny(name, `\/:`)
 }
 
 // validEntryFile 校验条目文件参数：必须是不含 ".." 与路径分隔符的 .md 基本名。
@@ -558,11 +575,16 @@ func (h *Handler) apiProjects(w http.ResponseWriter, _ *http.Request) {
 
 // apiProjectDelete 删除项目知识库：先注销注册表（Save 失败则中止、目录不动），
 // 再删除 projects/<name>/ 目录；目录删除失败时项目已注销，返回 warning 供前端提示手动清理。
-// 目录名取注册表匹配后的 p.Name，不接受用户原始输入，无路径穿越面。
+// 目录名取注册表匹配后的 p.Name 而非用户原始输入，但注册名本身可能被手改或经
+// ok init 带入穿越段——RemoveAll 落地前仍须过 validProjectName 形状校验。
 func (h *Handler) apiProjectDelete(w http.ResponseWriter, r *http.Request) {
 	name := r.URL.Query().Get("project")
 	if name == "" {
 		writeErr(w, http.StatusBadRequest, "缺少 project 参数")
+		return
+	}
+	if !validProjectName(name) {
+		writeErr(w, http.StatusBadRequest, fmt.Sprintf("非法项目名: %q", name))
 		return
 	}
 	// 锁内读-改-写：与并发的 ok init / 备份恢复互斥，防止互相覆盖丢注册

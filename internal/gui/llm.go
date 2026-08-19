@@ -348,17 +348,39 @@ func gatherGrounding(st *store.Store, project, selfFile, title, summary, body st
 	return sb.String()
 }
 
-// normalizeForCmp 语义级相同判定用的归一化：全部空白（含换行）折叠为单空格、
-// 常见全角标点归半角——只动排版/标点的伪优化不算优化，应判 no_change。
+// cmpPunct 归一 CJK 标点区块的符号；全角 ASCII 区（！～，含全角字母数字与
+// ％＝＋等）由 foldFullWidth 统一折半角，二者字符集不相交。
 var cmpPunct = strings.NewReplacer(
-	"：", ":", "；", ";", "，", ",", "。", ".", "、", ",",
-	"（", "(", "）", ")", "【", "[", "】", "]",
-	"「", "\"", "」", "\"", "“", "\"", "”", "\"", "‘", "'", "’", "'",
-	"！", "!", "？", "?", "—", "-", "–", "-",
+	"。", ".", "、", ",", "·", ".",
+	"《", "<", "》", ">", "〈", "<", "〉", ">",
+	"【", "[", "】", "]",
+	"「", "\"", "」", "\"", "『", "\"", "』", "\"",
+	"“", "\"", "”", "\"", "‘", "'", "’", "'",
+	"—", "-", "–", "-", "…", ".",
 )
 
+// foldFullWidth 全角 ASCII 区（U+FF01 ！ ～ U+FF5E）折对应半角——模型输出
+// 常混全半角（50％ vs 50%、ＡＢＣ vs ABC）。
+func foldFullWidth(s string) string {
+	var sb strings.Builder
+	sb.Grow(len(s))
+	for _, r := range s {
+		if r >= 0xFF01 && r <= 0xFF5E {
+			r -= 0xFEE0
+		}
+		sb.WriteRune(r)
+	}
+	return sb.String()
+}
+
+// normalizeForCmp 语义级相同判定用的归一化：全角折半角、CJK 标点归半角、
+// 连续点号折叠（... ↔ …… ↔ 。。。）、全部空白（含换行）折叠为单空格——
+// 只动排版/标点的伪优化不算优化，应判 no_change。
+var cmpDots = regexp.MustCompile(`\.{2,}`)
+
 func normalizeForCmp(s string) string {
-	return strings.Join(strings.Fields(cmpPunct.Replace(s)), " ")
+	folded := cmpPunct.Replace(foldFullWidth(s))
+	return strings.Join(strings.Fields(cmpDots.ReplaceAllString(folded, ".")), " ")
 }
 
 // excerptLines 按 "30" 或 "30-50" 行号取窗口（前后各放宽 5 行）。无行号时取
@@ -505,12 +527,12 @@ func (h *Handler) apiEntryOptimize(w http.ResponseWriter, r *http.Request) {
 	raw = strings.TrimSuffix(raw, "```")
 	raw = strings.TrimSpace(raw)
 	var out struct {
-		Title    string      `json:"title"`
-		Tags     []string    `json:"tags"`
-		Summary  string      `json:"summary"`
-		Body     string      `json:"body"`
-		NoChange bool        `json:"no_change"`
-		Usage    llmx.Usage  `json:"usage"`
+		Title    string     `json:"title"`
+		Tags     []string   `json:"tags"`
+		Summary  string     `json:"summary"`
+		Body     string     `json:"body"`
+		NoChange bool       `json:"no_change"`
+		Usage    llmx.Usage `json:"usage"`
 	}
 	if err := json.Unmarshal([]byte(raw), &out); err != nil {
 		snip := raw
