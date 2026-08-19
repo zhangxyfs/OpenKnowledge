@@ -1,8 +1,10 @@
 # OpenViking 知识检索调研：对 OpenKnowledge 的借鉴价值
 
 日期：2026-08-19
-调研对象：D:\develop\OpenViking（火山引擎开源，"面向 AI Agent 的上下文数据库"，VLDB 2026 VikingMem 论文实现，Python + Rust + C++ 引擎，AGPLv3）
+调研对象：[OpenViking](https://github.com/volcengine/OpenViking) @ commit `d88967aa`（2026-08-19；火山引擎开源，"面向 AI Agent 的上下文数据库"，VLDB 2026 VikingMem 论文实现，Python + Rust + C++ 引擎，主项目 AGPLv3，CLI/examples 为 Apache 2.0）
 调研目的：评估其检索设计中哪些可移植到 OpenKnowledge（Go + SQLite + FTS5 + 内存余弦，万条级单用户本地知识库）
+
+> 独立第三方调研，非官方对比，与 OpenViking 项目方无关。文中 `file:line` 引用均基于上述 commit，上游更新后行号可能漂移。
 
 ---
 
