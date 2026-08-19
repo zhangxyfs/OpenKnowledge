@@ -32,6 +32,74 @@ type Session struct {
 	// 统计性信号可接受）。
 	InjectedKnowledge []string `json:"injected_knowledge"`
 	AdoptedKnowledge  []string `json:"adopted_knowledge"`
+	// PromptTurns 本会话 prompt 轮次计数：每轮 InjectForPrompt +1，是注入冷却的
+	// 时钟；门控命中轮也计（语义"每 prompt 一轮"，时钟自走无停摆模式）。
+	PromptTurns int `json:"prompt_turns"`
+	// InjectedLog 检索注入台账：条目 basename（原始大小写，与索引库 filename
+	// 同源，精确匹配无需大小写折叠）→ 最后注入的 prompt 轮次。冷却判定见
+	// Cooling/CoolingSet；采纳归因窗口见 AdoptableName。
+	InjectedLog map[string]int `json:"injected_log,omitempty"`
+}
+
+// Cooling 报告条目是否在冷却期：距上次注入 ≤ dedupTurns 轮。dedupTurns<=0
+// （关闭）恒 false；nil 台账安全。
+func (s *Session) Cooling(name string, dedupTurns int) bool {
+	if dedupTurns <= 0 {
+		return false
+	}
+	last, ok := s.InjectedLog[name]
+	return ok && s.PromptTurns-last <= dedupTurns
+}
+
+// CoolingSet 返回当前冷却中的条目 basename 集合（检索排除用）；无冷却或关闭
+// 返回 nil。
+func (s *Session) CoolingSet(dedupTurns int) map[string]bool {
+	if dedupTurns <= 0 || len(s.InjectedLog) == 0 {
+		return nil
+	}
+	out := map[string]bool{}
+	for name := range s.InjectedLog {
+		if s.Cooling(name, dedupTurns) {
+			out[name] = true
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// MarkRetrievalInjected 把本轮检索注入的条目记入台账（轮次=当前 PromptTurns）；
+// 重新注入刷新轮次。
+func (s *Session) MarkRetrievalInjected(names []string) {
+	if len(names) == 0 {
+		return
+	}
+	if s.InjectedLog == nil {
+		s.InjectedLog = map[string]int{}
+	}
+	for _, n := range names {
+		s.InjectedLog[n] = s.PromptTurns
+	}
+}
+
+// AdoptableName 报告 base 是否在采纳归因窗口内并返回库内原名：本轮注入过，
+// 或冷却窗口内注入过（模型可能按历史轮指针读取冷却中的条目，仍应归因）。
+// 大小写不敏感——TrackTouched 的 basename 来自 OS 工具调用路径，大小写可能与
+// 库内不一致；返回原名保证 entry_events 与 entries.filename 大小写对齐。
+// dedupTurns<=0 时只认本轮注入（旧行为）。
+func (s *Session) AdoptableName(base string, dedupTurns int) string {
+	for _, n := range s.InjectedKnowledge {
+		if strings.EqualFold(n, base) {
+			return n
+		}
+	}
+	for n := range s.InjectedLog {
+		if strings.EqualFold(n, base) && s.Cooling(n, dedupTurns) {
+			return n
+		}
+	}
+	return ""
 }
 
 func fileName(sessionID string) string {
