@@ -39,6 +39,16 @@ func TestDaemonEndToEnd(t *testing.T) {
 	if stdout, _, code := runOK(t, home, proj, "", "init", "demo"); code != 0 {
 		t.Fatalf("init: %d %q", code, stdout)
 	}
+	// 本测试意图是"第二轮检索仍生效"（local fallback 与同 session 第二次 prompt），
+	// 与跨轮注入冷却正交：钉 dedup_turns=0 关闭冷却
+	cfgPin := filepath.Join(home, "projects", "demo", "config.toml")
+	existing, err := os.ReadFile(cfgPin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cfgPin, append(existing, []byte("\n[retrieve]\ndedup_turns = 0\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	body := filepath.Join(proj, "body.md")
 	if err := os.WriteFile(body, []byte("使用 Conventional Commits。"), 0o644); err != nil {
 		t.Fatal(err)
