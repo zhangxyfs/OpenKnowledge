@@ -62,9 +62,18 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 	// 开头先入账（读挂账到闭包外再清空）。会话就此结束则挂账丢失——统计性
 	// 信号，可接受。fail-open：失败仅记日志。
 	var adopted []string
+	var coolingSet map[string]bool
+	dedupTurns := pc.Config.Retrieve.DedupTurns
+	if dedupTurns < 0 {
+		dedupTurns = 0
+	}
 	if err := state.Update(pc.Store.StateDir(), sessionID, func(st *state.Session) {
 		adopted = st.AdoptedKnowledge
 		st.AdoptedKnowledge = nil
+		// 冷却时钟：每 prompt 轮 +1（门控命中轮也计——语义"每 prompt 一轮"，
+		// 时钟自走无停摆）。先推进时钟再取冷却集合，本轮与上次注入的轮距才正确。
+		st.PromptTurns++
+		coolingSet = st.CoolingSet(dedupTurns)
 	}); err != nil {
 		logErr("prompt adopt load: %v", err)
 	}
@@ -175,7 +184,7 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 		}
 		// top_n 截断在分支过滤之后（QueryExBranch 内部保证），其他分支的差异条目
 		// 不再白白挤占名额；无 branch 标签的条目与未知分支场景不受影响。
-		h, info, err := db.QueryExBranch(retrieve.Terms(promptText), queryVec, pc.Config.Retrieve, ws.Branch, nil)
+		h, info, err := db.QueryExBranch(retrieve.Terms(promptText), queryVec, pc.Config.Retrieve, ws.Branch, coolingSet)
 		if err != nil {
 			logErr("prompt query: %v", err)
 		}
@@ -192,6 +201,10 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 		// 反馈降权命中（持续注入但从未被读）：记 ok.log，GUI 日志页可按"反馈"过滤
 		if len(info.FeedbackDemoted) > 0 {
 			logErr("prompt feedback: 反馈降权（%s）", strings.Join(info.FeedbackDemoted, "、"))
+		}
+		// 冷却跳过（本可准入但在冷却窗口内被排除）：记 ok.log，GUI 日志页可按"冷却"过滤
+		if len(info.CooledSkipped) > 0 {
+			logErr("prompt dedup: 冷却跳过（%s）", strings.Join(info.CooledSkipped, "、"))
 		}
 		hits = h
 	}
@@ -215,6 +228,7 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 		}
 		if err := state.Update(pc.Store.StateDir(), sessionID, func(st *state.Session) {
 			st.InjectedKnowledge = names
+			st.MarkRetrievalInjected(names)
 		}); err != nil {
 			logErr("prompt inject state: %v", err)
 		}
