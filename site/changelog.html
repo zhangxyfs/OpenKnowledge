@@ -115,8 +115,12 @@
    <details id="verNav" open>
     <summary data-i18n="c.ledger">版本档案</summary>
     <div class="group">
+      <div class="group-title">2.20.x</div>
+      <a href="#v2-20-0"><span><span class="latest-dot"></span>v2.20.0</span><span class="d">08-19</span></a>
+    </div>
+    <div class="group">
       <div class="group-title">2.17.x</div>
-      <a href="#v2-17-0"><span><span class="latest-dot"></span>v2.17.0</span><span class="d">08-16</span></a>
+      <a href="#v2-17-0"><span>v2.17.0</span><span class="d">08-16</span></a>
     </div>
     <div class="group">
       <div class="group-title">2.16.x</div>
@@ -195,12 +199,43 @@
       <h1 data-i18n="c.h1">更新日志</h1>
       <p class="lede" data-i18n="c.lede">OpenKnowledge 的版本发布记录。日期为 2026 年。</p>
       <div class="cta">
-        <a class="btn btn-primary" href="https://github.com/zhangxyfs/OpenKnowledge/releases" target="_blank" rel="noopener" data-i18n="c.cta">下载最新版 v2.19.0</a>
+        <a class="btn btn-primary" href="https://github.com/zhangxyfs/OpenKnowledge/releases" target="_blank" rel="noopener" data-i18n="c.cta">下载最新版 v2.20.0</a>
       </div>
     </div>
 
+    <section class="ver" id="v2-20-0">
+      <div class="ver-head"><h2>v2.20.0</h2><span class="badge-latest" data-i18n="c.latest">最新</span><time>2026-08-19</time></div>
+      <div class="chg">
+        <span class="tag tag-new" data-i18n="t.new">新功能</span>
+        <ul>
+          <li>跨轮注入冷却（<code>retrieve.dedup_turns</code>，默认 3）：同一会话里注入过的检索条目冷却 N 轮不再重复注入，到期自然回归；冷却中的条目不占 top_n 名额、由排名靠后的新条目补位；「继续」「好的」类泛化 prompt 轮同样消耗冷却轮次；上下文压缩后冷却台账一并重置；冷却期内按历史指针读取文件仍记采纳、反馈降权统计不被污染。GUI 引导页新增「跨轮注入冷却」卡（0~99，0=关闭）；冷却跳过记 ok.log 可按「冷却」过滤，<code>ok search</code> 与 GUI 搜索不受影响</li>
+        </ul>
+      </div>
+      <div class="chg">
+        <span class="tag tag-improve" data-i18n="t.improve">改进</span>
+        <ul>
+          <li>优化输出上限可配：模型配置卡新增「最大 token」单字段保存（0=默认 8192，或 1024~131072），不动 temperature 等其他高级参数</li>
+          <li>AI 优化的参照检索按正文反引号代码片段定位行窗口，不再只看文件头；对照弹窗展示本次入/出 token 消耗；「无需优化」放宽为语义级相同判定（全半角、CJK 标点、空白与连续点号归一）</li>
+          <li>GUI 安全加固：项目名形状校验（拒绝路径穿越段名）、浏览器打开外链前校验 URL 安全性</li>
+        </ul>
+      </div>
+      <div class="chg">
+        <span class="tag tag-fix" data-i18n="t.fix">修复</span>
+        <ul>
+          <li>推理模型优化结果为空：思考过程与正文共享同一 max_tokens 预算，默认 4096 被长思考烧穿——默认提到 8192，思考里吐答案 JSON 的情况兜底提取</li>
+          <li>输出触顶截断不再笼统报「非合法 JSON」，明确提示调大最大 token（finish 标记 + completion 打满上限双信号）</li>
+        </ul>
+      </div>
+      <div class="chg">
+        <span class="tag tag-note" data-i18n="t.note">说明</span>
+        <ul>
+          <li>冷却默认开启（3 轮），设 <code>dedup_turns = 0</code> 完整恢复旧行为；新会话天然无冷却；无接口破坏，直接覆盖升级</li>
+        </ul>
+      </div>
+    </section>
+
     <section class="ver" id="v2-17-0">
-      <div class="ver-head"><h2>v2.17.0</h2><span class="badge-latest" data-i18n="c.latest">最新</span><time>2026-08-16</time></div>
+      <div class="ver-head"><h2>v2.17.0</h2><time>2026-08-16</time></div>
       <div class="chg">
         <span class="tag tag-new" data-i18n="t.new">新功能</span>
         <ul>
