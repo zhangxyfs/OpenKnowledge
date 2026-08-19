@@ -53,7 +53,7 @@ func TestQueryExBranchFiltersBeforeTopN(t *testing.T) {
 		t.Fatalf("top1 should be the higher-BM25 cross-branch entry: %+v", hits)
 	}
 	// 同一查询经分支裁剪：feat 条目被过滤后主分支条目补位，而不是返回空
-	hits, _, err = db.QueryExBranch(retrieve.Terms("构建"), nil, cfg, "main")
+	hits, _, err = db.QueryExBranch(retrieve.Terms("构建"), nil, cfg, "main", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestQueryExBranchFiltersBeforeTopN(t *testing.T) {
 		t.Fatalf("cross-branch entry must be dropped: %+v", hits)
 	}
 	// 未知分支（branch 为空）不过滤
-	hits, _, err = db.QueryExBranch(retrieve.Terms("构建"), nil, cfg, "")
+	hits, _, err = db.QueryExBranch(retrieve.Terms("构建"), nil, cfg, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

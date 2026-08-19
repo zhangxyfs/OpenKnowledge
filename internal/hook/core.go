@@ -175,7 +175,7 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 		}
 		// top_n 截断在分支过滤之后（QueryExBranch 内部保证），其他分支的差异条目
 		// 不再白白挤占名额；无 branch 标签的条目与未知分支场景不受影响。
-		h, info, err := db.QueryExBranch(retrieve.Terms(promptText), queryVec, pc.Config.Retrieve, ws.Branch)
+		h, info, err := db.QueryExBranch(retrieve.Terms(promptText), queryVec, pc.Config.Retrieve, ws.Branch, nil)
 		if err != nil {
 			logErr("prompt query: %v", err)
 		}
