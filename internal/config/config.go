@@ -208,6 +208,10 @@ type Retrieve struct {
 	// Feedback 是注入→采纳反馈闭环（[retrieve.feedback] 子表）：采纳归因窗口
 	// = 本会话（只统计"读本会话注入过的条目"）。
 	Feedback RetrieveFeedback `toml:"feedback"`
+	// DedupTurns 是跨轮注入冷却轮数（默认 3）：同 session 内已注入的检索条目
+	// 冷却 N 个 prompt 轮不再注入（门控轮也计），0=关闭（旧行为，每轮都注入）。
+	// <0 按 0（使用处归一，fail-open 方向）。GUI 引导页可配（0~99）。
+	DedupTurns int `toml:"dedup_turns"`
 }
 
 type EnforceRule struct {
@@ -263,7 +267,7 @@ func Default() Config {
 	return Config{
 		Embedding:  Embedding{TimeoutSec: 5},
 		Inject:     Inject{MaxTokens: 800, MandatoryMaxTokens: 2000},
-		Retrieve:   Retrieve{Alpha: 1.0, Beta: 1.0, TopN: 2, MinScore: 0.5, MinGap: 0.25, Fusion: "rrf", RrfK: 60,
+		Retrieve:   Retrieve{Alpha: 1.0, Beta: 1.0, TopN: 2, DedupTurns: 3, MinScore: 0.5, MinGap: 0.25, Fusion: "rrf", RrfK: 60,
 			Gate:    RetrieveGate{Enabled: true},
 			Recency: RetrieveRecency{Enabled: true, Floor: 0.85, Windows: RecencyWindows{
 				Rule: []int{180, 730}, Pitfall: []int{90, 365}, Note: []int{60, 180}, Reference: []int{180, 730},
