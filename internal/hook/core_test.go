@@ -615,3 +615,70 @@ func TestInjectCooldownCorruptStateFailOpen(t *testing.T) {
 		t.Fatalf("状态损坏应照常注入, got: %q", out)
 	}
 }
+
+// TestAdoptionDuringCooldown 冷却中的条目被模型读取（按历史轮指针）仍记采纳——
+// 归因窗口 = 本轮注入 ∪ 冷却窗口内。
+func TestAdoptionDuringCooldown(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	writeEntry(t, kbRoot, "检索.md", "---\ntitle: 检索经验\ntype: note\ntags: []\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\n独角兽紫晶 RetrievalQuirk 词。\n")
+	if err := os.WriteFile(filepath.Join(kbRoot, "config.toml"), []byte("[retrieve]\ndedup_turns = 3\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pc, err := project.FromCwd(projDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stateDir := filepath.Join(kbRoot, "state")
+	if out := InjectForPrompt(pc, "s-cool-adopt", projDir, "RetrievalQuirk 一问"); !strings.Contains(out, "检索.md") {
+		t.Fatalf("第 1 轮应注入, got: %q", out)
+	}
+	// 第 2 轮：条目冷却中（不再注入）
+	if out := InjectForPrompt(pc, "s-cool-adopt", projDir, "RetrievalQuirk 再问"); strings.Contains(out, "检索.md") {
+		t.Fatalf("第 2 轮应冷却中, got: %q", out)
+	}
+	// 模型按第 1 轮历史里的指针读取冷却中的条目 → 仍应挂账
+	TrackTouched(pc, "s-cool-adopt", "read_file", filepath.Join(kbRoot, "knowledge", "检索.md"))
+	st := state.Load(stateDir, "s-cool-adopt")
+	if len(st.AdoptedKnowledge) != 1 || st.AdoptedKnowledge[0] != "检索.md" {
+		t.Fatalf("冷却中条目的读取应记采纳: %+v", st.AdoptedKnowledge)
+	}
+}
+
+// TestAdoptionDuringCooldownOverwrite 归因窗口的判别性用例：第 2 轮另一条目补位
+// 注入、覆盖了 InjectedKnowledge（state.Update 仅在 len(hits)>0 时覆写），冷却中
+// 条目不在"最近一轮注入"里；模型按第 1 轮历史指针读取它，旧语义（只认
+// InjectedKnowledge）丢失归因，新语义（本轮注入 ∪ 冷却窗口）仍应挂账。
+// TestAdoptionDuringCooldown 单条目场景下冷却轮零命中、InjectedKnowledge 不被
+// 覆写，旧循环碰巧也能归因，无法区分新旧语义，故补此用例。
+func TestAdoptionDuringCooldownOverwrite(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	writeEntry(t, kbRoot, "甲.md", "---\ntitle: 冷却甲\ntype: note\ntags: []\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\n紫晶冷却 紫晶冷却 紫晶冷却 词。\n")
+	writeEntry(t, kbRoot, "乙.md", "---\ntitle: 冷却乙\ntype: note\ntags: []\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\n紫晶冷却 词。\n")
+	if err := os.WriteFile(filepath.Join(kbRoot, "config.toml"), []byte("[retrieve]\ntop_n = 1\ndedup_turns = 3\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pc, err := project.FromCwd(projDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stateDir := filepath.Join(kbRoot, "state")
+	out1 := InjectForPrompt(pc, "s-cool-ow", projDir, "紫晶冷却 是什么")
+	first, second := "甲.md", "乙.md"
+	if !strings.Contains(out1, first) {
+		first, second = second, first
+	}
+	if !strings.Contains(out1, first) {
+		t.Fatalf("第 1 轮应注入其一, got: %q", out1)
+	}
+	// 第 2 轮：first 冷却中，second 补位注入 → InjectedKnowledge 被覆写为 [second]
+	out2 := InjectForPrompt(pc, "s-cool-ow", projDir, "紫晶冷却 再问")
+	if !strings.Contains(out2, second) || strings.Contains(out2, first) {
+		t.Fatalf("第 2 轮应由另一条目补位, got: %q", out2)
+	}
+	// 模型按第 1 轮历史里的指针读取冷却中的 first → 仍应挂账
+	TrackTouched(pc, "s-cool-ow", "read_file", filepath.Join(kbRoot, "knowledge", first))
+	st := state.Load(stateDir, "s-cool-ow")
+	if len(st.AdoptedKnowledge) != 1 || st.AdoptedKnowledge[0] != first {
+		t.Fatalf("冷却中条目（注入台账已被覆写）的读取应记采纳: %+v", st.AdoptedKnowledge)
+	}
+}

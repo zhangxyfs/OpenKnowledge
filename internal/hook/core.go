@@ -305,15 +305,17 @@ func TrackTouched(pc *project.Context, sessionID, toolName, filePath string) {
 	rel := relativize(pc, filePath)
 	if rel == "" {
 		// 知识库目录在项目路径之外：规范化路径位于 KnowledgeDir 且 basename 命中
-		// 本会话注入过的条目 → 采纳挂账（锁内读判+写，post-tool 不开库）。
-		// mandatory 粘性指针重读不经检索、不在 InjectedKnowledge，天然不计入。
+		// 采纳归因窗口 → 采纳挂账（锁内读判+写，post-tool 不开库）。
 		if base, ok := knowledgeBase(pc, filePath); ok {
+			dedupTurns := pc.Config.Retrieve.DedupTurns
+			if dedupTurns < 0 {
+				dedupTurns = 0
+			}
+			// 归因窗口 = 本轮注入 ∪ 冷却窗口内（冷却中的条目模型仍可能按历史
+			// 轮指针读取）；mandatory 粘性指针重读不经检索、不在台账，天然不计入。
 			if err := state.Update(pc.Store.StateDir(), sessionID, func(st *state.Session) {
-				for _, name := range st.InjectedKnowledge {
-					if strings.EqualFold(name, base) {
-						st.AddAdopted(name)
-						break
-					}
+				if name := st.AdoptableName(base, dedupTurns); name != "" {
+					st.AddAdopted(name)
 				}
 			}); err != nil {
 				logErr("post-tool adopt state: %v", err)
