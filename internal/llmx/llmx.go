@@ -43,6 +43,10 @@ type Usage struct {
 type Reply struct {
 	Text      string
 	Reasoning string // 思考过程（reasoning_content / thinking 块），无则空
+	// Truncated 输出触顶 max_tokens 被服务端截断（openai finish_reason=length /
+	// anthropic stop_reason=max_tokens 归一）。截断时 Text 多为半截，调用方
+	// 应报明确的截断错误而不是笼统的解析失败。
+	Truncated bool
 	Usage     Usage
 }
 
@@ -134,7 +138,8 @@ func (c *Client) chatOpenAI(ctx context.Context, system, user string, maxTokens 
 	}
 	var out struct {
 		Choices []struct {
-			Message struct {
+			FinishReason string `json:"finish_reason"` // stop/length/…；length=触顶截断
+			Message      struct {
 				Content          string `json:"content"`
 				ReasoningContent string `json:"reasoning_content"` // 思考过程（DeepSeek/Kimi 等推理模型）
 			} `json:"message"`
@@ -154,6 +159,7 @@ func (c *Client) chatOpenAI(ctx context.Context, system, user string, maxTokens 
 	return Reply{
 		Text:      out.Choices[0].Message.Content,
 		Reasoning: out.Choices[0].Message.ReasoningContent,
+		Truncated: out.Choices[0].FinishReason == "length",
 		Usage:     Usage{Prompt: out.Usage.Prompt, Completion: out.Usage.Completion},
 	}, nil
 }
@@ -174,7 +180,8 @@ func (c *Client) chatAnthropic(ctx context.Context, system, user string, maxToke
 			Text     string `json:"text"`
 			Thinking string `json:"thinking"` // 扩展思考块（thinking 开启时）
 		} `json:"content"`
-		Usage struct {
+		StopReason string `json:"stop_reason"` // end_turn/max_tokens/…；max_tokens=触顶截断
+		Usage      struct {
 			Input  int `json:"input_tokens"`
 			Output int `json:"output_tokens"`
 		} `json:"usage"`
@@ -202,6 +209,7 @@ func (c *Client) chatAnthropic(ctx context.Context, system, user string, maxToke
 	return Reply{
 		Text:      text,
 		Reasoning: reasoning,
+		Truncated: out.StopReason == "max_tokens",
 		Usage:     Usage{Prompt: out.Usage.Input, Completion: out.Usage.Output},
 	}, nil
 }

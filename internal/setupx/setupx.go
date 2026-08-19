@@ -220,6 +220,21 @@ func SetActiveLLM(name string) error {
 	})
 }
 
+// SetActiveLLMMaxTokens 只更新使用中 profile 的 max_tokens（0 = 用调用方默认）。
+// 单字段改而不整 profile 覆盖：GUI 模型配置卡的「最大 token」两段式保存走此，
+// 避免误清 temperature 等其他高级参数。无使用中 profile 报错。
+func SetActiveLLMMaxTokens(n int) error {
+	return updateGlobalConfig(func(cfg *config.Config) error {
+		for i := range cfg.LLM.Profiles {
+			if cfg.LLM.Profiles[i].Name == cfg.LLM.Active {
+				cfg.LLM.Profiles[i].MaxTokens = n
+				return nil
+			}
+		}
+		return fmt.Errorf("无使用中的 llm profile（先在模型配置里设置「使用中」）")
+	})
+}
+
 // DeleteLLMProfile 删除 llm profile；删除使用中项时 Active 置空。
 func DeleteLLMProfile(name string) error {
 	return updateGlobalConfig(func(cfg *config.Config) error {

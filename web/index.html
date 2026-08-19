@@ -184,7 +184,15 @@
         <div class="card">
           <div class="card-head"><h3>模型配置</h3><span id="badge-llm" class="badge badge-off">未配置</span></div>
           <p id="llm-current" class="card-desc muted">未启用（条目优化不可用）</p>
-          <div class="card-actions"><button id="btn-llm-config" type="button" class="btn">配置…</button></div>
+          <div class="card-actions">
+            <button id="btn-llm-config" type="button" class="btn">配置…</button>
+            <span class="form-inline">
+              <label for="llm-max-tokens">最大 token</label>
+              <input id="llm-max-tokens" type="number" min="0" max="131072" step="256" value="0" style="width:9ch"
+                     title="生成输出上限（写使用中配置）：0 = 默认 8192；推理模型的思考也占此预算，触顶会截断输出，可适当调大">
+              <button id="btn-llm-max-save" type="button" class="btn">保存</button>
+            </span>
+          </div>
         </div>
         <div class="card card-danger">
           <div class="card-head"><h3>卸载</h3></div>

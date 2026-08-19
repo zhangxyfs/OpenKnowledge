@@ -306,6 +306,233 @@ func TestEntryOptimizeNoChangeFuzzy(t *testing.T) {
 	}
 }
 
+// TestEntryOptimizeReasoningFallback 推理模型把答案 JSON 整个吐进 reasoning_content、
+// content 留空时（2026-08-19 deepseek-v4-flash 实证），从 reasoning 兜底提取完整
+// JSON 照常解析，不再报「非合法 JSON」。
+func TestEntryOptimizeReasoningFallback(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	mkProject(t, okHome, "demo")
+
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{
+				"finish_reason": "stop",
+				"message": map[string]string{
+					"content": "",
+					"reasoning_content": "逐条分析后结论如下：\n" +
+						`{"title":"新标题","tags":["x"],"summary":"新摘要","body":"新正文"}`,
+				},
+			}},
+		})
+	}))
+	defer fake.Close()
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	code, _ := do(t, "POST", srv.URL+"/api/llm/profile", testToken, map[string]any{
+		"name": "s", "kind": "openai", "base_url": fake.URL, "model": "m", "api_key": "k", "activate": true,
+	})
+	if code != 200 {
+		t.Fatalf("save profile: %d", code)
+	}
+	code, data := do(t, "POST", srv.URL+"/api/entry/optimize", testToken, map[string]any{
+		"project": "demo", "file": "a.md", "title": "旧标题", "body": "旧正文",
+	})
+	if code != 200 {
+		t.Fatalf("reasoning 兜底应 200, got %d %s", code, data)
+	}
+	var out struct {
+		Title string `json:"title"`
+		Body  string `json:"body"`
+	}
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Title != "新标题" || out.Body != "新正文" {
+		t.Fatalf("应从 reasoning 提取 JSON: %+v", out)
+	}
+	logData, _ := os.ReadFile(filepath.Join(okHome, "ok.log"))
+	if !strings.Contains(string(logData), "optimize 兜底") {
+		t.Fatalf("ok.log 应记兜底提取: %q", logData)
+	}
+}
+
+// TestEntryOptimizeTruncated finish_reason=length（max_tokens 触顶）时报错须点明
+// 截断与当前生效上限（profile 未配时为调用方默认 8192），不再笼统「非合法 JSON」。
+func TestEntryOptimizeTruncated(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	mkProject(t, okHome, "demo")
+
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{
+				"finish_reason": "length",
+				"message":       map[string]string{"content": `{"title":"半截`},
+			}},
+		})
+	}))
+	defer fake.Close()
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	code, _ := do(t, "POST", srv.URL+"/api/llm/profile", testToken, map[string]any{
+		"name": "s", "kind": "openai", "base_url": fake.URL, "model": "m", "api_key": "k", "activate": true,
+	})
+	if code != 200 {
+		t.Fatalf("save profile: %d", code)
+	}
+	code, data := do(t, "POST", srv.URL+"/api/entry/optimize", testToken, map[string]any{
+		"project": "demo", "file": "a.md", "title": "旧标题", "body": "旧正文",
+	})
+	if code != 502 {
+		t.Fatalf("截断应 502, got %d %s", code, data)
+	}
+	if !strings.Contains(string(data), "截断") || !strings.Contains(string(data), "8192") {
+		t.Fatalf("报错须点明截断与生效上限: %s", data)
+	}
+	logData, _ := os.ReadFile(filepath.Join(okHome, "ok.log"))
+	if !strings.Contains(string(logData), "被截断") {
+		t.Fatalf("ok.log 应记截断: %q", logData)
+	}
+}
+
+// TestEntryOptimizeTruncatedNoFinishReason 网关不回 finish_reason 时的兜底判定：
+// 解析失败且 completion 打满生效上限（默认 8192）同样报截断，不落「非合法 JSON」。
+func TestEntryOptimizeTruncatedNoFinishReason(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	mkProject(t, okHome, "demo")
+
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			// 无 finish_reason 字段（部分第三方网关如此），但 completion 钉在上限
+			"choices": []map[string]any{{
+				"message": map[string]string{"content": `{"title":"半截`},
+			}},
+			"usage": map[string]any{"prompt_tokens": 100, "completion_tokens": 8192},
+		})
+	}))
+	defer fake.Close()
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	code, _ := do(t, "POST", srv.URL+"/api/llm/profile", testToken, map[string]any{
+		"name": "s", "kind": "openai", "base_url": fake.URL, "model": "m", "api_key": "k", "activate": true,
+	})
+	if code != 200 {
+		t.Fatalf("save profile: %d", code)
+	}
+	code, data := do(t, "POST", srv.URL+"/api/entry/optimize", testToken, map[string]any{
+		"project": "demo", "file": "a.md", "title": "旧标题", "body": "旧正文",
+	})
+	if code != 502 {
+		t.Fatalf("截断应 502, got %d %s", code, data)
+	}
+	if !strings.Contains(string(data), "截断") || strings.Contains(string(data), "非合法 JSON") {
+		t.Fatalf("completion 打满上限应报截断而非「非合法 JSON」: %s", data)
+	}
+	logData, _ := os.ReadFile(filepath.Join(okHome, "ok.log"))
+	if !strings.Contains(string(logData), "被截断") {
+		t.Fatalf("ok.log 应记截断: %q", logData)
+	}
+}
+
+// TestEntryOptimizeBelowCapNotTruncated 对照组：completion 远低于上限时解析失败
+// 仍报「非合法 JSON」（不误报截断）。
+func TestEntryOptimizeBelowCapNotTruncated(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	mkProject(t, okHome, "demo")
+
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{
+				"finish_reason": "stop",
+				"message":       map[string]string{"content": "这不是 JSON"},
+			}},
+			"usage": map[string]any{"prompt_tokens": 100, "completion_tokens": 50},
+		})
+	}))
+	defer fake.Close()
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	code, _ := do(t, "POST", srv.URL+"/api/llm/profile", testToken, map[string]any{
+		"name": "s", "kind": "openai", "base_url": fake.URL, "model": "m", "api_key": "k", "activate": true,
+	})
+	if code != 200 {
+		t.Fatalf("save profile: %d", code)
+	}
+	code, data := do(t, "POST", srv.URL+"/api/entry/optimize", testToken, map[string]any{
+		"project": "demo", "file": "a.md", "title": "旧标题", "body": "旧正文",
+	})
+	if code != 502 || !strings.Contains(string(data), "非合法 JSON") {
+		t.Fatalf("未打满上限的乱输出仍应报「非合法 JSON」: %d %s", code, data)
+	}
+}
+
+// TestLLMMaxTokensEndpoint 模型配置卡「最大 token」单字段保存：只改使用中 profile
+// 的 max_tokens，其他高级参数（temperature）不动；0=恢复默认；越界 400；
+// 无使用中 profile 409。
+func TestLLMMaxTokensEndpoint(t *testing.T) {
+	h, _, _ := newEnv(t)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	code, _ := do(t, "POST", srv.URL+"/api/llm/profile", testToken, map[string]any{
+		"name": "s", "kind": "openai", "base_url": "https://x.example.com/v1",
+		"model": "m", "api_key": "sk-real", "temperature": "0.7", "activate": true,
+	})
+	if code != 200 {
+		t.Fatalf("save profile: %d", code)
+	}
+
+	var view struct {
+		Profiles []struct {
+			MaxTokens   int    `json:"max_tokens"`
+			Temperature string `json:"temperature"`
+		} `json:"profiles"`
+	}
+
+	// 保存 32768（5 位数上限场景）→ GET 回显；temperature 不受影响
+	code, _ = do(t, "POST", srv.URL+"/api/llm/max-tokens", testToken, map[string]any{"max_tokens": 32768})
+	if code != 200 {
+		t.Fatalf("max-tokens save: %d", code)
+	}
+	_, data := do(t, "GET", srv.URL+"/api/llm", testToken, nil)
+	if err := json.Unmarshal(data, &view); err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Profiles) != 1 || view.Profiles[0].MaxTokens != 32768 {
+		t.Fatalf("max_tokens 应落盘: %+v", view)
+	}
+	if view.Profiles[0].Temperature != "0.7" {
+		t.Fatalf("单字段保存不得动 temperature: %+v", view)
+	}
+
+	// 0 = 恢复默认（调用方值）
+	code, _ = do(t, "POST", srv.URL+"/api/llm/max-tokens", testToken, map[string]any{"max_tokens": 0})
+	if code != 200 {
+		t.Fatalf("置 0 应合法: %d", code)
+	}
+
+	// 越界 → 400
+	for _, bad := range []int{-1, 100, 200000} {
+		code, _ = do(t, "POST", srv.URL+"/api/llm/max-tokens", testToken, map[string]any{"max_tokens": bad})
+		if code != 400 {
+			t.Fatalf("max_tokens=%d 应 400, got %d", bad, code)
+		}
+	}
+
+	// 删除使用中 profile 后 → 409
+	code, _ = do(t, "POST", srv.URL+"/api/llm/delete", testToken, map[string]any{"name": "s"})
+	if code != 200 {
+		t.Fatalf("delete: %d", code)
+	}
+	code, _ = do(t, "POST", srv.URL+"/api/llm/max-tokens", testToken, map[string]any{"max_tokens": 8192})
+	if code != 409 {
+		t.Fatalf("无使用中 profile 应 409, got %d", code)
+	}
+}
+
 // TestExcerptLines 行号窗口截取：带行号取窗口、无行号取头部、越界钳制。
 func TestExcerptLines(t *testing.T) {
 	var sb strings.Builder

@@ -158,6 +158,27 @@ func (h *Handler) apiLLMActive(w http.ResponseWriter, r *http.Request) {
 	h.apiLLMGet(w, r)
 }
 
+// apiLLMMaxTokens 模型配置卡「最大 token」两段式保存：单字段更新使用中 profile
+// 的 max_tokens。0 = 用调用方默认（优化场景 8192）；非 0 限 1024~131072
+// （<1024 长 JSON 必截断；上限对齐主流模型输出天花板）。无使用中 profile → 409。
+func (h *Handler) apiLLMMaxTokens(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		MaxTokens int `json:"max_tokens"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if req.MaxTokens != 0 && (req.MaxTokens < 1024 || req.MaxTokens > 131072) {
+		writeErr(w, http.StatusBadRequest, "最大 token 为 0（默认 8192）或 1024~131072")
+		return
+	}
+	if err := setupx.SetActiveLLMMaxTokens(req.MaxTokens); err != nil {
+		writeErr(w, http.StatusConflict, err.Error())
+		return
+	}
+	h.apiLLMGet(w, r)
+}
+
 // apiLLMTest 用表单直传的配置（无需先保存）做连通性检查；api_key 掩码/空时
 // 回查同名已存 profile 的真实 key。
 func (h *Handler) apiLLMTest(w http.ResponseWriter, r *http.Request) {
@@ -460,6 +481,24 @@ func excerptLines(content, lines string, hints []string) string {
 	return strings.Join(all[lo-1:hi], "\n")
 }
 
+// optimizeMaxTokens 优化输出的默认 token 上限（profile.max_tokens>0 时被覆盖）。
+// 推理模型的 reasoning_content 与正文共享同一 max_tokens 预算，4096 会被长思考
+// 烧穿导致正文来不及输出（2026-08-19 deepseek-v4-flash 实证 completion 钉死
+// 4096、content 为空），故默认提到 8192；无文档/规格钉过原值（实现期魔数）。
+const optimizeMaxTokens = 8192
+
+// extractJSONObject 从文本中提取首个 { 到末个 } 的子串；找不到返回空。
+// 用于推理模型把答案 JSON 吐进 reasoning_content、content 留空时的兜底提取；
+// 提取结果仍须过 json.Unmarshal 校验，宽进严判。
+func extractJSONObject(s string) string {
+	lo := strings.Index(s, "{")
+	hi := strings.LastIndex(s, "}")
+	if lo < 0 || hi <= lo {
+		return ""
+	}
+	return s[lo : hi+1]
+}
+
 // apiEntryOptimize 条目 AI 优化：事实检索 → LLM → 返回优化后字段（不写盘，
 // 落盘由前端回填表单后走既有保存路径）。无 active 配置 → 409 {error:"no_llm"}。
 func (h *Handler) apiEntryOptimize(w http.ResponseWriter, r *http.Request) {
@@ -507,7 +546,7 @@ func (h *Handler) apiEntryOptimize(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), timeout+15*time.Second)
 	defer cancel()
 	logOptimize("optimize 开始 project=%s file=%s title=%q model=%s", req.Project, req.File, req.Title, prof.Model)
-	rep, err := llmx.New(*prof, timeout).Chat(ctx, optimizeSystemPrompt, user, 4096)
+	rep, err := llmx.New(*prof, timeout).Chat(ctx, optimizeSystemPrompt, user, optimizeMaxTokens)
 	if err != nil {
 		logOptimize("optimize 失败: %v", err)
 		writeErr(w, http.StatusBadGateway, fmt.Sprintf("模型调用失败: %v", err))
@@ -526,6 +565,14 @@ func (h *Handler) apiEntryOptimize(w http.ResponseWriter, r *http.Request) {
 	raw = strings.TrimPrefix(raw, "```")
 	raw = strings.TrimSuffix(raw, "```")
 	raw = strings.TrimSpace(raw)
+	// 兜底：推理模型偶发把答案 JSON 整个吐进 reasoning_content、content 留空
+	// （deepseek-v4-flash 实证），此时从 reasoning 提取完整 JSON 照常解析。
+	if raw == "" {
+		if cand := extractJSONObject(reasoning); cand != "" {
+			logOptimize("optimize 兜底: content 为空，从 reasoning 提取 JSON")
+			raw = cand
+		}
+	}
 	var out struct {
 		Title    string     `json:"title"`
 		Tags     []string   `json:"tags"`
@@ -535,12 +582,31 @@ func (h *Handler) apiEntryOptimize(w http.ResponseWriter, r *http.Request) {
 		Usage    llmx.Usage `json:"usage"`
 	}
 	if err := json.Unmarshal([]byte(raw), &out); err != nil {
-		snip := raw
-		if len(snip) > 300 {
-			snip = snip[:300] + "…"
+		// 生效上限：profile.max_tokens>0 覆盖调用方默认（与 llmx.Chat 同口径）
+		limit := optimizeMaxTokens
+		if prof.MaxTokens > 0 {
+			limit = prof.MaxTokens
 		}
-		logOptimize("optimize 结果: 输出非合法 JSON")
-		writeErr(w, http.StatusBadGateway, fmt.Sprintf("模型输出非合法 JSON: %s", snip))
+		// 截断双信号：finish_reason=length 之外，completion 打满上限也是截断
+		// （部分第三方网关不回 finish_reason，半截 JSON 不能笼统报「非合法 JSON」）。
+		truncated := rep.Truncated || rep.Usage.Completion >= limit
+		switch {
+		case truncated:
+			logOptimize("optimize 结果: 输出达 max_tokens=%d 被截断（completion=%d, finish 标记=%v）",
+				limit, rep.Usage.Completion, rep.Truncated)
+			writeErr(w, http.StatusBadGateway, fmt.Sprintf(
+				"模型输出达到 max_tokens 上限（%d）被截断，请到「引导页 → 模型配置」调大最大 token", limit))
+		case raw == "":
+			logOptimize("optimize 结果: content 与 reasoning 均无完整 JSON")
+			writeErr(w, http.StatusBadGateway, "模型未输出有效内容（正文为空，思考中也无完整 JSON），请重试")
+		default:
+			snip := raw
+			if len(snip) > 300 {
+				snip = snip[:300] + "…"
+			}
+			logOptimize("optimize 结果: 输出非合法 JSON")
+			writeErr(w, http.StatusBadGateway, fmt.Sprintf("模型输出非合法 JSON: %s", snip))
+		}
 		return
 	}
 	// 无需优化判定：模型自报 no_change，或与原文语义级相同（空白折叠 + 全半角

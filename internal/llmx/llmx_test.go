@@ -121,6 +121,56 @@ func TestTestPing(t *testing.T) {
 	}
 }
 
+// TestTruncatedFlag 输出触顶 max_tokens 被服务端截断时归一置 Truncated：
+// openai finish_reason=length、anthropic stop_reason=max_tokens；正常结束为 false。
+// （2026-08-19 实证：推理模型思考烧穿 4096 预算，content 为空，无此前字段时
+// 只能笼统报「非合法 JSON」，无法区分截断。）
+func TestTruncatedFlag(t *testing.T) {
+	openaiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{
+				"finish_reason": "length",
+				"message":       map[string]string{"content": "{\"title\":\"半截"},
+			}},
+		})
+	}))
+	defer openaiSrv.Close()
+	c := New(config.LLMProfile{Kind: "openai", BaseURL: openaiSrv.URL, Model: "m"}, 0)
+	rep, err := c.Chat(context.Background(), "s", "u", 10)
+	if err != nil || !rep.Truncated {
+		t.Fatalf("finish_reason=length 应置 Truncated, got (%+v, %v)", rep, err)
+	}
+
+	anthSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"content":     []map[string]string{{"text": "半截"}},
+			"stop_reason": "max_tokens",
+		})
+	}))
+	defer anthSrv.Close()
+	c = New(config.LLMProfile{Kind: "anthropic", BaseURL: anthSrv.URL, Model: "m"}, 0)
+	rep, err = c.Chat(context.Background(), "s", "u", 10)
+	if err != nil || !rep.Truncated {
+		t.Fatalf("stop_reason=max_tokens 应置 Truncated, got (%+v, %v)", rep, err)
+	}
+
+	// 正常结束（无 finish_reason / stop=end_turn）不得误报截断
+	stopSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{
+				"finish_reason": "stop",
+				"message":       map[string]string{"content": "完整"},
+			}},
+		})
+	}))
+	defer stopSrv.Close()
+	c = New(config.LLMProfile{Kind: "openai", BaseURL: stopSrv.URL, Model: "m"}, 0)
+	rep, err = c.Chat(context.Background(), "s", "u", 10)
+	if err != nil || rep.Truncated {
+		t.Fatalf("finish_reason=stop 不应置 Truncated, got (%+v, %v)", rep, err)
+	}
+}
+
 // 高级参数：temperature 显式配置才进请求体（缺省不传，兼容锁死参数的模型）；
 // profile.MaxTokens>0 覆盖调用方值；非法 temperature 报错。
 func TestAdvancedParams(t *testing.T) {

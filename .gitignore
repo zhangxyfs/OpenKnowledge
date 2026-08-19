@@ -9,3 +9,4 @@ cmd/ok/*.syso
 /.reasonix/
 .worktrees/
 .mimosa/
+/docs/2026-08-19-vikingmem-paper.md

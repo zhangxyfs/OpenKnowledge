@@ -1094,6 +1094,7 @@
         $("badge-llm").textContent = "已配置";
         $("llm-current").textContent = "使用中：" + active.name + " · " + active.model +
           "（" + (active.kind === "anthropic" ? "Anthropic 兼容" : "OpenAI 兼容") + "）";
+        $("llm-max-tokens").value = active.max_tokens || 0;
       } else {
         $("badge-llm").className = "badge badge-off";
         $("badge-llm").textContent = cfg.profiles && cfg.profiles.length ? "未启用" : "未配置";
@@ -1101,8 +1102,24 @@
           ? "已有 " + cfg.profiles.length + " 个配置但未设「使用中」，条目优化不可用"
           : "未启用（条目优化不可用）";
       }
+      // 最大 token 写的是使用中 profile 的字段：无使用中项时不可编辑
+      $("llm-max-tokens").disabled = !active;
+      $("btn-llm-max-save").disabled = !active;
     }).catch(function (err) { showError(err.message); });
   }
+
+  // 最大 token 两段式：文本框只改本地值，点保存才落盘（同规则配置卡约定）
+  $("btn-llm-max-save").addEventListener("click", function () {
+    var n = parseInt($("llm-max-tokens").value, 10);
+    if (isNaN(n) || (n !== 0 && (n < 1024 || n > 131072))) {
+      showError("最大 token 为 0（默认 8192）或 1024~131072");
+      refreshLLM();
+      return;
+    }
+    api("/api/llm/max-tokens", { method: "POST", body: { max_tokens: n } })
+      .then(refreshLLM)
+      .catch(function (err) { showError(err.message); refreshLLM(); });
+  });
 
   // llmExpanded：当前展开编辑的卡（profile 名；"__new__" = 添加中的新卡）
   var llmExpanded = null;

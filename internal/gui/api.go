@@ -84,6 +84,7 @@ func NewHandler(webDir, token string, beats chan<- struct{}) *Handler {
 	api("POST /api/llm/profile", h.apiLLMProfileSave)
 	api("POST /api/llm/delete", h.apiLLMProfileDelete)
 	api("POST /api/llm/active", h.apiLLMActive)
+	api("POST /api/llm/max-tokens", h.apiLLMMaxTokens)
 	api("POST /api/llm/test", h.apiLLMTest)
 	api("POST /api/entry/optimize", h.apiEntryOptimize)
 	api("GET /api/project/branch-info", h.apiProjectBranchInfo)
