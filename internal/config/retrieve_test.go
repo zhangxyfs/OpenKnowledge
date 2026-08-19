@@ -92,3 +92,12 @@ func TestDedupTurnsDefault(t *testing.T) {
 		t.Fatalf("默认应为 3, got %v", got)
 	}
 }
+
+// TestEffectiveDedupTurns <0 归一为 0（关闭），0 与正值原样返回。
+func TestEffectiveDedupTurns(t *testing.T) {
+	for _, tc := range []struct{ in, want int }{{-5, 0}, {-1, 0}, {0, 0}, {3, 3}, {99, 99}} {
+		if got := (Retrieve{DedupTurns: tc.in}).EffectiveDedupTurns(); got != tc.want {
+			t.Fatalf("DedupTurns=%d: got %d, want %d", tc.in, got, tc.want)
+		}
+	}
+}

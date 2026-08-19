@@ -210,7 +210,7 @@ type Retrieve struct {
 	Feedback RetrieveFeedback `toml:"feedback"`
 	// DedupTurns 是跨轮注入冷却轮数（默认 3）：同 session 内已注入的检索条目
 	// 冷却 N 个 prompt 轮不再注入（门控轮也计），0=关闭（旧行为，每轮都注入）。
-	// <0 按 0（使用处归一，fail-open 方向）。GUI 引导页可配（0~99）。
+	// <0 由 EffectiveDedupTurns() 归一为 0（fail-open 方向）。GUI 引导页可配（0~99）。
 	DedupTurns int `toml:"dedup_turns"`
 }
 

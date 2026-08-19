@@ -1293,10 +1293,7 @@ func (h *Handler) apiRetrieveGet(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	n := cfg.Retrieve.DedupTurns
-	if n < 0 {
-		n = 0
-	}
+	n := cfg.Retrieve.EffectiveDedupTurns()
 	writeJSON(w, http.StatusOK, map[string]any{"dedup_turns": n})
 }
 

@@ -1615,6 +1615,14 @@ func TestRetrieveDedupTurnsRoundTrip(t *testing.T) {
 			t.Fatalf("dedup_turns=%d 应 400, got %d", bad, code)
 		}
 	}
+	// 非整数（字符串/小数）→ decodeJSON 解码失败 400
+	for _, v := range []any{"abc", 1.5} {
+		code, _ = do(t, "POST", srv.URL+"/api/retrieve", testToken,
+			map[string]any{"project": "demo", "dedup_turns": v})
+		if code != 400 {
+			t.Fatalf("dedup_turns=%v 应 400, got %d", v, code)
+		}
+	}
 	// 0 = 关闭，是合法值；重复设置幂等：键行唯一
 	code, _ = do(t, "POST", srv.URL+"/api/retrieve", testToken,
 		map[string]any{"project": "demo", "dedup_turns": 0})

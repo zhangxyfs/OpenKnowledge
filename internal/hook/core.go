@@ -63,10 +63,7 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 	// 信号，可接受。fail-open：失败仅记日志。
 	var adopted []string
 	var coolingSet map[string]bool
-	dedupTurns := pc.Config.Retrieve.DedupTurns
-	if dedupTurns < 0 {
-		dedupTurns = 0
-	}
+	dedupTurns := pc.Config.Retrieve.EffectiveDedupTurns()
 	if err := state.Update(pc.Store.StateDir(), sessionID, func(st *state.Session) {
 		adopted = st.AdoptedKnowledge
 		st.AdoptedKnowledge = nil
@@ -307,10 +304,7 @@ func TrackTouched(pc *project.Context, sessionID, toolName, filePath string) {
 		// 知识库目录在项目路径之外：规范化路径位于 KnowledgeDir 且 basename 命中
 		// 采纳归因窗口 → 采纳挂账（锁内读判+写，post-tool 不开库）。
 		if base, ok := knowledgeBase(pc, filePath); ok {
-			dedupTurns := pc.Config.Retrieve.DedupTurns
-			if dedupTurns < 0 {
-				dedupTurns = 0
-			}
+			dedupTurns := pc.Config.Retrieve.EffectiveDedupTurns()
 			// 归因窗口 = 本轮注入 ∪ 冷却窗口内（冷却中的条目模型仍可能按历史
 			// 轮指针读取）；mandatory 粘性指针重读不经检索、不在台账，天然不计入。
 			if err := state.Update(pc.Store.StateDir(), sessionID, func(st *state.Session) {

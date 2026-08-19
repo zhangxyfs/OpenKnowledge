@@ -52,6 +52,20 @@ func runOK(t *testing.T, home, cwd, stdin string, args ...string) (string, strin
 	return so.String(), se.String(), code
 }
 
+// pinDedupTurnsOff 钉住项目配置 dedup_turns=0：本包 e2e 的意图是"第二轮检索
+// 仍生效"，与跨轮注入冷却正交，须关闭冷却消除干涉。
+func pinDedupTurnsOff(t *testing.T, home string) {
+	t.Helper()
+	cfgPin := filepath.Join(home, "projects", "demo", "config.toml")
+	existing, err := os.ReadFile(cfgPin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cfgPin, append(existing, []byte("\n[retrieve]\ndedup_turns = 0\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestEndToEnd(t *testing.T) {
 	home := t.TempDir()
 	// KIMI_CODE_HOME 目录需存在（模拟已安装 kimi），否则 agent 检测为假、init 跳过 hooks 写入
@@ -87,15 +101,7 @@ func TestEndToEnd(t *testing.T) {
 		t.Fatalf("init should write 3 hooks into kimi config: %v %q", err, kimiCfg)
 	}
 
-	// 本测试意图是"第二轮检索仍生效"，与跨轮注入冷却正交：钉 dedup_turns=0 关闭冷却
-	cfgPin := filepath.Join(home, "projects", "demo", "config.toml")
-	existing, err := os.ReadFile(cfgPin)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(cfgPin, append(existing, []byte("\n[retrieve]\ndedup_turns = 0\n")...), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	pinDedupTurnsOff(t, home)
 
 	// add 普通条目（无 embedding key → 跳过向量但成功）
 	body := filepath.Join(proj, "body.md")

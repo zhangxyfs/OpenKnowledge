@@ -359,6 +359,9 @@ func Search(args []string, stdout, stderr io.Writer) int {
 	if len(info.FeedbackDemoted) > 0 {
 		fmt.Fprintf(stderr, "反馈降权（持续注入从未被读：%s）\n", strings.Join(info.FeedbackDemoted, "、"))
 	}
+	if len(info.CooledSkipped) > 0 {
+		fmt.Fprintf(stderr, "冷却跳过（%s）\n", strings.Join(info.CooledSkipped, "、"))
+	}
 	for _, h := range hits {
 		fmt.Fprintf(stdout, "%.4f\t%s (%s)\n", h.Score, h.Title, h.Filename)
 	}
