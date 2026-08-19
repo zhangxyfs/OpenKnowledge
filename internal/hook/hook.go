@@ -245,8 +245,10 @@ func HandlePostTool(r io.Reader) int {
 }
 
 // ResetBaseInjection 压缩/上下文丢失后重置基础注入标记：下一次 prompt 注入即重新
-// 下发 mandatory 全文 + 索引。返回是否实际发生了重置。Reasonix sidecar 的
-// compaction.complete 与 Claude Code 的 PreCompact 共用此逻辑。
+// 下发 mandatory 全文 + 索引。同时清空检索注入台账（InjectedLog）——压缩后已注入的
+// 指针行同样被摘要/丢弃，冷却中的条目应立即恢复可注入，与基础注入重置同语义。
+// 返回是否实际发生了重置。Reasonix sidecar 的 compaction.complete 与 Claude Code
+// 的 PreCompact 共用此逻辑。
 func ResetBaseInjection(pc *project.Context, sessionID string) bool {
 	reset := false
 	if err := state.Update(pc.Store.StateDir(), sessionID, func(s *state.Session) {
@@ -254,6 +256,7 @@ func ResetBaseInjection(pc *project.Context, sessionID string) bool {
 			s.BaseInjected = false
 			reset = true
 		}
+		s.InjectedLog = nil
 	}); err != nil {
 		logErr("reset base injection: %v", err)
 	}

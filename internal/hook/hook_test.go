@@ -214,6 +214,47 @@ func TestHandleCompactResetsBaseInjection(t *testing.T) {
 	}
 }
 
+// TestHandleCompactClearsCooldownLedger 压缩后注入上下文已被摘要/丢弃，冷却台账
+// 应一并重置：否则压缩后冷却中的条目要等 dedup_turns 轮才恢复，与
+// ResetBaseInjection 重注入 mandatory 的语义矛盾（上下文已空，指针理应重发）。
+func TestHandleCompactClearsCooldownLedger(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	writeEntry(t, kbRoot, "压缩.md", "---\ntitle: 压缩冷却\ntype: note\ntags: []\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\nCompactQuirk 紫晶词。\n")
+	// dedup_turns 故意取大：不重置台账则本测试全程冷却中
+	if err := os.WriteFile(filepath.Join(kbRoot, "config.toml"), []byte("[retrieve]\ndedup_turns = 9\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mkPrompt := func(text string) string {
+		return fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s-compact","cwd":%q,"prompt":[{"type":"text","text":%q}]}`, projDir, text)
+	}
+	var out bytes.Buffer
+	if code := HandlePrompt(strings.NewReader(mkPrompt("CompactQuirk 是什么")), &out, ""); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if !strings.Contains(out.String(), "压缩.md") {
+		t.Fatalf("第 1 轮应注入检索命中, got: %q", out.String())
+	}
+	out.Reset()
+	if code := HandlePrompt(strings.NewReader(mkPrompt("CompactQuirk 再问")), &out, ""); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if strings.Contains(out.String(), "压缩.md") {
+		t.Fatalf("第 2 轮冷却期不应注入, got: %q", out.String())
+	}
+	// PreCompact：压缩重置应连冷却台账一起清
+	compactJSON := fmt.Sprintf(`{"hook_event_name":"PreCompact","session_id":"s-compact","cwd":%q}`, projDir)
+	if code := HandleCompact(strings.NewReader(compactJSON)); code != 0 {
+		t.Fatalf("HandleCompact exit %d", code)
+	}
+	out.Reset()
+	if code := HandlePrompt(strings.NewReader(mkPrompt("CompactQuirk 三问")), &out, ""); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if !strings.Contains(out.String(), "压缩.md") {
+		t.Fatalf("压缩后台账已重置，应立即恢复注入, got: %q", out.String())
+	}
+}
+
 func TestPromptStringFormCompat(t *testing.T) {
 	projDir, kbRoot := setupProject(t)
 	writeEntry(t, kbRoot, "git.md", gitEntry)
