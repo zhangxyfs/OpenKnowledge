@@ -80,6 +80,10 @@ type QueryInfo struct {
 	// FeedbackDemoted：因反馈闭环（retrieve.feedback）被降权的条目
 	//（"filename×0.80" 格式）。
 	FeedbackDemoted []string
+	// CooledSkipped：因跨轮冷却被 exclude 排除、但本轮本可准入的条目
+	//（basename，按名次排序）；exclude 为空时恒 nil。供 hook 层记 ok.log
+	//（GUI 日志页按"冷却"过滤）。
+	CooledSkipped []string
 }
 
 // Hit 是一条检索命中，携带注入所需的正文与摘要。
@@ -127,17 +131,20 @@ func (db *DB) Query(terms []string, queryVec []float32, cfg config.Retrieve) ([]
 const scoreFloor = 1e-6
 
 func (db *DB) QueryEx(terms []string, queryVec []float32, cfg config.Retrieve) ([]Hit, QueryInfo, error) {
-	hits, info, err := db.queryAll(terms, queryVec, cfg)
+	hits, info, err := db.queryAll(terms, queryVec, cfg, nil)
 	if err != nil {
 		return nil, QueryInfo{}, err
 	}
 	return truncateHits(hits, cfg.TopN), info, nil
 }
 
-// QueryExBranch 同 QueryEx，但 top_n 截断前先按 branch 过滤差异条目：截断先于
-// 过滤时其他分支的条目白白挤占名额，本分支注入条数无谓少于 top_n 且无补位。
-func (db *DB) QueryExBranch(terms []string, queryVec []float32, cfg config.Retrieve, branch string) ([]Hit, QueryInfo, error) {
-	hits, info, err := db.queryAll(terms, queryVec, cfg)
+// QueryExBranch 同 QueryEx，但 top_n 截断前先按 branch 过滤差异条目、再按 exclude
+// 排除冷却条目（basename 精确匹配，与 session 台账/索引库 filename 同源，无需
+// 大小写折叠）：截断先于过滤/排除时，其他分支或冷却中的条目白白挤占名额，注入
+// 条数无谓少于 top_n 且无补位。exclude 传 nil 表示无排除（ok search / GUI 检索
+// 的行为）。被排除但本可准入的条目记入 QueryInfo.CooledSkipped。
+func (db *DB) QueryExBranch(terms []string, queryVec []float32, cfg config.Retrieve, branch string, exclude map[string]bool) ([]Hit, QueryInfo, error) {
+	hits, info, err := db.queryAll(terms, queryVec, cfg, exclude)
 	if err != nil {
 		return nil, QueryInfo{}, err
 	}
@@ -151,7 +158,7 @@ func truncateHits(hits []Hit, topN int) []Hit {
 	return hits
 }
 
-func (db *DB) queryAll(terms []string, queryVec []float32, cfg config.Retrieve) ([]Hit, QueryInfo, error) {
+func (db *DB) queryAll(terms []string, queryVec []float32, cfg config.Retrieve, exclude map[string]bool) ([]Hit, QueryInfo, error) {
 	if len(terms) == 0 && len(queryVec) == 0 {
 		return nil, QueryInfo{}, nil
 	}
@@ -314,6 +321,19 @@ func (db *DB) queryAll(terms []string, queryVec []float32, cfg config.Retrieve) 
 		}
 		return out[i].Title < out[j].Title
 	})
+	// 冷却排除在排序后、返回前（QueryExBranch 内 top_n 截断随之位于排除之后）；
+	// 被排除但本可准入（Score>0 进入 out）的条目记入 CooledSkipped 供观测。
+	if len(exclude) > 0 {
+		kept := make([]Hit, 0, len(out))
+		for _, h := range out {
+			if exclude[h.Filename] {
+				info.CooledSkipped = append(info.CooledSkipped, h.Filename)
+				continue
+			}
+			kept = append(kept, h)
+		}
+		out = kept
+	}
 	return out, info, nil
 }
 

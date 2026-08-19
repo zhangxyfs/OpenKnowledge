@@ -25,6 +25,10 @@ func TestInjectForPromptBaseAndRetrieve(t *testing.T) {
 	// 一条 mandatory 条目 + 一条普通条目（正文含独特词）
 	writeEntry(t, kbRoot, "规约.md", "---\ntitle: 架构规约\ntype: reference\nmandatory: true\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\n永远先跑 gofmt。\n")
 	writeEntry(t, kbRoot, "检索.md", "---\ntitle: 检索经验\ntype: note\ntags: []\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\n独角兽紫晶 RetrievalQuirk 词。\n")
+	// 本测试意图是"基础注入后检索仍生效"，与跨轮冷却正交：钉 dedup_turns=0 关闭冷却
+	if err := os.WriteFile(filepath.Join(kbRoot, "config.toml"), []byte("[retrieve]\ndedup_turns = 0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	pc, err := project.FromCwd(projDir)
 	if err != nil {
 		t.Fatal(err)
@@ -459,5 +463,222 @@ func TestAdoptionLoop(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("项目内文件仍应记 Touched: %+v", st.Touched)
+	}
+}
+
+// TestInjectCooldownSkipAndRecover 冷却主语义：dedup_turns=2 时第 1 轮注入、
+// 第 2~3 轮跳过、第 4 轮恢复。
+func TestInjectCooldownSkipAndRecover(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	writeEntry(t, kbRoot, "检索.md", "---\ntitle: 检索经验\ntype: note\ntags: []\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\n独角兽紫晶 RetrievalQuirk 词。\n")
+	if err := os.WriteFile(filepath.Join(kbRoot, "config.toml"), []byte("[retrieve]\ndedup_turns = 2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pc, err := project.FromCwd(projDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out1 := InjectForPrompt(pc, "s-cool", projDir, "RetrievalQuirk 是什么")
+	if !strings.Contains(out1, "相关知识") || !strings.Contains(out1, "检索.md") {
+		t.Fatalf("第 1 轮应注入检索命中, got: %q", out1)
+	}
+	for i, q := range []string{"RetrievalQuirk 再问", "RetrievalQuirk 三问"} {
+		out := InjectForPrompt(pc, "s-cool", projDir, q)
+		if strings.Contains(out, "相关知识") || strings.Contains(out, "检索.md") {
+			t.Fatalf("第 %d 轮冷却期不应注入, got: %q", i+2, out)
+		}
+	}
+	out4 := InjectForPrompt(pc, "s-cool", projDir, "RetrievalQuirk 四问")
+	if !strings.Contains(out4, "检索.md") {
+		t.Fatalf("第 4 轮冷却结束应恢复注入, got: %q", out4)
+	}
+}
+
+// TestInjectCooldownYieldsSlot 冷却条目不占 top_n 名额：top_n=1 时第 1 轮注入
+// 第 1 名，第 2 轮第 1 名冷却 → 第 2 名补位注入。
+func TestInjectCooldownYieldsSlot(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	writeEntry(t, kbRoot, "甲.md", "---\ntitle: 冷却甲\ntype: note\ntags: []\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\n紫晶冷却 紫晶冷却 紫晶冷却 词。\n")
+	writeEntry(t, kbRoot, "乙.md", "---\ntitle: 冷却乙\ntype: note\ntags: []\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\n紫晶冷却 词。\n")
+	if err := os.WriteFile(filepath.Join(kbRoot, "config.toml"), []byte("[retrieve]\ntop_n = 1\ndedup_turns = 3\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pc, err := project.FromCwd(projDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out1 := InjectForPrompt(pc, "s-slot", projDir, "紫晶冷却 是什么")
+	first, second := "甲.md", "乙.md"
+	if !strings.Contains(out1, first) {
+		first, second = second, first
+	}
+	if !strings.Contains(out1, first) {
+		t.Fatalf("第 1 轮应注入其一, got: %q", out1)
+	}
+	out2 := InjectForPrompt(pc, "s-slot", projDir, "紫晶冷却 再问")
+	if !strings.Contains(out2, second) || strings.Contains(out2, first) {
+		t.Fatalf("第 2 轮应由另一条目补位, got: %q", out2)
+	}
+}
+
+// TestInjectCooldownDisabled dedup_turns=0 关闭冷却：每轮都注入（旧行为回归保护）。
+func TestInjectCooldownDisabled(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	writeEntry(t, kbRoot, "检索.md", "---\ntitle: 检索经验\ntype: note\ntags: []\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\n独角兽紫晶 RetrievalQuirk 词。\n")
+	if err := os.WriteFile(filepath.Join(kbRoot, "config.toml"), []byte("[retrieve]\ndedup_turns = 0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pc, err := project.FromCwd(projDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, q := range []string{"RetrievalQuirk 一问", "RetrievalQuirk 再问", "RetrievalQuirk 三问"} {
+		out := InjectForPrompt(pc, "s-off", projDir, q)
+		if !strings.Contains(out, "检索.md") {
+			t.Fatalf("第 %d 轮关闭冷却应照常注入, got: %q", i+1, out)
+		}
+	}
+}
+
+// TestCooldownGatedTurnTicks 门控命中轮也计冷却轮次：dedup_turns=1 时，第 1 轮
+// 注入 → 第 2 轮门控轮（跳检索但时钟走）→ 第 3 轮轮距 2>1 恢复注入。
+func TestCooldownGatedTurnTicks(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	writeEntry(t, kbRoot, "检索.md", "---\ntitle: 检索经验\ntype: note\ntags: []\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\n独角兽紫晶 RetrievalQuirk 词。\n")
+	cfg := "[retrieve]\ndedup_turns = 1\n\n[retrieve.gate]\nenabled = true\nextra_phrases = [\"泛泛而谈\"]\n"
+	if err := os.WriteFile(filepath.Join(kbRoot, "config.toml"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pc, err := project.FromCwd(projDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out := InjectForPrompt(pc, "s-gate-tick", projDir, "RetrievalQuirk 一问"); !strings.Contains(out, "检索.md") {
+		t.Fatalf("第 1 轮应注入, got: %q", out)
+	}
+	if out := InjectForPrompt(pc, "s-gate-tick", projDir, "泛泛而谈"); strings.Contains(out, "相关知识") {
+		t.Fatalf("第 2 轮门控命中不应注入, got: %q", out)
+	}
+	// 门控轮若不计冷却轮次，此处轮距为 1（仍冷却）；计则为 2（恢复）
+	if out := InjectForPrompt(pc, "s-gate-tick", projDir, "RetrievalQuirk 三问"); !strings.Contains(out, "检索.md") {
+		t.Fatalf("门控轮应计冷却轮次，第 3 轮应恢复注入, got: %q", out)
+	}
+}
+
+// TestCooldownNoInjectedEvent 冷却跳过的轮次不记 injected 事件（反馈降权统计
+// 不被冷却污染）。
+func TestCooldownNoInjectedEvent(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	writeEntry(t, kbRoot, "检索.md", "---\ntitle: 检索经验\ntype: note\ntags: []\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\n独角兽紫晶 RetrievalQuirk 词。\n")
+	if err := os.WriteFile(filepath.Join(kbRoot, "config.toml"), []byte("[retrieve]\ndedup_turns = 5\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pc, err := project.FromCwd(projDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	InjectForPrompt(pc, "s-evt", projDir, "RetrievalQuirk 一问")
+	InjectForPrompt(pc, "s-evt", projDir, "RetrievalQuirk 再问") // 冷却中
+	InjectForPrompt(pc, "s-evt", projDir, "RetrievalQuirk 三问") // 冷却中
+	db, err := index.Open(filepath.Join(kbRoot, "kb.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	stats, err := db.FeedbackStats(30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := stats["检索.md"].Injections; got != 1 {
+		t.Fatalf("冷却轮不应记 injected 事件（应只有首轮 1 次）, got %d", got)
+	}
+}
+
+// TestInjectCooldownCorruptStateFailOpen 状态文件损坏：注入照常（fail-open），
+// 台账按空状态自愈。
+func TestInjectCooldownCorruptStateFailOpen(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	writeEntry(t, kbRoot, "检索.md", "---\ntitle: 检索经验\ntype: note\ntags: []\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\n独角兽紫晶 RetrievalQuirk 词。\n")
+	pc, err := project.FromCwd(projDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stateDir := filepath.Join(kbRoot, "state")
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, "session-s-bad.json"), []byte("{oops"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := InjectForPrompt(pc, "s-bad", projDir, "RetrievalQuirk 是什么")
+	if !strings.Contains(out, "检索.md") {
+		t.Fatalf("状态损坏应照常注入, got: %q", out)
+	}
+}
+
+// TestAdoptionDuringCooldown 冷却中的条目被模型读取（按历史轮指针）仍记采纳——
+// 归因窗口 = 本轮注入 ∪ 冷却窗口内。
+func TestAdoptionDuringCooldown(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	writeEntry(t, kbRoot, "检索.md", "---\ntitle: 检索经验\ntype: note\ntags: []\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\n独角兽紫晶 RetrievalQuirk 词。\n")
+	if err := os.WriteFile(filepath.Join(kbRoot, "config.toml"), []byte("[retrieve]\ndedup_turns = 3\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pc, err := project.FromCwd(projDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stateDir := filepath.Join(kbRoot, "state")
+	if out := InjectForPrompt(pc, "s-cool-adopt", projDir, "RetrievalQuirk 一问"); !strings.Contains(out, "检索.md") {
+		t.Fatalf("第 1 轮应注入, got: %q", out)
+	}
+	// 第 2 轮：条目冷却中（不再注入）
+	if out := InjectForPrompt(pc, "s-cool-adopt", projDir, "RetrievalQuirk 再问"); strings.Contains(out, "检索.md") {
+		t.Fatalf("第 2 轮应冷却中, got: %q", out)
+	}
+	// 模型按第 1 轮历史里的指针读取冷却中的条目 → 仍应挂账
+	TrackTouched(pc, "s-cool-adopt", "read_file", filepath.Join(kbRoot, "knowledge", "检索.md"))
+	st := state.Load(stateDir, "s-cool-adopt")
+	if len(st.AdoptedKnowledge) != 1 || st.AdoptedKnowledge[0] != "检索.md" {
+		t.Fatalf("冷却中条目的读取应记采纳: %+v", st.AdoptedKnowledge)
+	}
+}
+
+// TestAdoptionDuringCooldownOverwrite 归因窗口的判别性用例：第 2 轮另一条目补位
+// 注入、覆盖了 InjectedKnowledge（state.Update 仅在 len(hits)>0 时覆写），冷却中
+// 条目不在"最近一轮注入"里；模型按第 1 轮历史指针读取它，旧语义（只认
+// InjectedKnowledge）丢失归因，新语义（本轮注入 ∪ 冷却窗口）仍应挂账。
+// TestAdoptionDuringCooldown 单条目场景下冷却轮零命中、InjectedKnowledge 不被
+// 覆写，旧循环碰巧也能归因，无法区分新旧语义，故补此用例。
+func TestAdoptionDuringCooldownOverwrite(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	writeEntry(t, kbRoot, "甲.md", "---\ntitle: 冷却甲\ntype: note\ntags: []\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\n紫晶冷却 紫晶冷却 紫晶冷却 词。\n")
+	writeEntry(t, kbRoot, "乙.md", "---\ntitle: 冷却乙\ntype: note\ntags: []\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\n紫晶冷却 词。\n")
+	if err := os.WriteFile(filepath.Join(kbRoot, "config.toml"), []byte("[retrieve]\ntop_n = 1\ndedup_turns = 3\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pc, err := project.FromCwd(projDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stateDir := filepath.Join(kbRoot, "state")
+	out1 := InjectForPrompt(pc, "s-cool-ow", projDir, "紫晶冷却 是什么")
+	first, second := "甲.md", "乙.md"
+	if !strings.Contains(out1, first) {
+		first, second = second, first
+	}
+	if !strings.Contains(out1, first) {
+		t.Fatalf("第 1 轮应注入其一, got: %q", out1)
+	}
+	// 第 2 轮：first 冷却中，second 补位注入 → InjectedKnowledge 被覆写为 [second]
+	out2 := InjectForPrompt(pc, "s-cool-ow", projDir, "紫晶冷却 再问")
+	if !strings.Contains(out2, second) || strings.Contains(out2, first) {
+		t.Fatalf("第 2 轮应由另一条目补位, got: %q", out2)
+	}
+	// 模型按第 1 轮历史里的指针读取冷却中的 first → 仍应挂账
+	TrackTouched(pc, "s-cool-ow", "read_file", filepath.Join(kbRoot, "knowledge", first))
+	st := state.Load(stateDir, "s-cool-ow")
+	if len(st.AdoptedKnowledge) != 1 || st.AdoptedKnowledge[0] != first {
+		t.Fatalf("冷却中条目（注入台账已被覆写）的读取应记采纳: %+v", st.AdoptedKnowledge)
 	}
 }

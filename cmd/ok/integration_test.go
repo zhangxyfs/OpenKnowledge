@@ -87,6 +87,16 @@ func TestEndToEnd(t *testing.T) {
 		t.Fatalf("init should write 3 hooks into kimi config: %v %q", err, kimiCfg)
 	}
 
+	// 本测试意图是"第二轮检索仍生效"，与跨轮注入冷却正交：钉 dedup_turns=0 关闭冷却
+	cfgPin := filepath.Join(home, "projects", "demo", "config.toml")
+	existing, err := os.ReadFile(cfgPin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cfgPin, append(existing, []byte("\n[retrieve]\ndedup_turns = 0\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
 	// add 普通条目（无 embedding key → 跳过向量但成功）
 	body := filepath.Join(proj, "body.md")
 	if err := os.WriteFile(body, []byte("使用 Conventional Commits。"), 0o644); err != nil {

@@ -236,6 +236,7 @@
     state.gate = null; // 项目切换：清空旧项目短语缓存，防弹窗展示/串写旧项目数据
     refreshGate();
     refreshInject();
+    refreshDedup();
   });
 
   $("branch-filter").addEventListener("change", function () {
@@ -859,6 +860,7 @@
     refreshCapture();
     refreshGate();
     refreshInject();
+    refreshDedup();
     refreshLLM();
   }
 
@@ -1049,6 +1051,35 @@
       body: { project: project, mandatory_max_tokens: n }
     }).then(refreshInject)
       .catch(function (err) { showError(err.message); refreshInject(); });
+  });
+
+  // ---------- 引导页：跨轮注入冷却卡（dedup_turns） ----------
+
+  function refreshDedup() {
+    var project = captureProject();
+    if (!project) return;
+    api("/api/retrieve?project=" + encodeURIComponent(project)).then(function (cfg) {
+      $("retrieve-dedup-turns").value = cfg.dedup_turns;
+    }).catch(function (err) { showError(err.message); });
+  }
+
+  $("btn-dedup-save").addEventListener("click", function () {
+    var project = captureProject();
+    if (!project) {
+      showError("尚无已注册项目，请先 ok init");
+      return;
+    }
+    var n = parseInt($("retrieve-dedup-turns").value, 10);
+    if (isNaN(n) || n < 0 || n > 99) {
+      showError("冷却轮数必须在 0~99 之间");
+      refreshDedup();
+      return;
+    }
+    api("/api/retrieve", {
+      method: "POST",
+      body: { project: project, dedup_turns: n }
+    }).then(refreshDedup)
+      .catch(function (err) { showError(err.message); refreshDedup(); });
   });
 
   // ---------- 引导页：模型配置卡 + 弹窗（全局 [llm]，卡片列表 + 行内展开） ----------

@@ -1560,6 +1560,73 @@ func TestInjectMandatoryMaxRoundTrip(t *testing.T) {
 	}
 }
 
+// /api/retrieve：dedup_turns 的 GET 默认值 / POST 落盘 / 非法值 400 / 重复设置幂等 /
+// [retrieve] 其余键保留。
+func TestRetrieveDedupTurnsRoundTrip(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	mkProject(t, okHome, "demo")
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	cfgPath := filepath.Join(okHome, "projects", "demo", "config.toml")
+
+	code, data := do(t, "GET", srv.URL+"/api/retrieve?project=demo", testToken, nil)
+	if code != 200 {
+		t.Fatalf("retrieve get: status = %d, body %s", code, data)
+	}
+	var view struct {
+		DedupTurns int `json:"dedup_turns"`
+	}
+	if err := json.Unmarshal([]byte(data), &view); err != nil {
+		t.Fatal(err)
+	}
+	if view.DedupTurns != 3 {
+		t.Fatalf("默认应为 3, got %d", view.DedupTurns)
+	}
+
+	// 预置 [retrieve] 既有键，验证单键 upsert 不整段覆盖
+	if err := os.WriteFile(cfgPath, []byte("[retrieve]\nalpha = 1.5\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, _ = do(t, "POST", srv.URL+"/api/retrieve", testToken,
+		map[string]any{"project": "demo", "dedup_turns": 5})
+	if code != 200 {
+		t.Fatalf("retrieve set: status = %d", code)
+	}
+	cfgData, _ := os.ReadFile(cfgPath)
+	if !strings.Contains(string(cfgData), "dedup_turns = 5") || !strings.Contains(string(cfgData), "alpha = 1.5") {
+		t.Fatalf("config 应含 dedup_turns = 5 且保留 alpha: %q", cfgData)
+	}
+	code, data = do(t, "GET", srv.URL+"/api/retrieve?project=demo", testToken, nil)
+	if code != 200 {
+		t.Fatalf("retrieve re-get: status = %d", code)
+	}
+	if err := json.Unmarshal([]byte(data), &view); err != nil {
+		t.Fatal(err)
+	}
+	if view.DedupTurns != 5 {
+		t.Fatalf("GET 应反映 5, got %d", view.DedupTurns)
+	}
+
+	// 非法值：负数 / 超上限 → 400
+	for _, bad := range []int{-1, 100} {
+		code, _ = do(t, "POST", srv.URL+"/api/retrieve", testToken,
+			map[string]any{"project": "demo", "dedup_turns": bad})
+		if code != 400 {
+			t.Fatalf("dedup_turns=%d 应 400, got %d", bad, code)
+		}
+	}
+	// 0 = 关闭，是合法值；重复设置幂等：键行唯一
+	code, _ = do(t, "POST", srv.URL+"/api/retrieve", testToken,
+		map[string]any{"project": "demo", "dedup_turns": 0})
+	if code != 200 {
+		t.Fatalf("dedup_turns=0 应合法: status = %d", code)
+	}
+	cfgData, _ = os.ReadFile(cfgPath)
+	if strings.Count(string(cfgData), "dedup_turns") != 1 {
+		t.Fatalf("重复设置应幂等替换: %q", cfgData)
+	}
+}
+
 // 更新路径须继承旧条目的 draft/archived 标记（v2.18.1 回归：entryRequest 不含
 // 生命周期字段，writeEntry 曾默认 false——编辑草稿静默转正、编辑归档条目静默
 // 取消归档）。

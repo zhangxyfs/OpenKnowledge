@@ -145,6 +145,10 @@ func TestFirstPromptInjectsBaseOnce(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(kbRoot, "INDEX.md"), []byte("# 知识索引\n\n- **Git 提交规范**\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// 本测试意图是"第二轮检索仍生效"，与跨轮冷却正交：钉 dedup_turns=0 关闭冷却
+	if err := os.WriteFile(filepath.Join(kbRoot, "config.toml"), []byte("[retrieve]\ndedup_turns = 0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	mkPrompt := func(text string) string {
 		return fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":[{"type":"text","text":%q}]}`, projDir, text)
 	}

@@ -78,6 +78,8 @@ func NewHandler(webDir, token string, beats chan<- struct{}) *Handler {
 	api("POST /api/gate", h.apiGateSet)
 	api("GET /api/inject", h.apiInjectGet)
 	api("POST /api/inject", h.apiInjectSet)
+	api("GET /api/retrieve", h.apiRetrieveGet)
+	api("POST /api/retrieve", h.apiRetrieveSet)
 	api("GET /api/llm", h.apiLLMGet)
 	api("POST /api/llm/profile", h.apiLLMProfileSave)
 	api("POST /api/llm/delete", h.apiLLMProfileDelete)
@@ -1277,6 +1279,50 @@ func (h *Handler) apiInjectSet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "mandatory_max_tokens": req.MandatoryMaxTokens})
+}
+
+// apiRetrieveGet 返回项目合并配置中的跨轮注入冷却轮数
+//（[retrieve] dedup_turns，默认 3；<0 归一为 0）。
+func (h *Handler) apiRetrieveGet(w http.ResponseWriter, r *http.Request) {
+	st := resolveProject(w, r.URL.Query().Get("project"))
+	if st == nil {
+		return
+	}
+	cfg, err := config.LoadMerged(st.ConfigPath(), filepath.Join(registry.Home(), "config.toml"))
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	n := cfg.Retrieve.DedupTurns
+	if n < 0 {
+		n = 0
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"dedup_turns": n})
+}
+
+// apiRetrieveSet 设置跨轮注入冷却轮数（0~99，0=关闭，非法 400）；落盘走
+// config.SetRetrieveDedupTurns（[retrieve] 小节内单键 upsert，其余键保留）。
+func (h *Handler) apiRetrieveSet(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Project    string `json:"project"`
+		DedupTurns int    `json:"dedup_turns"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	st := resolveProject(w, req.Project)
+	if st == nil {
+		return
+	}
+	if req.DedupTurns < 0 || req.DedupTurns > 99 {
+		writeErr(w, http.StatusBadRequest, "dedup_turns 必须在 0~99 之间")
+		return
+	}
+	if err := config.SetRetrieveDedupTurns(st.ConfigPath(), req.DedupTurns); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // apiProjectBranchInfo 返回项目的分支上下文：基准分支（wiki.json）、

@@ -145,6 +145,17 @@
           </div>
         </div>
         <div class="card">
+          <div class="card-head"><h3>跨轮注入冷却</h3></div>
+          <p class="card-desc muted">同一会话内已注入的检索条目冷却 N 轮不再重复注入，节省注入预算；0 = 关闭（默认 3）。</p>
+          <div class="card-actions">
+            <span class="form-inline">
+              <label for="retrieve-dedup-turns">冷却轮数</label>
+              <input id="retrieve-dedup-turns" type="number" min="0" max="99" value="3">
+              <button id="btn-dedup-save" type="button" class="btn">保存</button>
+            </span>
+          </div>
+        </div>
+        <div class="card">
           <div class="card-head"><h3>规则配置</h3></div>
           <p class="card-desc muted">mandatory（必守规约）全文随首轮基础注入，是唯一不被注入预算截断的段；全文超上限时注入告警行提醒精简（默认 2000 token）。</p>
           <div class="card-actions">

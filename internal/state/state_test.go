@@ -161,6 +161,105 @@ func TestUpdatePreemptsStaleLock(t *testing.T) {
 	}
 }
 
+// TestCoolingLifecycle 冷却语义：dedupTurns=N 时注入后接下来 N 轮冷却、第 N+1 个
+// 后续轮恢复；dedupTurns<=0 恒不冷却（关闭）。重新注入刷新台账轮次。
+func TestCoolingLifecycle(t *testing.T) {
+	s := &Session{SessionID: "s1"}
+	s.PromptTurns = 1
+	s.MarkRetrievalInjected([]string{"a.md"})
+	// 注入后第 1、2 个后续轮冷却中（dedupTurns=2）
+	s.PromptTurns = 2
+	if !s.Cooling("a.md", 2) {
+		t.Fatal("第 2 轮应冷却中")
+	}
+	s.PromptTurns = 3
+	if !s.Cooling("a.md", 2) {
+		t.Fatal("第 3 轮应冷却中")
+	}
+	// 第 3 个后续轮恢复
+	s.PromptTurns = 4
+	if s.Cooling("a.md", 2) {
+		t.Fatal("第 4 轮应恢复")
+	}
+	// 恢复后重新注入 → 台账刷新，下一轮又冷却
+	s.MarkRetrievalInjected([]string{"a.md"})
+	if !s.Cooling("a.md", 2) {
+		t.Fatal("重新注入后应立即进入冷却")
+	}
+	// 关闭：恒不冷却
+	if s.Cooling("a.md", 0) || s.Cooling("a.md", -1) {
+		t.Fatal("dedupTurns<=0 应恒不冷却")
+	}
+	// 从未注入的条目不冷却；nil 台账安全
+	if s.Cooling("never.md", 2) {
+		t.Fatal("未注入条目不冷却")
+	}
+	empty := &Session{SessionID: "s2"}
+	if empty.Cooling("a.md", 2) || empty.CoolingSet(2) != nil {
+		t.Fatal("空台账应安全返回")
+	}
+}
+
+// TestCoolingSet 冷却集合只含冷却中的条目，供检索排除下推。
+func TestCoolingSet(t *testing.T) {
+	s := &Session{SessionID: "s1", PromptTurns: 5}
+	s.InjectedLog = map[string]int{"cool.md": 4, "old.md": 1}
+	set := s.CoolingSet(2)
+	if !set["cool.md"] || set["old.md"] || len(set) != 1 {
+		t.Fatalf("cooling set 错误: %+v", set)
+	}
+	if got := s.CoolingSet(0); got != nil {
+		t.Fatalf("dedupTurns=0 应返回 nil: %+v", got)
+	}
+}
+
+// TestAdoptableNameWindow 归因窗口 = 本轮注入 ∪ 冷却窗口内；返回库内原名（大小写
+// 不敏感匹配）；窗口外与关闭时（dedupTurns=0）仅认本轮注入。
+func TestAdoptableNameWindow(t *testing.T) {
+	s := &Session{SessionID: "s1", PromptTurns: 5}
+	s.InjectedKnowledge = []string{"cur.md"}
+	s.InjectedLog = map[string]int{"cur.md": 5, "cool.md": 4, "old.md": 1}
+	if got := s.AdoptableName("CUR.MD", 2); got != "cur.md" {
+		t.Fatalf("本轮注入应归因且返回原名, got %q", got)
+	}
+	if got := s.AdoptableName("Cool.MD", 2); got != "cool.md" {
+		t.Fatalf("冷却窗口内应归因且返回原名, got %q", got)
+	}
+	if got := s.AdoptableName("old.md", 2); got != "" {
+		t.Fatalf("窗口外不应归因, got %q", got)
+	}
+	if got := s.AdoptableName("cool.md", 0); got != "" {
+		t.Fatalf("dedupTurns=0 时冷却条目不归因, got %q", got)
+	}
+	if got := s.AdoptableName("never.md", 2); got != "" {
+		t.Fatalf("未注入条目不归因, got %q", got)
+	}
+}
+
+// TestSessionCooldownRoundTrip 台账与轮次随状态 JSON 落盘/读回；旧版状态文件
+// （无新字段）按零值自愈，冷却判定安全。
+func TestSessionCooldownRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	s := &Session{SessionID: "rt", PromptTurns: 3}
+	s.MarkRetrievalInjected([]string{"a.md"})
+	if err := s.Save(dir); err != nil {
+		t.Fatal(err)
+	}
+	back := Load(dir, "rt")
+	if back.PromptTurns != 3 || !back.Cooling("a.md", 2) {
+		t.Fatalf("roundtrip 后台账丢失: %+v", back)
+	}
+	// 旧版文件（无 prompt_turns/injected_log 字段）：零值自愈不 panic
+	if err := os.WriteFile(filepath.Join(dir, fileName("legacy")),
+		[]byte(`{"session_id":"legacy","base_injected":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	legacy := Load(dir, "legacy")
+	if legacy.PromptTurns != 0 || legacy.Cooling("a.md", 3) || legacy.CoolingSet(3) != nil {
+		t.Fatalf("旧版状态应零值自愈: %+v", legacy)
+	}
+}
+
 // 损坏的状态文件按空状态加载（自愈），不得返回半解析结果——半截 Session 被回写
 // 会把损坏"洗白"成错误状态（如 BaseInjected=false 触发 mandatory 重注入）。
 func TestLoadCorruptFileSelfHeals(t *testing.T) {
