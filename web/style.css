@@ -227,6 +227,10 @@ input:focus, select:focus, textarea:focus {
 .merge-lineage { padding: 2px 4px; font-size: 12px; }
 /* 基线继承徽标（变体 A，inherited 态展示在当前分支名后） */
 .badge-inherit { background: #e6f4ea; color: #1e7e34; border-radius: 4px; padding: 1px 6px; font-size: 12px; white-space: nowrap; }
+/* 继承徽标 hover 浮动窗（原型变体 C 的 bubble，仅 hover 出现） */
+.tip { position: relative; }
+.tip .bubble { display: none; position: absolute; bottom: 130%; left: 50%; transform: translateX(-50%); background: #111827; color: #fff; font-size: 12px; padding: 4px 10px; border-radius: 4px; white-space: nowrap; z-index: 20; }
+.tip:hover .bubble { display: block; }
 
 /* ---------- 引导页卡片 ---------- */
 

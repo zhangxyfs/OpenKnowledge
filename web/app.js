@@ -333,6 +333,18 @@
         // 无 branch_state 的旧后端走 else，行为与旧版逐位一致
         c.className = "badge-inherit";
         c.textContent = cur + " · 继承基线";
+        // hover 浮动窗（原型变体 C 的 bubble）：继承来源@commit + 落后数
+        var tip = document.createElement("span");
+        tip.className = "tip";
+        tip.appendChild(c);
+        var bubble = document.createElement("span");
+        bubble.className = "bubble";
+        var src = info.inherited_from || info.base_branch || "—";
+        var short = String(info.last_commit || "").slice(0, 7);
+        bubble.textContent = "wiki 基线继承自 " + src + (short ? "@" + short : "") +
+          " · 落后 " + (info.behind || 0) + " commit";
+        tip.appendChild(bubble);
+        c = tip;
       } else {
         c.textContent = cur;
         if (info.base_branch && info.current_branch && info.base_branch !== info.current_branch) {
