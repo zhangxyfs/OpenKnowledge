@@ -345,9 +345,12 @@
       } else {
         lineage.classList.add("hidden");
       }
-      // 分支上下文状态卡（变体 B）：fail-open，无 branch_state（旧后端/非 git/失败）或非 inherited → 隐藏，现状不变
+      // 分支上下文状态卡（变体 B 弹窗版）：inherited 时填充卡片内容并显示工具栏
+      // 「wiki 基线」触发按钮（点击开 wiki-modal 弹窗）；其余情况隐藏按钮。
+      // fail-open：无 branch_state（旧后端/非 git/失败）→ 按钮隐藏，现状不变
       var card = $("wiki-card");
-      if (card) {
+      var cardBtn = $("btn-wiki-card");
+      if (card && cardBtn) {
         if (info.branch_state === "inherited") {
           var short = (info.last_commit || "").slice(0, 7);
           // 生成时间行：generated_at 缺失或零值（0001-01-01T...）显示 —；
@@ -382,11 +385,11 @@
           btns[0].onclick = function () { copyText("在 agent 会话运行 /openknowledge-wiki 更新本分支 wiki"); };
           btns[1].onclick = function () { copyText("ok wiki diff"); };
           card.appendChild(act);
-          card.classList.remove("hidden");
+          cardBtn.classList.remove("hidden");
           // 工具栏摘要：超阈值时在继承徽标上带落后数
           if (info.stale) { c.textContent = cur + " "; var tag = document.createElement("span"); tag.className = "badge-inherit"; tag.textContent = "wiki 落后 " + info.behind; c.appendChild(tag); }
         } else {
-          card.classList.add("hidden");
+          cardBtn.classList.add("hidden");
         }
       }
     }).catch(function () {});
@@ -638,6 +641,14 @@
     if (!changelogFromPending) return;
     changelogFromPending = false;
     api("/api/changelog/seen", { method: "POST" }).catch(function (err) { showError(err.message); });
+  });
+
+  // wiki 基线状态卡弹窗：工具栏「wiki 基线」按钮触发（按钮仅在 inherited 态可见）
+  $("btn-wiki-card").addEventListener("click", function () {
+    $("wiki-modal").classList.remove("hidden");
+  });
+  $("wiki-card-close").addEventListener("click", function () {
+    $("wiki-modal").classList.add("hidden");
   });
 
   $("btn-changelog").addEventListener("click", function () {
