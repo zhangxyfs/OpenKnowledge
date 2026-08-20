@@ -115,8 +115,12 @@
    <details id="verNav" open>
     <summary data-i18n="c.ledger">版本档案</summary>
     <div class="group">
+      <div class="group-title">2.21.x</div>
+      <a href="#v2-21-0"><span><span class="latest-dot"></span>v2.21.0</span><span class="d">08-20</span></a>
+    </div>
+    <div class="group">
       <div class="group-title">2.20.x</div>
-      <a href="#v2-20-0"><span><span class="latest-dot"></span>v2.20.0</span><span class="d">08-19</span></a>
+      <a href="#v2-20-0"><span>v2.20.0</span><span class="d">08-19</span></a>
     </div>
     <div class="group">
       <div class="group-title">2.17.x</div>
@@ -199,12 +203,28 @@
       <h1 data-i18n="c.h1">更新日志</h1>
       <p class="lede" data-i18n="c.lede">OpenKnowledge 的版本发布记录。日期为 2026 年。</p>
       <div class="cta">
-        <a class="btn btn-primary" href="https://github.com/zhangxyfs/OpenKnowledge/releases" target="_blank" rel="noopener" data-i18n="c.cta">下载最新版 v2.20.0</a>
+        <a class="btn btn-primary" href="https://github.com/zhangxyfs/OpenKnowledge/releases" target="_blank" rel="noopener" data-i18n="c.cta">下载最新版 v2.21.0</a>
       </div>
     </div>
 
+    <section class="ver" id="v2-21-0">
+      <div class="ver-head"><h2>v2.21.0</h2><span class="badge-latest" data-i18n="c.latest">最新</span><time>2026-08-20</time></div>
+      <div class="chg">
+        <span class="tag tag-new" data-i18n="t.new">新功能</span>
+        <ul>
+          <li>wiki 基线读时继承：从基准分支切出的新分支不再误报「尚无基线」——本分支无游标时自动回退继承最近的可达基线（新状态 inherited，附继承来源分支），wiki 内容照常注入且落后追踪立即生效；超过 <code>wiki.stale_commits</code> 阈值时注入行合并提示「落后 N commit，建议更新」，不重复提醒；GUI 工具栏当前分支显示绿色「继承基线」徽标，悬停可见继承来源与落后数</li>
+        </ul>
+      </div>
+      <div class="chg">
+        <span class="tag tag-note" data-i18n="t.note">说明</span>
+        <ul>
+          <li>继承只是检测态，wiki.json 零写入零迁移；所有游标均不可达（如从游离历史切出）仍报「尚无基线」；基准分支上的注入与旧版逐字节一致，直接覆盖升级</li>
+        </ul>
+      </div>
+    </section>
+
     <section class="ver" id="v2-20-0">
-      <div class="ver-head"><h2>v2.20.0</h2><span class="badge-latest" data-i18n="c.latest">最新</span><time>2026-08-19</time></div>
+      <div class="ver-head"><h2>v2.20.0</h2><time>2026-08-19</time></div>
       <div class="chg">
         <span class="tag tag-new" data-i18n="t.new">新功能</span>
         <ul>
