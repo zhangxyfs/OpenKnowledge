@@ -130,19 +130,91 @@ func TestCheckStatusGone(t *testing.T) {
 }
 
 func TestCheckStatusNoCursor(t *testing.T) {
+	// 唯一游标（dev 上的 B）对 master HEAD 不可达 → 真·无基线 no_cursor
 	dir := initRepo(t, 1)
+	run(t, dir, "checkout", "-q", "-b", "dev")
+	run(t, dir, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty", "-m", "b")
+	devTip := headOf(t, dir)
+	run(t, dir, "checkout", "-q", "master")
+	sd := t.TempDir()
+	if err := SaveState(sd, &State{BaseBranch: "master", Cursors: map[string]BranchCursor{"dev": {LastCommit: devTip}}}); err != nil {
+		t.Fatal(err)
+	}
+	st := CheckStatus(sd, dir, 1)
+	if st.BranchState != "no_cursor" || !st.HasWiki || st.Branch != "master" {
+		t.Fatalf("应为 no_cursor: %+v", st)
+	}
+	if st.InheritedFrom != "" {
+		t.Errorf("no_cursor 不得带继承来源: %+v", st)
+	}
+}
+
+func TestCheckStatusInherited(t *testing.T) {
+	// master 有游标，切 dev 后再提交 1 个 → 继承 master 基线，behind=1，超阈值 Stale
+	dir := initRepo(t, 2)
 	master := headOf(t, dir)
 	run(t, dir, "checkout", "-q", "-b", "dev")
+	run(t, dir, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty", "-m", "d1")
 	sd := t.TempDir()
 	if err := SaveState(sd, &State{BaseBranch: "master", Cursors: map[string]BranchCursor{"master": {LastCommit: master}}}); err != nil {
 		t.Fatal(err)
 	}
 	st := CheckStatus(sd, dir, 1)
-	if st.BranchState != "no_cursor" || !st.HasWiki || st.Branch != "dev" {
-		t.Fatalf("应为 no_cursor: %+v", st)
+	if st.BranchState != "inherited" || st.InheritedFrom != "master" || st.LastCommit != master {
+		t.Fatalf("应为 inherited(master): %+v", st)
 	}
-	if st.LastCommit != master {
-		t.Errorf("no_cursor 应展示基准分支游标: %+v", st)
+	if st.Behind != 1 || !st.Stale {
+		t.Errorf("behind 应照算且走正常门控: %+v", st)
+	}
+	if !st.HasWiki || st.Branch != "dev" || st.BaseBranch != "master" {
+		t.Errorf("基础字段应透传: %+v", st)
+	}
+}
+
+func TestCheckStatusInheritedPrefersBase(t *testing.T) {
+	// 基准游标可达即短路：即使其他游标距离更近也用基准
+	dir := initRepo(t, 3)
+	mid := func() string { // HEAD~1
+		full, err := ResolveRevision(dir, "HEAD~1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return full
+	}()
+	tip := headOf(t, dir)
+	run(t, dir, "checkout", "-q", "-b", "dev")
+	sd := t.TempDir()
+	if err := SaveState(sd, &State{BaseBranch: "master", Cursors: map[string]BranchCursor{
+		"master": {LastCommit: mid}, // 距离 1
+		"other":  {LastCommit: tip}, // 距离 0，更近
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	st := CheckStatus(sd, dir, 1)
+	if st.BranchState != "inherited" || st.InheritedFrom != "master" || st.LastCommit != mid {
+		t.Fatalf("基准可达应短路优先: %+v", st)
+	}
+}
+
+func TestCheckStatusInheritedFallbackNearest(t *testing.T) {
+	// 基准无游标，其余两条可达 → 取 rev-list 距离最近者
+	dir := initRepo(t, 3)
+	tip := headOf(t, dir)
+	full, err := ResolveRevision(dir, "HEAD~2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	run(t, dir, "checkout", "-q", "-b", "dev")
+	sd := t.TempDir()
+	if err := SaveState(sd, &State{BaseBranch: "master", Cursors: map[string]BranchCursor{
+		"far":  {LastCommit: full}, // 距离 2
+		"near": {LastCommit: tip},  // 距离 0
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	st := CheckStatus(sd, dir, 1)
+	if st.BranchState != "inherited" || st.InheritedFrom != "near" || st.Behind != 0 {
+		t.Fatalf("应取最近者 near: %+v", st)
 	}
 }
 

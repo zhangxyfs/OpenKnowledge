@@ -96,19 +96,20 @@ func SaveState(stateDir string, s *State) error {
 }
 
 // Status 是 ok wiki status 的结果。Behind=-1 表示 git 不可用或状态无法计算。
-// BranchState 分支状态："ok"（正常）、"no_cursor"（本分支无基线）、"diverged"
-// （游标与本分支分叉）、"gone"（游标 commit 被改写）、"legacy_orphan"（旧格式
-// 游标归属不可判）；非 git 项目与旧行为路径为空串。
+// BranchState 分支状态："ok"（正常）、"inherited"（读时继承可达游标）、"no_cursor"
+// （本分支无基线且无游标可继承）、"diverged"（游标与本分支分叉）、"gone"（游标
+// commit 被改写）、"legacy_orphan"（旧格式游标归属不可判）；非 git 项目与旧行为路径为空串。
 type Status struct {
-	HasWiki     bool   `json:"has_wiki"`
-	LastCommit  string `json:"last_commit,omitempty"`
-	Behind      int    `json:"behind"`
-	Stale       bool   `json:"stale"`
-	Threshold   int    `json:"threshold"`
-	Branch      string `json:"branch,omitempty"`
-	BaseBranch  string `json:"base_branch,omitempty"`
-	BranchState string `json:"branch_state,omitempty"`
-	MergeBase   string `json:"merge_base,omitempty"`
+	HasWiki       bool   `json:"has_wiki"`
+	LastCommit    string `json:"last_commit,omitempty"`
+	Behind        int    `json:"behind"`
+	Stale         bool   `json:"stale"`
+	Threshold     int    `json:"threshold"`
+	Branch        string `json:"branch,omitempty"`
+	BaseBranch    string `json:"base_branch,omitempty"`
+	BranchState   string `json:"branch_state,omitempty"`
+	MergeBase     string `json:"merge_base,omitempty"`
+	InheritedFrom string `json:"inherited_from,omitempty"` // 继承来源分支（inherited 态非空）
 }
 
 // CheckStatus 计算 wiki 状态（只读 git 与游标文件，绝不写盘；迁移落盘只发生
@@ -179,7 +180,19 @@ func CheckStatus(stateDir, srcDir string, threshold int) *Status {
 	st.HasWiki = len(s.Cursors) > 0
 	cur, ok := s.Cursors[branch]
 	if !ok {
-		// 本分支无基线：展示基准分支游标供提示使用
+		// 本分支无游标：读时回退继承可达游标（不落盘）。基准分支优先
+		//（一次 merge-base 短路），否则取可达且 rev-list 距离最近者。
+		if branch != "" {
+			if from, lc, behind, ok2 := inheritCursor(srcDir, s); ok2 {
+				st.BranchState = "inherited"
+				st.InheritedFrom = from
+				st.LastCommit = lc
+				st.Behind = behind
+				st.Stale = threshold > 0 && behind >= threshold
+				return st
+			}
+		}
+		// 真·无基线：展示基准分支游标供提示使用
 		if bc, ok2 := s.Cursors[s.BaseBranch]; ok2 {
 			st.LastCommit = bc.LastCommit
 		}
@@ -236,4 +249,37 @@ func countCommits(srcDir, rev string) (int, error) {
 		return 0, err
 	}
 	return strconv.Atoi(strings.TrimSpace(string(out)))
+}
+
+// inheritCursor 找可继承游标：commit 是 HEAD 祖先的分支游标。基准分支优先
+//（短路，不与其他游标比距离）；基准无游标或不可达时，取其余可达游标中
+// rev-list 距离最近者。只读（git 调用上限 = 1 + 游标表大小，常态 1-2 条）。
+func inheritCursor(srcDir string, s *State) (from, lastCommit string, behind int, ok bool) {
+	try := func(c BranchCursor) (int, bool) {
+		if c.LastCommit == "" || !isAncestor(srcDir, c.LastCommit, "HEAD") {
+			return 0, false
+		}
+		n, err := countCommits(srcDir, c.LastCommit+"..HEAD")
+		if err != nil {
+			return 0, false
+		}
+		return n, true
+	}
+	if s.BaseBranch != "" {
+		if bc, exists := s.Cursors[s.BaseBranch]; exists {
+			if n, good := try(bc); good {
+				return s.BaseBranch, bc.LastCommit, n, true
+			}
+		}
+	}
+	best := -1
+	for name, c := range s.Cursors {
+		if name == s.BaseBranch {
+			continue
+		}
+		if n, good := try(c); good && (best < 0 || n < best) {
+			best, from, lastCommit, ok = n, name, c.LastCommit, true
+		}
+	}
+	return from, lastCommit, best, ok
 }
