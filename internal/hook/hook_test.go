@@ -731,6 +731,60 @@ func TestPromptWikiBranchContextOnDiverged(t *testing.T) {
 	}
 }
 
+func TestPromptWikiInheritedContextLine(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	initGitRepo(t, projDir, 2)
+	head := gitHead(t, projDir)
+	runGit(t, projDir, "checkout", "-q", "-b", "dev") // dev 无本分支游标，master 游标可达 → inherited
+	st := &wiki.State{BaseBranch: "master", Cursors: map[string]wiki.BranchCursor{"master": {LastCommit: head}}}
+	if err := wiki.SaveState(filepath.Join(kbRoot, "state"), st); err != nil {
+		t.Fatal(err)
+	}
+	writeEntry(t, kbRoot, "条目.md", "---\ntitle: 测试条目\ntype: note\ntags: []\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\n正文含线索词 InhCue。\n")
+	in := fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":"InhCue"}`, projDir)
+	var out bytes.Buffer
+	if code := HandlePrompt(strings.NewReader(in), &out, ""); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	got := out.String()
+	if !strings.Contains(got, "当前分支 dev 继承该基线") {
+		t.Errorf("inherited 未超阈值应为纯上下文行: %q", got)
+	}
+	if strings.Contains(got, "尚无基线") {
+		t.Errorf("可继承场景不得再报尚无基线: %q", got)
+	}
+}
+
+func TestPromptWikiInheritedStaleMergedLine(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	initGitRepo(t, projDir, 1)
+	head := gitHead(t, projDir) // 切分支前的 master tip 作为游标
+	runGit(t, projDir, "checkout", "-q", "-b", "dev")
+	runGit(t, projDir, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty", "-m", "d1")
+	runGit(t, projDir, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty", "-m", "d2")
+	// 阈值 1：inherited + Stale（behind=2）
+	if err := os.WriteFile(filepath.Join(kbRoot, "config.toml"), []byte("[wiki]\nstale_commits = 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st := &wiki.State{BaseBranch: "master", Cursors: map[string]wiki.BranchCursor{"master": {LastCommit: head}}}
+	if err := wiki.SaveState(filepath.Join(kbRoot, "state"), st); err != nil {
+		t.Fatal(err)
+	}
+	writeEntry(t, kbRoot, "条目.md", "---\ntitle: 测试条目\ntype: note\ntags: []\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\n正文含线索词 StaleInhCue。\n")
+	in := fmt.Sprintf(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":%q,"prompt":"StaleInhCue"}`, projDir)
+	var out bytes.Buffer
+	if code := HandlePrompt(strings.NewReader(in), &out, ""); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	got := out.String()
+	if !strings.Contains(got, "当前分支 dev 继承，落后 2 commit") || !strings.Contains(got, "建议更新") {
+		t.Errorf("超阈值应为合并行（带落后数）: %q", got)
+	}
+	if strings.Contains(got, "wiki 已落后") {
+		t.Errorf("wikiNudge 不得重复提醒（去重）: %q", got)
+	}
+}
+
 func TestPromptWikiNoContextOnBaseBranch(t *testing.T) {
 	projDir, kbRoot := setupProject(t)
 	initGitRepo(t, projDir, 2)
