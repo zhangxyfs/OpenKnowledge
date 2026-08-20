@@ -85,7 +85,7 @@ daemon 常驻后台、按需自动拉起，无需手动管理；托盘图标右�
 - **想临时停用**：`ok off`（全部链路暂停），`ok on` 恢复
 - **数据都在哪**：`~/.openknowledge/`——`registry.toml`（项目注册表）、`projects/<项目>/knowledge/*.md`（条目真源）、`kb.db`（索引，删了会自动重建）、`state/`（会话状态）
 - **备份/迁移**：其他页"数据导出"存 zip → 另一台机器"数据导入"（索引自动重建）
-- **切了 git 分支**：wiki 是分支感知的（2.6+）——注入会提示"wiki 基于 <基准分支>"；长期并行分支用 `/openknowledge-wiki` 在该分支生成差异条目（2.7+），互不影响
+- **切了 git 分支**：wiki 是分支感知的（2.6+）——新分支自动继承可达基线并提示"wiki 基于 <基准分支>；当前分支 X 继承该基线"，落后超阈值照常提醒；长期并行分支用 `/openknowledge-wiki` 在该分支生成差异条目（2.7+），互不影响
 - **卸载**：Windows"应用与功能"里卸载 OpenKnowledge——会清理 hooks/插件登记/技能/embedding 配置并停 daemon；知识库数据保留在 `~/.openknowledge/` 可手动删
 - **已知限制**：用 2.7.1 及更早版本执行过 `ok wiki mark/base` 会丢弃 merges 合并谱系（不崩，但谱系清空）；升级后用 `ok wiki status` 可重新检出积累
 
