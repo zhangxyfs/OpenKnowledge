@@ -382,8 +382,8 @@
           act.innerHTML = '<button type="button" class="btn btn-primary" title="点击复制提示命令">在本分支更新 wiki</button>' +
             '<button type="button" class="btn" title="点击复制提示命令">查看分支差异</button>';
           var btns = act.querySelectorAll("button");
-          btns[0].onclick = function () { copyText("在 agent 会话运行 /openknowledge-wiki 更新本分支 wiki"); };
-          btns[1].onclick = function () { copyText("ok wiki diff"); };
+          btns[0].onclick = function () { copyText("在 agent 会话运行 /openknowledge-wiki 更新本分支 wiki", btns[0]); };
+          btns[1].onclick = function () { copyText("ok wiki diff", btns[1]); };
           card.appendChild(act);
           cardBtn.classList.remove("hidden");
           // 工具栏摘要：超阈值时在继承徽标上带落后数
@@ -395,10 +395,19 @@
     }).catch(function () {});
   }
 
-  // copyText 复制文本到剪贴板（无既有 toast 机制，按钮以 title 提示，失败静默）
-  function copyText(text) {
+  // copyText 复制文本到剪贴板；btn 传入时以其文案短暂变化作可见反馈（无既有 toast 机制）
+  function copyText(text, btn) {
+    var done = function (ok) {
+      if (!btn) return;
+      var old = btn.textContent;
+      btn.textContent = ok ? "已复制" : "复制失败";
+      btn.disabled = true;
+      setTimeout(function () { btn.textContent = old; btn.disabled = false; }, 1500);
+    };
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).catch(function () {});
+      navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(false); });
+    } else {
+      done(false);
     }
   }
 
