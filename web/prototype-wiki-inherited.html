@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>PROTOTYPE · wiki 基线继承三变体</title>
+<!--
+  一次性原型（throwaway）：回答「inherited 态在三个面上长什么样」
+  三个变体 ?variant=A|B|C，底部浮条或 ←/→ 切换。
+  色板取自 web/style.css：badge-branch #e0e7ff/#3730a3、badge-born #4E5D73、branch-warn #b45309。
+  场景统一为：master@127cc01 有游标，当前分支 feat/injection-cooldown 无本分支游标、可继承，已落后 23 commit（阈值 20）。
+-->
+<style>
+  :root {
+    --ink:#1f2430; --muted:#8a8f9c; --line:#e3e5ea; --bg:#f6f7f9;
+    --badge-scope-bg:#e0e7ff; --badge-scope-fg:#3730a3;
+    --badge-born:#4E5D73; --warn:#b45309;
+    --inherit-bg:#e6f4ea; --inherit-fg:#1e7e34;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif; color:var(--ink); background:var(--bg); padding:24px 24px 96px; }
+  h1 { font-size:18px; margin:0 0 4px; }
+  h2 { font-size:15px; margin:28px 0 10px; }
+  .proto-banner { background:#fff7ed; border:1px solid #fdba74; color:#9a3412; padding:6px 12px; border-radius:6px; display:inline-block; font-size:12px; margin-bottom:16px; }
+  .muted { color:var(--muted); }
+  .panel { background:#fff; border:1px solid var(--line); border-radius:8px; padding:16px; margin-bottom:16px; }
+  .panel h3 { margin:0 0 10px; font-size:13px; color:var(--muted); font-weight:600; letter-spacing:.5px; }
+
+  /* 终端 */
+  .term { background:#14171f; color:#d6dae4; border-radius:8px; padding:14px 16px; font:13px/1.7 "Cascadia Code",Consolas,monospace; white-space:pre-wrap; }
+  .term .p { color:#7ee787; }           /* prompt 符 */
+  .term .dim { color:#6b7280; }
+  .term .inj { color:#79b8ff; }         /* hook 注入行 */
+  .term .hl { background:#2d333f; }
+
+  /* GUI 工具栏复刻 */
+  .toolbar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; border:1px solid var(--line); border-radius:6px; padding:10px 12px; background:#fff; }
+  .toolbar .fake { border:1px solid var(--line); border-radius:4px; padding:2px 8px; color:var(--muted); font-size:13px; background:#fafbfc; }
+  .badge-branch { background:var(--badge-scope-bg); color:var(--badge-scope-fg); border-radius:4px; padding:1px 6px; font-size:12px; white-space:nowrap; }
+  .badge-born { background:var(--badge-born); color:#fff; border-radius:4px; padding:1px 6px; font-size:12px; }
+  .badge-inherit { background:var(--inherit-bg); color:var(--inherit-fg); border-radius:4px; padding:1px 6px; font-size:12px; white-space:nowrap; }
+  .branch-warn { color:var(--warn); font-weight:600; }
+  .tip { position:relative; }
+  .tip .bubble { position:absolute; bottom:130%; left:50%; transform:translateX(-50%); background:#111827; color:#fff; font-size:12px; padding:4px 10px; border-radius:4px; white-space:nowrap; }
+
+  /* 状态卡（变体 B） */
+  .wcard { border:1px solid var(--line); border-radius:8px; background:#fff; padding:14px 16px; max-width:520px; }
+  .wcard .row { display:flex; justify-content:space-between; padding:4px 0; font-size:13px; }
+  .wcard .row .k { color:var(--muted); }
+  .wcard .act { margin-top:10px; display:flex; gap:8px; }
+  .btn { border:1px solid var(--line); background:#fff; border-radius:4px; padding:4px 12px; font-size:13px; cursor:default; }
+  .btn-primary { background:#2563eb; border-color:#2563eb; color:#fff; }
+
+  .vs { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-top:8px; }
+  .vs .cell { border:1px solid var(--line); border-radius:6px; padding:8px 10px; background:#fafbfc; font-size:13px; }
+  .vs .cap { font-size:12px; color:var(--muted); margin-bottom:4px; }
+
+  /* 浮条 */
+  #switcher { position:fixed; left:50%; bottom:18px; transform:translateX(-50%); background:#111827; color:#fff; border-radius:999px; padding:8px 10px; display:flex; gap:10px; align-items:center; box-shadow:0 6px 20px rgba(0,0,0,.3); font-size:13px; z-index:99; }
+  #switcher button { background:#374151; color:#fff; border:none; border-radius:999px; width:30px; height:30px; cursor:pointer; font-size:14px; }
+  #switcher button:hover { background:#4b5563; }
+  #switcher .lbl { min-width:230px; text-align:center; }
+</style>
+</head>
+<body>
+
+<div class="proto-banner">PROTOTYPE — 一次性原型，不进生产；变体间是结构差异，不是配色差异</div>
+<h1>wiki 基线继承（inherited 态）· 三个展示面</h1>
+<p class="muted">场景：master@127cc01 有游标；当前分支 <b>feat/injection-cooldown</b> 无本分支游标、可继承；已落后 23 commit（阈值 20，已超）。</p>
+
+<!-- ============ 变体 A：内联徽标（最小改动） ============ -->
+<section id="v-A" hidden>
+  <h2>变体 A — 内联徽标（最小改动：一行文案 + 一个小徽标）</h2>
+
+  <div class="panel">
+    <h3>① hook 注入（AI 看到的 stdout）</h3>
+    <div class="term"><span class="dim">…检索条目注入…</span>
+<span class="inj">[OpenKnowledge] wiki 基于 master@127cc01；当前分支 feat/injection-cooldown 继承该基线，结构描述以 master 为准。</span>
+<span class="inj">[OpenKnowledge] wiki 已落后 23 个 commit，建议用 openknowledge-wiki 技能增量更新。</span></div>
+  </div>
+
+  <div class="panel">
+    <h3>② ok wiki status（CLI）</h3>
+    <div class="term"><span class="p">$</span> ok wiki status
+分支:     feat/injection-cooldown（基线继承自 master@127cc01）
+落后:     23 commit（阈值 20，建议更新）
+条目:     15</div>
+  </div>
+
+  <div class="panel">
+    <h3>③ GUI 工具栏（现状布局不动，当前分支后加中性徽标）</h3>
+    <div class="toolbar">
+      <span class="fake">项目: OpenKnowledge</span>
+      <span class="fake">类型: 全部</span>
+      <span class="fake">分支: 全部</span>
+      <span class="muted">基准分支: master · 当前分支: <span class="badge-inherit">feat/injection-cooldown · 继承基线</span></span>
+      <span class="fake">🔍 搜索条目…</span>
+      <span class="btn btn-primary">新建</span>
+    </div>
+    <div class="vs">
+      <div class="cell"><div class="cap">基准分支（无色）</div>当前分支: master</div>
+      <div class="cell"><div class="cap">继承基线（绿，中性）</div><span class="badge-inherit">feat/x · 继承基线</span></div>
+      <div class="cell"><div class="cap">无基线/分叉（橙，警示，现状）</div><span class="branch-warn">feat/y</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 变体 B：状态卡（信息层级 + 动作入口） ============ -->
+<section id="v-B" hidden>
+  <h2>变体 B — 状态卡（分支上下文升级为卡片，带「更新 wiki」动作）</h2>
+
+  <div class="panel">
+    <h3>① hook 注入（带 behind 数字，一行说完）</h3>
+    <div class="term"><span class="dim">…检索条目注入…</span>
+<span class="inj">[OpenKnowledge] wiki 基于 master@127cc01（当前分支 feat/injection-cooldown 继承，落后 23 commit），结构描述以 master 为准，建议更新。</span></div>
+  </div>
+
+  <div class="panel">
+    <h3>② ok wiki status（键值块，继承来源单列）</h3>
+    <div class="term"><span class="p">$</span> ok wiki status
+基准分支: master
+当前分支: feat/injection-cooldown
+基线:     继承自 master@127cc01（2026-08-12 生成，15 条目）
+落后:     23 commit（阈值 20）→ 建议在本分支运行 /openknowledge-wiki</div>
+  </div>
+
+  <div class="panel">
+    <h3>③ GUI（工具栏只留一行摘要，点击/常驻展开为状态卡）</h3>
+    <div class="toolbar">
+      <span class="fake">项目: OpenKnowledge</span>
+      <span class="muted">基准分支: master · 当前分支: <b>feat/injection-cooldown</b> <span class="badge-inherit">wiki 落后 23</span></span>
+    </div>
+    <div style="height:10px"></div>
+    <div class="wcard">
+      <div class="row"><span class="k">基准分支</span><span>master</span></div>
+      <div class="row"><span class="k">当前分支</span><span>feat/injection-cooldown</span></div>
+      <div class="row"><span class="k">基线</span><span>继承自 master@127cc01</span></div>
+      <div class="row"><span class="k">wiki 生成于</span><span>2026-08-12 · 15 条目</span></div>
+      <div class="row"><span class="k">落后</span><span class="branch-warn">23 commit（阈值 20）</span></div>
+      <div class="act"><span class="btn btn-primary">在本分支更新 wiki</span><span class="btn">查看分支差异</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 变体 C：静默派（未落后零存在感） ============ -->
+<section id="v-C" hidden>
+  <h2>变体 C — 静默派（继承无存在感，只有落后才说话）</h2>
+
+  <div class="panel">
+    <h3>① hook 注入（未超阈值：完全无行；超阈值：只出 stale 行，不提继承）</h3>
+    <div class="term"><span class="dim"># behind=3（未超阈值 20）时：注入里一行都没有，与基准分支体验一致</span>
+<span class="dim"># behind=23（超阈值）时：</span>
+<span class="inj">[OpenKnowledge] wiki 已落后 23 个 commit，建议用 openknowledge-wiki 技能增量更新。</span></div>
+  </div>
+
+  <div class="panel">
+    <h3>② ok wiki status（与 ok 态完全同构，只看数字不说话）</h3>
+    <div class="term"><span class="p">$</span> ok wiki status
+分支:     feat/injection-cooldown
+落后:     23 commit（阈值 20，建议更新）
+条目:     15</div>
+  </div>
+
+  <div class="panel">
+    <h3>③ GUI 工具栏（无徽标，hover 才出 tooltip）</h3>
+    <div class="toolbar">
+      <span class="fake">项目: OpenKnowledge</span>
+      <span class="fake">分支: 全部</span>
+      <span class="muted">基准分支: master · 当前分支: <span class="tip">feat/injection-cooldown<span class="bubble">wiki 基线继承自 master@127cc01 · 落后 23 commit</span></span></span>
+    </div>
+    <p class="muted" style="font-size:12px;margin:8px 0 0">（上图 tooltip 为演示常显，实际仅 hover 出现；无基线/分叉仍用 <span class="branch-warn">橙色警示</span>）</p>
+  </div>
+</section>
+
+<div id="switcher">
+  <button id="prev" title="上一变体（←）">←</button>
+  <span class="lbl" id="lbl"></span>
+  <button id="next" title="下一变体（→）">→</button>
+</div>
+
+<script>
+  var VARIANTS = { A: "A — 内联徽标", B: "B — 状态卡 + 动作", C: "C — 静默派" };
+  var order = ["A", "B", "C"];
+  function cur() {
+    var v = new URLSearchParams(location.search).get("variant") || "A";
+    return VARIANTS[v] ? v : "A";
+  }
+  function show(v) {
+    order.forEach(function (k) { document.getElementById("v-" + k).hidden = k !== v; });
+    document.getElementById("lbl").textContent = VARIANTS[v];
+  }
+  function go(v) {
+    var p = new URLSearchParams(location.search); p.set("variant", v);
+    history.replaceState(null, "", "?" + p.toString());
+    show(v);
+  }
+  function step(d) {
+    var i = (order.indexOf(cur()) + d + order.length) % order.length;
+    go(order[i]);
+  }
+  document.getElementById("prev").onclick = function () { step(-1); };
+  document.getElementById("next").onclick = function () { step(1); };
+  document.addEventListener("keydown", function (e) {
+    var t = e.target;
+    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+    if (e.key === "ArrowLeft") step(-1);
+    if (e.key === "ArrowRight") step(1);
+  });
+  show(cur());
+</script>
+</body>
+</html>
