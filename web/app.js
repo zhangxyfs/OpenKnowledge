@@ -329,7 +329,9 @@
       b.textContent = "基准分支: " + base + " · 当前分支: ";
       var c = document.createElement("span");
       c.textContent = cur;
-      if (info.base_branch && info.current_branch && info.base_branch !== info.current_branch) {
+      // inherited 态由状态卡承接，当前分支不再加 branch-warn；无 branch_state 的旧后端行为不变
+      if (info.base_branch && info.current_branch && info.base_branch !== info.current_branch &&
+          info.branch_state !== "inherited") {
         c.className = "branch-warn";
       }
       el.appendChild(b); el.appendChild(c);
@@ -343,7 +345,49 @@
       } else {
         lineage.classList.add("hidden");
       }
+      // 分支上下文状态卡（变体 B）：fail-open，无 branch_state（旧后端/非 git/失败）或非 inherited → 隐藏，现状不变
+      var card = $("wiki-card");
+      if (card) {
+        if (info.branch_state === "inherited") {
+          var short = (info.last_commit || "").slice(0, 7);
+          var rows = [
+            ["基准分支", info.base_branch || "—"],
+            ["当前分支", info.current_branch || "—"],
+            ["基线", "继承自 " + (info.inherited_from || "—") + "@" + short],
+            ["落后", info.behind + " commit（阈值 " + (info.threshold || 20) + "）" + (info.stale ? "，建议更新" : "")],
+          ];
+          card.innerHTML = rows.map(function (r) {
+            return '<div class="row"><span class="k"></span><span class="v"></span></div>';
+          }).join("");
+          // 逐格填文本（textContent 防注入），再追加动作行
+          var rowEls = card.querySelectorAll(".row");
+          rows.forEach(function (r, i) {
+            rowEls[i].querySelector(".k").textContent = r[0];
+            rowEls[i].querySelector(".v").textContent = r[1];
+          });
+          var act = document.createElement("div");
+          act.className = "act";
+          act.innerHTML = '<button type="button" class="btn btn-primary" title="点击复制提示命令">在本分支更新 wiki</button>' +
+            '<button type="button" class="btn" title="点击复制提示命令">查看分支差异</button>';
+          var btns = act.querySelectorAll("button");
+          btns[0].onclick = function () { copyText("在 agent 会话运行 /openknowledge-wiki 更新本分支 wiki"); };
+          btns[1].onclick = function () { copyText("ok wiki diff"); };
+          card.appendChild(act);
+          card.classList.remove("hidden");
+          // 工具栏摘要：超阈值时在继承徽标上带落后数
+          if (info.stale) { c.textContent = cur + " "; var tag = document.createElement("span"); tag.className = "badge-inherit"; tag.textContent = "wiki 落后 " + info.behind; c.appendChild(tag); }
+        } else {
+          card.classList.add("hidden");
+        }
+      }
     }).catch(function () {});
+  }
+
+  // copyText 复制文本到剪贴板（无既有 toast 机制，按钮以 title 提示，失败静默）
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).catch(function () {});
+    }
   }
 
   // renderBranchFilter 按当前项目条目聚合分支选项（born ∪ scope；项目切换时重聚合，联动）
