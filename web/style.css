@@ -225,12 +225,8 @@ input:focus, select:focus, textarea:focus {
 .badge-born { background: #4E5D73; color: #ffffff; border-radius: 4px; padding: 1px 6px; font-size: 12px; white-space: nowrap; }
 .branch-warn { color: #b45309; font-weight: 600; }
 .merge-lineage { padding: 2px 4px; font-size: 12px; }
-/* 基线继承徽标（绿）与分支上下文状态卡（变体 B，inherited 态展示；卡片在 wiki-modal 弹窗内） */
+/* 基线继承徽标（变体 A，inherited 态展示在当前分支名后） */
 .badge-inherit { background: #e6f4ea; color: #1e7e34; border-radius: 4px; padding: 1px 6px; font-size: 12px; white-space: nowrap; }
-.wiki-card { font-size: 13px; }
-.wiki-card .row { display: flex; justify-content: space-between; padding: 3px 0; }
-.wiki-card .row .k { color: #8a8f9c; }
-.wiki-card .act { margin-top: 8px; display: flex; gap: 8px; }
 
 /* ---------- 引导页卡片 ---------- */
 

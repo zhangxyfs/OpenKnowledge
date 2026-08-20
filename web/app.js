@@ -328,11 +328,16 @@
       var b = document.createElement("span");
       b.textContent = "基准分支: " + base + " · 当前分支: ";
       var c = document.createElement("span");
-      c.textContent = cur;
-      // inherited 态由状态卡承接，当前分支不再加 branch-warn；无 branch_state 的旧后端行为不变
-      if (info.base_branch && info.current_branch && info.base_branch !== info.current_branch &&
-          info.branch_state !== "inherited") {
-        c.className = "branch-warn";
+      if (info.branch_state === "inherited") {
+        // 变体 A 内联徽标：inherited 态用中性绿徽标「继承基线」，不加警示色；
+        // 无 branch_state 的旧后端走 else，行为与旧版逐位一致
+        c.className = "badge-inherit";
+        c.textContent = cur + " · 继承基线";
+      } else {
+        c.textContent = cur;
+        if (info.base_branch && info.current_branch && info.base_branch !== info.current_branch) {
+          c.className = "branch-warn";
+        }
       }
       el.appendChild(b); el.appendChild(c);
       var lineage = $("merge-lineage");
@@ -345,70 +350,15 @@
       } else {
         lineage.classList.add("hidden");
       }
-      // 分支上下文状态卡（变体 B 弹窗版）：inherited 时填充卡片内容并显示工具栏
-      // 「wiki 基线」触发按钮（点击开 wiki-modal 弹窗）；其余情况隐藏按钮。
-      // fail-open：无 branch_state（旧后端/非 git/失败）→ 按钮隐藏，现状不变
-      var card = $("wiki-card");
-      var cardBtn = $("btn-wiki-card");
-      if (card && cardBtn) {
-        if (info.branch_state === "inherited") {
-          var short = (info.last_commit || "").slice(0, 7);
-          // 生成时间行：generated_at 缺失或零值（0001-01-01T...）显示 —；
-          // entry_count 缺失时只显示日期
-          var genAt = info.generated_at || "";
-          var genRow = "—";
-          if (genAt && genAt.indexOf("0001-01-01") !== 0) {
-            genRow = genAt.slice(0, 10);
-            if (info.entry_count) genRow += " · " + info.entry_count + " 条目";
-          }
-          var rows = [
-            ["基准分支", info.base_branch || "—"],
-            ["当前分支", info.current_branch || "—"],
-            ["基线", "继承自 " + (info.inherited_from || "—") + "@" + short],
-            ["落后", info.behind + " commit（阈值 " + (info.threshold || 20) + "）" + (info.stale ? "，建议更新" : "")],
-            ["wiki 生成于", genRow],
-          ];
-          card.innerHTML = rows.map(function (r) {
-            return '<div class="row"><span class="k"></span><span class="v"></span></div>';
-          }).join("");
-          // 逐格填文本（textContent 防注入），再追加动作行
-          var rowEls = card.querySelectorAll(".row");
-          rows.forEach(function (r, i) {
-            rowEls[i].querySelector(".k").textContent = r[0];
-            rowEls[i].querySelector(".v").textContent = r[1];
-          });
-          var act = document.createElement("div");
-          act.className = "act";
-          act.innerHTML = '<button type="button" class="btn btn-primary" title="点击复制提示命令">在本分支更新 wiki</button>' +
-            '<button type="button" class="btn" title="点击复制提示命令">查看分支差异</button>';
-          var btns = act.querySelectorAll("button");
-          btns[0].onclick = function () { copyText("在 agent 会话运行 /openknowledge-wiki 更新本分支 wiki", btns[0]); };
-          btns[1].onclick = function () { copyText("ok wiki diff", btns[1]); };
-          card.appendChild(act);
-          cardBtn.classList.remove("hidden");
-          // 工具栏摘要：超阈值时在继承徽标上带落后数
-          if (info.stale) { c.textContent = cur + " "; var tag = document.createElement("span"); tag.className = "badge-inherit"; tag.textContent = "wiki 落后 " + info.behind; c.appendChild(tag); }
-        } else {
-          cardBtn.classList.add("hidden");
-        }
+      // 工具栏摘要：inherited 且超阈值时追加落后徽标（与继承徽标同色，信息不阻断）
+      if (info.branch_state === "inherited" && info.stale) {
+        var tag = document.createElement("span");
+        tag.className = "badge-inherit";
+        tag.textContent = "wiki 落后 " + info.behind;
+        el.appendChild(document.createTextNode(" "));
+        el.appendChild(tag);
       }
     }).catch(function () {});
-  }
-
-  // copyText 复制文本到剪贴板；btn 传入时以其文案短暂变化作可见反馈（无既有 toast 机制）
-  function copyText(text, btn) {
-    var done = function (ok) {
-      if (!btn) return;
-      var old = btn.textContent;
-      btn.textContent = ok ? "已复制" : "复制失败";
-      btn.disabled = true;
-      setTimeout(function () { btn.textContent = old; btn.disabled = false; }, 1500);
-    };
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(false); });
-    } else {
-      done(false);
-    }
   }
 
   // renderBranchFilter 按当前项目条目聚合分支选项（born ∪ scope；项目切换时重聚合，联动）
@@ -650,14 +600,6 @@
     if (!changelogFromPending) return;
     changelogFromPending = false;
     api("/api/changelog/seen", { method: "POST" }).catch(function (err) { showError(err.message); });
-  });
-
-  // wiki 基线状态卡弹窗：工具栏「wiki 基线」按钮触发（按钮仅在 inherited 态可见）
-  $("btn-wiki-card").addEventListener("click", function () {
-    $("wiki-modal").classList.remove("hidden");
-  });
-  $("wiki-card-close").addEventListener("click", function () {
-    $("wiki-modal").classList.add("hidden");
   });
 
   $("btn-changelog").addEventListener("click", function () {
