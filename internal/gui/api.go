@@ -1324,7 +1324,10 @@ func (h *Handler) apiRetrieveSet(w http.ResponseWriter, r *http.Request) {
 }
 
 // apiProjectBranchInfo 返回项目的分支上下文：基准分支（wiki.json）、
-// 项目目录实际 checkout 分支、合并谱系（无谱系给 [] 便于前端）。
+// 项目目录实际 checkout 分支、合并谱系（无谱系给 [] 便于前端）；对找到项目
+// 路径的分支额外透传 CheckStatus 的 branch_state/inherited_from/behind/stale/
+// last_commit，以及生效游标（继承时为来源分支游标）的 generated_at/entry_count。
+// 全部 fail-open：git 失败时字段空/零值，配置加载失败阈值回退默认。
 func (h *Handler) apiProjectBranchInfo(w http.ResponseWriter, r *http.Request) {
 	name := r.URL.Query().Get("project")
 	st := resolveProject(w, name)
@@ -1342,7 +1345,35 @@ func (h *Handler) apiProjectBranchInfo(w http.ResponseWriter, r *http.Request) {
 	if reg, err := registry.Load(registry.DefaultPath()); err == nil {
 		for _, p := range reg.Projects {
 			if p.Name == name && len(p.Paths) > 0 {
-				out["current_branch"] = wiki.CurrentBranch(p.Paths[0])
+				path := p.Paths[0]
+				out["current_branch"] = wiki.CurrentBranch(path)
+				cfg, err := config.LoadMerged(st.ConfigPath(), filepath.Join(registry.Home(), "config.toml"))
+				if err != nil {
+					cfg = config.Default() // fail-open：阈值回退默认
+				}
+				ws := wiki.CheckStatus(st.StateDir(), path, cfg.Wiki.StaleCommits)
+				if ws.BranchState != "" {
+					out["branch_state"] = ws.BranchState
+				}
+				if ws.InheritedFrom != "" {
+					out["inherited_from"] = ws.InheritedFrom
+				}
+				out["behind"] = ws.Behind
+				out["stale"] = ws.Stale
+				if ws.LastCommit != "" {
+					out["last_commit"] = ws.LastCommit
+				}
+				// generated_at/entry_count 取实际生效游标：继承态为来源分支，否则当前分支
+				if s := wiki.LoadState(st.StateDir()); s != nil {
+					cursorBranch := ws.Branch
+					if ws.InheritedFrom != "" {
+						cursorBranch = ws.InheritedFrom
+					}
+					if cur, ok := s.Cursors[cursorBranch]; ok {
+						out["generated_at"] = cur.GeneratedAt
+						out["entry_count"] = cur.EntryCount
+					}
+				}
 				break
 			}
 		}

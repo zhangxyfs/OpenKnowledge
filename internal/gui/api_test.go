@@ -14,10 +14,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"openknowledge/internal/agentx"
 	"openknowledge/internal/entry"
 	"openknowledge/internal/registry"
+	"openknowledge/internal/wiki"
 )
 
 const testToken = "0123456789abcdef0123456789abcdef"
@@ -71,8 +73,9 @@ func mkProject(t *testing.T, okHome, name string) {
 	}
 }
 
-// mkGitProject 注册一个项目，其注册路径指向新建的临时 git 仓库（master，1 个提交）。
-func mkGitProject(t *testing.T, okHome, name string) {
+// mkGitProject 注册一个项目，其注册路径指向新建的临时 git 仓库（master，1 个提交），
+// 返回仓库路径。
+func mkGitProject(t *testing.T, okHome, name string) string {
 	t.Helper()
 	repo := t.TempDir()
 	runGit := func(args ...string) {
@@ -95,6 +98,7 @@ func mkGitProject(t *testing.T, okHome, name string) {
 	if err := os.MkdirAll(filepath.Join(okHome, "projects", name, "knowledge"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	return repo
 }
 
 // do 发请求并按需带令牌与 JSON body，返回状态码与响应体。
@@ -1080,6 +1084,61 @@ func TestBranchInfoAPI(t *testing.T) {
 	}
 	if !strings.Contains(string(data), `"merges":[]`) {
 		t.Errorf("无谱系时 merges 应为 []: %s", data)
+	}
+
+	// 继承场景：git 项目 master 有游标，checkout 出 dev（无本分支游标）后
+	// 应透传 branch_state=inherited / inherited_from=master / behind 数字。
+	repo := mkGitProject(t, okHome, "wikidev")
+	gitOut := func(args ...string) string {
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	masterHead := gitOut("rev-parse", "master")
+	gitOut("checkout", "-b", "dev")
+	gitOut("commit", "--allow-empty", "-m", "c2")
+
+	devStateDir := filepath.Join(okHome, "projects", "wikidev", "state")
+	genAt := time.Date(2026, 8, 10, 0, 0, 0, 0, time.UTC)
+	if err := wiki.SaveState(devStateDir, &wiki.State{
+		BaseBranch: "master",
+		Cursors: map[string]wiki.BranchCursor{
+			"master": {LastCommit: masterHead, GeneratedAt: genAt, EntryCount: 7},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	code, data = do(t, "GET", srv.URL+"/api/project/branch-info?project=wikidev", testToken, nil)
+	if code != 200 {
+		t.Fatalf("wikidev branch-info: status = %d, body %s", code, data)
+	}
+	body = nil
+	if err := json.Unmarshal(data, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["branch_state"] != "inherited" {
+		t.Errorf("branch_state 应为 inherited: %v", body)
+	}
+	if body["inherited_from"] != "master" {
+		t.Errorf("inherited_from 应为 master: %v", body)
+	}
+	if behind, ok := body["behind"].(float64); !ok || behind != 1 {
+		t.Errorf("behind 应为数字 1: %v", body["behind"])
+	}
+	if body["current_branch"] != "dev" {
+		t.Errorf("current_branch 应为 dev: %v", body)
+	}
+	if ec, ok := body["entry_count"].(float64); !ok || ec != 7 {
+		t.Errorf("entry_count 应为继承来源游标的 7: %v", body["entry_count"])
+	}
+	if body["generated_at"] == nil {
+		t.Errorf("应含 generated_at: %v", body)
 	}
 }
 
