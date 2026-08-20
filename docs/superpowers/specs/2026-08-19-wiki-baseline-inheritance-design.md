@@ -23,7 +23,7 @@
 | stale 门控 | **走正常门控**：inherited 态 `Behind`/`Stale` 照常计算，超 `stale_commits` 阈值即提醒（提醒并入上下文行，见 §4）；接受反向合并导致 behind 虚高（分支感知 spec §7.3 已接受同类口径） |
 | 落盘 | **不落盘**：继承只是检测态，`wiki.json` 零变更、零迁移 |
 | 触发方式 | 否决 git hook（侵入用户仓库、IDE/worktree 路径漏网）；否决惰性落盘（打破 CheckStatus 只读铁律、污染游标表） |
-| 展示层 | **变体 B 状态卡**（原型 `web/prototype-wiki-inherited.html`，2026-08-19 用户选定）：hook 一行带落后数、CLI 键值块、GUI 状态卡 + 动作入口；否决 A 内联徽标（信息不足）与 C 静默派（继承无存在感，违背「让落后可见」的初衷） |
+| 展示层 | **变体 A 内联徽标**（2026-08-19 试用后终稿）：当前分支名后加中性绿徽标「继承基线」，超阈值另加「wiki 落后 N」；**变体 B 状态卡曾实现并打包试用，被否决**——动作按钮只能是「复制命令」的假功能，信息增益不抵复杂度；C 静默派否决（继承无存在感，违背「让落后可见」的初衷） |
 
 ## 3. 检测层（internal/wiki，保持只读）
 
@@ -38,7 +38,7 @@
 
 **git 调用预算**：继承命中路径 = symbolic-ref + merge-base（基准短路）+ rev-list = 3 次，与 ok 路径持平；基准不可达才遍历其余游标，上限受游标表大小约束（常态 1-2 条）。
 
-## 4. 注入行为（internal/hook，按变体 B 一行带数字）
+## 4. 注入行为（internal/hook，上下文行带落后数）
 
 - `wikiContextLine` 新增 `inherited` 分支：
   - 未超阈值：`[OpenKnowledge] wiki 基于 master@abc1234；当前分支 feat/x 继承该基线，结构描述以 master 为准。`
@@ -46,16 +46,13 @@
 - **去重**：inherited 且 Stale 时 `wikiNudge` 的 stale 分支跳过（提醒已并入上下文行，避免同语义两行）；未超阈值不涉及 nudge。`no_cursor` 路径行为不变。
 - `no_cursor` 文案保留，仅服务「所有游标不可达」的真无基线场景。
 
-## 5. CLI 与 GUI 展示（展示层定稿：变体 B 状态卡，原型 `web/prototype-wiki-inherited.html` 2026-08-19 用户选定）
+## 5. CLI 与 GUI 展示（展示层终稿：变体 A 内联徽标，原型 `web/prototype-wiki-inherited.html` 变体 A）
 
-- `ok wiki status`：`inherited` 用键值块单列继承来源——
-  `基线: 继承自 master@127cc01（2026-08-12 生成，15 条目）`，落后行在超阈值时附「→ 建议在本分支运行 /openknowledge-wiki」。
-  实现时再定界：status 输出为 JSON，CLI 层只做字段透传，键值块呈现由消费侧（GUI 状态卡）承担。
-- GUI 分支上下文从一行文字升级为**状态卡**（`apiProjectBranchInfo` + `renderBranchInfo`）：
-  - 端点增加 `branch_state`、`behind`、`last_commit`、`generated_at`、`entry_count` 透传（调 `CheckStatus`；本地 daemon 页面加载频次低，git 调用可接受；失败 fail-open 不显示卡片，退回现状一行文字）。
-  - 工具栏摘要：当前分支 + 超阈值时加 `wiki 落后 N` 徽标（`badge-inherit` 中性绿色，无基线/分叉维持 `branch-warn` 橙）。
-  - 卡片内容：基准分支 / 当前分支 / 基线（继承自 <分支>@<short>）/ wiki 生成时间·条目数 / 落后 N commit（阈值 M）。
-  - 动作入口两键：「在本分支更新 wiki」点击复制引导文案（提示在 agent 会话运行 `/openknowledge-wiki`，一期不在 GUI 直接触发生成）；「查看分支差异」跳转/提示 `ok wiki diff`。
+- `ok wiki status`：`inherited` 输出新增 `branch_state`/`inherited_from` 透传（status 输出为 JSON，CLI 层只做字段透传，呈现由消费侧承担）。
+- GUI 分支上下文**内联徽标**（`apiProjectBranchInfo` + `renderBranchInfo`，工具栏现状布局不动）：
+  - 端点增加 `branch_state`、`behind`、`last_commit`、`generated_at`、`entry_count` 透传（调 `CheckStatus`；本地 daemon 页面加载频次低，git 调用可接受；失败 fail-open 不显示徽标，退回现状一行文字）。
+  - inherited 态：当前分支渲染为中性绿徽标「<分支> · 继承基线」（`badge-inherit`）；超阈值时另追加同色徽标「wiki 落后 N」。无基线/分叉维持 `branch-warn` 橙。
+  - 备注：变体 B 状态卡（弹窗 + 「在本分支更新 wiki」「查看分支差异」两按钮）曾实现并打包试用（`8618948`/`2ca4fbc`），因动作按钮只能是复制命令的假功能被试用否决，已回退为内联徽标（`0044b84`）。
 
 ## 6. 与分支差异条目（v2.7 已落地）的边界
 
@@ -89,5 +86,5 @@
 3. 分支从游离历史切出（无游标可达）：仍为「尚无基线」
 4. 基准分支上注入与现状逐字节一致
 5. `wiki.json` 在整个继承路径中零写入
-6. GUI 状态卡正确展示继承来源与落后数；CheckStatus 失败时回退现状一行文字
+6. GUI 内联徽标正确展示继承态与落后数；CheckStatus 失败时回退现状一行文字
 7. 全量测试绿
