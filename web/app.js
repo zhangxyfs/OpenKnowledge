@@ -350,11 +350,20 @@
       if (card) {
         if (info.branch_state === "inherited") {
           var short = (info.last_commit || "").slice(0, 7);
+          // 生成时间行：generated_at 缺失或零值（0001-01-01T...）显示 —；
+          // entry_count 缺失时只显示日期
+          var genAt = info.generated_at || "";
+          var genRow = "—";
+          if (genAt && genAt.indexOf("0001-01-01") !== 0) {
+            genRow = genAt.slice(0, 10);
+            if (info.entry_count) genRow += " · " + info.entry_count + " 条目";
+          }
           var rows = [
             ["基准分支", info.base_branch || "—"],
             ["当前分支", info.current_branch || "—"],
             ["基线", "继承自 " + (info.inherited_from || "—") + "@" + short],
             ["落后", info.behind + " commit（阈值 " + (info.threshold || 20) + "）" + (info.stale ? "，建议更新" : "")],
+            ["wiki 生成于", genRow],
           ];
           card.innerHTML = rows.map(function (r) {
             return '<div class="row"><span class="k"></span><span class="v"></span></div>';

@@ -1326,7 +1326,7 @@ func (h *Handler) apiRetrieveSet(w http.ResponseWriter, r *http.Request) {
 // apiProjectBranchInfo 返回项目的分支上下文：基准分支（wiki.json）、
 // 项目目录实际 checkout 分支、合并谱系（无谱系给 [] 便于前端）；对找到项目
 // 路径的分支额外透传 CheckStatus 的 branch_state/inherited_from/behind/stale/
-// last_commit，以及生效游标（继承时为来源分支游标）的 generated_at/entry_count。
+// threshold/last_commit，以及生效游标（继承时为来源分支游标）的 generated_at/entry_count。
 // 全部 fail-open：git 失败时字段空/零值，配置加载失败阈值回退默认。
 func (h *Handler) apiProjectBranchInfo(w http.ResponseWriter, r *http.Request) {
 	name := r.URL.Query().Get("project")
@@ -1360,6 +1360,7 @@ func (h *Handler) apiProjectBranchInfo(w http.ResponseWriter, r *http.Request) {
 				}
 				out["behind"] = ws.Behind
 				out["stale"] = ws.Stale
+				out["threshold"] = ws.Threshold
 				if ws.LastCommit != "" {
 					out["last_commit"] = ws.LastCommit
 				}

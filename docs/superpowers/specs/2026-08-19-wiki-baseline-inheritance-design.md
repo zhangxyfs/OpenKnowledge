@@ -50,6 +50,7 @@
 
 - `ok wiki status`：`inherited` 用键值块单列继承来源——
   `基线: 继承自 master@127cc01（2026-08-12 生成，15 条目）`，落后行在超阈值时附「→ 建议在本分支运行 /openknowledge-wiki」。
+  实现时再定界：status 输出为 JSON，CLI 层只做字段透传，键值块呈现由消费侧（GUI 状态卡）承担。
 - GUI 分支上下文从一行文字升级为**状态卡**（`apiProjectBranchInfo` + `renderBranchInfo`）：
   - 端点增加 `branch_state`、`behind`、`last_commit`、`generated_at`、`entry_count` 透传（调 `CheckStatus`；本地 daemon 页面加载频次低，git 调用可接受；失败 fail-open 不显示卡片，退回现状一行文字）。
   - 工具栏摘要：当前分支 + 超阈值时加 `wiki 落后 N` 徽标（`badge-inherit` 中性绿色，无基线/分叉维持 `branch-warn` 橙）。

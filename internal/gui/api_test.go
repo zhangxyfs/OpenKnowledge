@@ -1087,7 +1087,8 @@ func TestBranchInfoAPI(t *testing.T) {
 	}
 
 	// 继承场景：git 项目 master 有游标，checkout 出 dev（无本分支游标）后
-	// 应透传 branch_state=inherited / inherited_from=master / behind 数字。
+	// 应透传 branch_state=inherited / inherited_from=master / behind 数字 /
+	// threshold（默认 20）/ stale / last_commit（继承来源游标 commit）。
 	repo := mkGitProject(t, okHome, "wikidev")
 	gitOut := func(args ...string) string {
 		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
@@ -1130,6 +1131,15 @@ func TestBranchInfoAPI(t *testing.T) {
 	}
 	if behind, ok := body["behind"].(float64); !ok || behind != 1 {
 		t.Errorf("behind 应为数字 1: %v", body["behind"])
+	}
+	if th, ok := body["threshold"].(float64); !ok || th != 20 {
+		t.Errorf("threshold 应为默认 20: %v", body["threshold"])
+	}
+	if stale, ok := body["stale"].(bool); !ok || stale {
+		t.Errorf("behind=1 < 阈值 20，stale 应为 false: %v", body["stale"])
+	}
+	if body["last_commit"] != masterHead {
+		t.Errorf("last_commit 应为继承来源游标 commit: %v", body["last_commit"])
 	}
 	if body["current_branch"] != "dev" {
 		t.Errorf("current_branch 应为 dev: %v", body)

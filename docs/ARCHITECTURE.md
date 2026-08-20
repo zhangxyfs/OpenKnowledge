@@ -411,7 +411,7 @@ openknowledge-wiki 技能（AI 驱动）
 ok wiki status
   → git rev-list --count <游标>..HEAD 得落后计数（无游标按全历史；git 不可用 behind=-1）
   → 与 [wiki] stale_commits 阈值（默认 20，0=关闭）比较得出 stale
-  → 输出附 branch/base_branch/branch_state（ok/no_cursor/diverged/gone/legacy_orphan）
+  → 输出附 branch/base_branch/branch_state（ok/inherited/no_cursor/diverged/gone/legacy_orphan；inherited = 读时继承可达游标）
 
 ok wiki base [分支名]
   → 无参查看基准分支；带参设置并落盘
@@ -690,7 +690,7 @@ go build ./...         # 编译检查
 | `ok approve <文件>` | 批准草稿转正 | draft=false 并同步 INDEX 与向量；非草稿/缺文件报错 |
 | `ok backfill-born` | 回填存量条目 born 标签 | 按当前分支给无 born 的条目补 `born:<分支>`；预览确认后写入，已有值不覆盖；非 git 项目报错 |
 | `ok capture [propose\|auto]` | 查看/切换沉淀模式 | 无参打印当前模式与 turn_interval；带参写项目 `[capture]` 小节（幂等替换） |
-| `ok wiki status` / `ok wiki mark [commit]` / `ok wiki base [分支名]` | wiki 游标管理 | `status` 输出 JSON（has_wiki/behind/stale/threshold + branch/base_branch/branch_state，git 不可用 behind=-1）；`mark` 记游标（缺省 HEAD，按当前分支记录）并统计 wiki 条目数；`base` 查看/设置基准分支 |
+| `ok wiki status` / `ok wiki mark [commit]` / `ok wiki base [分支名]` | wiki 游标管理 | `status` 输出 JSON（has_wiki/behind/stale/threshold + branch/base_branch/branch_state：ok/inherited/no_cursor/diverged/gone/legacy_orphan，inherited = 读时继承可达游标；git 不可用 behind=-1）；`mark` 记游标（缺省 HEAD，按当前分支记录）并统计 wiki 条目数；`base` 查看/设置基准分支 |
 | `ok search <词>` | 检索预览 | 命令行输出打分排序（调试用） |
 | `ok index` | 同步索引库 | 增量同步 kb.db 并重建 INDEX.md、打印条目数（无 key 时向量跳过，退出码 1） |
 | `ok list` | 列出项目与条目 | `*` 标记 mandatory |
