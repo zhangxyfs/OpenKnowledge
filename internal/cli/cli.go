@@ -873,6 +873,9 @@ func WikiCmd(args []string, stdout, stderr io.Writer) int {
 		if st.BranchState != "" {
 			out["branch_state"] = st.BranchState
 		}
+		if st.InheritedFrom != "" {
+			out["inherited_from"] = st.InheritedFrom
+		}
 		if st.MergeBase != "" {
 			out["merge_base"] = st.MergeBase
 		}

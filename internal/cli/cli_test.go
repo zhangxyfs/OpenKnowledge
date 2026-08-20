@@ -767,6 +767,36 @@ func TestWikiStatusMergedBranches(t *testing.T) {
 	}
 }
 
+// ok wiki status：本分支无游标但基准游标可达 → branch_state=inherited + inherited_from。
+func TestWikiStatusInheritedFrom(t *testing.T) {
+	repo, stateDir := setupWikiProject(t)
+	masterTip, err := wiki.HeadCommit(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "checkout", "-q", "-b", "dev")
+	runGit(t, repo, "commit", "--allow-empty", "-m", "d1")
+	if err := wiki.SaveState(stateDir, &wiki.State{BaseBranch: "master", Cursors: map[string]wiki.BranchCursor{
+		"master": {LastCommit: masterTip},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	if code := WikiCmd([]string{"status"}, &out, &errb); code != 0 {
+		t.Fatalf("status exit %d err=%q", code, errb.String())
+	}
+	var st map[string]any
+	if err := json.Unmarshal(out.Bytes(), &st); err != nil {
+		t.Fatal(err)
+	}
+	if st["branch_state"] != "inherited" || st["inherited_from"] != "master" {
+		t.Fatalf("应透传 inherited/inherited_from: %v", st)
+	}
+	if st["behind"].(float64) != 1 {
+		t.Errorf("behind 应为 1: %v", st)
+	}
+}
+
 // writeBody 写一个临时正文文件并返回路径。
 func writeBody(t *testing.T, dir, content string) string {
 	t.Helper()
