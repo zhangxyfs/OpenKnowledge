@@ -13,20 +13,27 @@ import (
 )
 
 var binPath string
+var okdPath string
 
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "ok-bin")
 	if err != nil {
 		panic(err)
 	}
-	name := "ok"
+	name, okdName := "ok", "okd"
 	if runtime.GOOS == "windows" {
-		name = "ok.exe"
+		name, okdName = "ok.exe", "okd.exe"
 	}
 	binPath = filepath.Join(dir, name)
+	okdPath = filepath.Join(dir, okdName)
 	build := exec.Command("go", "build", "-o", binPath, ".")
 	if out, err := build.CombinedOutput(); err != nil {
-		panic(fmt.Sprintf("build failed: %v\n%s", err, out))
+		panic(fmt.Sprintf("build ok failed: %v\n%s", err, out))
+	}
+	// 同目录提供 okd：spawn 走三 exe 拆分路径（daemonTarget 命中同目录 okd）
+	build = exec.Command("go", "build", "-o", okdPath, "../okd")
+	if out, err := build.CombinedOutput(); err != nil {
+		panic(fmt.Sprintf("build okd failed: %v\n%s", err, out))
 	}
 	code := m.Run()
 	_ = os.RemoveAll(dir)
