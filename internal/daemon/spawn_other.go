@@ -8,13 +8,13 @@ import (
 	"syscall"
 )
 
-func spawnDetached(exe, logPath string) error {
+func spawnDetached(exe string, args []string, logPath string) error {
 	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	cmd := exec.Command(exe, "daemon")
+	cmd := exec.Command(exe, args...)
 	cmd.Stdout, cmd.Stderr = f, f
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {

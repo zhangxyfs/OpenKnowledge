@@ -18,7 +18,7 @@ func stubSpawn(t *testing.T) *int {
 	t.Helper()
 	calls := new(int)
 	old := SpawnDetached
-	SpawnDetached = func(exe, logPath string) error { *calls++; return nil }
+	SpawnDetached = func(exe string, args []string, logPath string) error { *calls++; return nil }
 	t.Cleanup(func() { SpawnDetached = old })
 	return calls
 }
