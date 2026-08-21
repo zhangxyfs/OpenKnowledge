@@ -14,6 +14,10 @@ contents:
     dst: /usr/lib/openknowledge/ok
     file_info:
       mode: 0755
+  - src: dist/linux-amd64/okd
+    dst: /usr/lib/openknowledge/okd
+    file_info:
+      mode: 0755
   - src: dist/linux-amd64/web/
     dst: /usr/lib/openknowledge/web/
   - src: dist/linux-amd64/changelogs/

@@ -34,21 +34,23 @@ Name: "addpath"; Description: "将安装目录加入用户 PATH（终端可直�
 
 [Files]
 Source: "..\dist\ok.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dist\okd.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dist\OkManager.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\dist\web\*"; DestDir: "{app}\web"; Flags: ignoreversion recursesubdirs
 Source: "..\dist\changelogs\*"; DestDir: "{app}\changelogs"; Flags: ignoreversion recursesubdirs
 Source: "..\dist\runtime\*"; DestDir: "{app}\runtime"; Flags: ignoreversion recursesubdirs
 Source: "assets\logo.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\OpenKnowledge 知识库"; Filename: "{app}\ok.exe"; IconFilename: "{app}\logo.ico"; Comment: "打开 OpenKnowledge 管理界面"
+Name: "{group}\OpenKnowledge 知识库"; Filename: "{app}\OkManager.exe"; IconFilename: "{app}\logo.ico"; Comment: "打开 OpenKnowledge 配置中心"
 Name: "{group}\卸载 OpenKnowledge"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\OpenKnowledge 知识库"; Filename: "{app}\ok.exe"; IconFilename: "{app}\logo.ico"; Tasks: desktopicon
+Name: "{autodesktop}\OpenKnowledge 知识库"; Filename: "{app}\OkManager.exe"; IconFilename: "{app}\logo.ico"; Tasks: desktopicon
 
 [Registry]
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "OpenKnowledge"; ValueData: """{app}\ok.exe"" daemon"; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "OpenKnowledge"; ValueData: """{app}\okd.exe"""; Flags: uninsdeletevalue
 
 [Run]
-Filename: "{app}\ok.exe"; Description: "打开 OpenKnowledge 管理界面（引导页可一键完成 hooks / 技能 / embedding 配置）"; Flags: postinstall skipifsilent unchecked
+Filename: "{app}\OkManager.exe"; Description: "打开 OpenKnowledge 配置中心（引导页可一键完成 hooks / 技能 / embedding 配置）"; Flags: postinstall skipifsilent unchecked
 
 [Code]
 const
@@ -125,8 +127,8 @@ var
   ResultCode: Integer;
 begin
   if CurStep = ssInstall then
-    { 文件拷贝前停常驻 daemon（hooks 会按需自动拉起它锁住 ok.exe；不存在则 Exec 失败无害） }
-    Exec(ExpandConstant('{app}\ok.exe'), 'daemon stop', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    { 文件拷贝前停常驻 daemon（hooks 会按需自动拉起它锁住 okd.exe；不存在则 Exec 失败无害） }
+    Exec(ExpandConstant('{app}\okd.exe'), 'stop', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   if (CurStep = ssPostInstall) and WizardIsTaskSelected('addpath') then
     AddToUserPath(ExpandConstant('{app}'));
 end;
@@ -138,8 +140,8 @@ var
 begin
   if CurUninstallStep = usUninstall then
   begin
-    { 文件删除前停常驻 daemon（不存在则 ok.exe 立即返回 0，无害） }
-    Exec(ExpandConstant('{app}\ok.exe'), 'daemon stop', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    { 文件删除前停常驻 daemon（不存在则 okd.exe 立即返回 0，无害） }
+    Exec(ExpandConstant('{app}\okd.exe'), 'stop', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   end;
   if CurUninstallStep = usPostUninstall then
   begin
