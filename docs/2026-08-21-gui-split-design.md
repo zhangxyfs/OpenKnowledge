@@ -1,6 +1,6 @@
 # GUI 分离方案：ok / okd / OkManager 三进程架构
 
-日期：2026-08-21 · 分支：`feat/gui-split` · 状态：已定稿，待实施
+日期：2026-08-21 · 分支：`feat/gui-split` · 状态：已实施
 
 UI 原型：`web/prototype-manager-v2.html`（功能面以此为准）
 

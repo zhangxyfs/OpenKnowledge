@@ -41,6 +41,7 @@ def main():
     data = tarfile.open(fileobj=io.BytesIO(m["data.tar.gz"]), mode="r:gz")
     names = {n.lstrip("./") for n in data.getnames()}
     for need in ("usr/lib/openknowledge/ok",
+                 "usr/lib/openknowledge/okd",
                  "usr/lib/openknowledge/web/index.html",
                  "usr/bin/ok"):
         if need not in names:

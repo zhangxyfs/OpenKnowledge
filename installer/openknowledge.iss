@@ -127,8 +127,14 @@ var
   ResultCode: Integer;
 begin
   if CurStep = ssInstall then
-    { 文件拷贝前停常驻 daemon（hooks 会按需自动拉起它锁住 okd.exe；不存在则 Exec 失败无害） }
-    Exec(ExpandConstant('{app}\okd.exe'), 'stop', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  begin
+    { 文件拷贝前停常驻 daemon：新版目标是 okd.exe stop；从旧版（无 okd.exe 的单 exe 部署）
+      升级时回退旧二进制的 ok.exe daemon stop；两者都不在则跳过无害 }
+    if FileExists(ExpandConstant('{app}\okd.exe')) then
+      Exec(ExpandConstant('{app}\okd.exe'), 'stop', '', SW_HIDE, ewWaitUntilTerminated, ResultCode)
+    else if FileExists(ExpandConstant('{app}\ok.exe')) then
+      Exec(ExpandConstant('{app}\ok.exe'), 'daemon stop', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
   if (CurStep = ssPostInstall) and WizardIsTaskSelected('addpath') then
     AddToUserPath(ExpandConstant('{app}'));
 end;

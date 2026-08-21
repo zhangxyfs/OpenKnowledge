@@ -666,7 +666,7 @@ bash scripts/build-linux.sh   # Linux 发布：tar + deb（含 runtime/）
 ### 12.2 常用开发命令
 
 ```bash
-go test ./...          # 全部测试（15 包）
+go test ./...          # 全部测试（33 包）
 go vet ./...           # 静态检查
 go build ./...         # 编译检查
 ```
@@ -712,7 +712,7 @@ go build ./...         # 编译检查
 - **端到端测试**（`tests/e2e/`，integration/daemon/wiki 共 3 个文件）：`TestMain` 编译真实二进制，驱动完整流程——init → add → 首次提问基础注入 → 二次提问不重复 → 手改条目后 hook 查询前增量同步命中并重建 INDEX → enforce 阻断一次后放行 → 未注册目录静默 → 开关 off/on
 - **隔离保证**：`OK_HOME` + `KIMI_CODE_HOME` + `OK_SKILLS_HOME` 指向 `t.TempDir()`，`OPENAI_API_KEY` 置空，全程零网络
 
-运行：`go test ./... -v`（15 包全绿）；`go vet ./...` 干净。
+运行：`go test ./... -v`（33 包全绿）；`go vet ./...` 干净。
 
 ### 14.2 真实环境验证（曾执行的手动验收）
 

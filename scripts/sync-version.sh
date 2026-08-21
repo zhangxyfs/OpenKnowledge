@@ -24,14 +24,15 @@ done
 # exe 版本资源（winres.json）：bump 时易漏（v2.9.0 起曾停在 2.8.0.0 直至 2.16.0 发现），
 # 四段式 = 三段版本号 + ".0"
 VERSION4="${VERSION}.0"
-f=cmd/ok/winres.json
-if grep -q "\"file_version\": \"${VERSION4}\"" "$f" && grep -q "\"product_version\": \"${VERSION4}\"" "$f"; then
-  echo "$f: 已是 ${VERSION4}，无需变更"
-else
-  # 分隔符必须避开分组 alternation 的 "|"（曾因此报 unknown option to `s' 且更新被跳过）
-  sed -i -E "s~\"(file_version|product_version)\": \"[0-9.]+\"~\"\1\": \"${VERSION4}\"~g" "$f"
-  echo "$f: 版本资源 → ${VERSION4}"
-fi
+for f in cmd/ok/winres.json cmd/okd/winres.json cmd/okmanager/winres.json; do
+  if grep -q "\"file_version\": \"${VERSION4}\"" "$f" && grep -q "\"product_version\": \"${VERSION4}\"" "$f"; then
+    echo "$f: 已是 ${VERSION4}，无需变更"
+  else
+    # 分隔符必须避开分组 alternation 的 "|"（曾因此报 unknown option to `s' 且更新被跳过）
+    sed -i -E "s~\"(file_version|product_version)\": \"[0-9.]+\"~\"\1\": \"${VERSION4}\"~g" "$f"
+    echo "$f: 版本资源 → ${VERSION4}"
+  fi
+done
 
 # 官网：VER 变量、Release 直链、安装/下载文案里的版本号
 # 覆盖 site/index.html（VER + 直链 + version 徽标）、site/changelog.html（下载按钮文案）、
