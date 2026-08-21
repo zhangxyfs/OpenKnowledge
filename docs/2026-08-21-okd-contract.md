@@ -5,7 +5,7 @@
 ## 实例凭证
 
 - 路径：`~/.openknowledge/daemon.json`（`OK_HOME` 环境变量可覆盖根目录）
-- 内容：`{"pid":int,"port":int,"token":"hex16","fingerprint":"路径|size|mtimeUnixNano","started_at":"RFC3339"}`
+- 内容：`{"pid":int,"port":int,"token":"hex（16 字节随机，32 字符）","fingerprint":"路径|size|mtimeUnixNano","started_at":"RFC3339"}`
 - 写入：okd 启动时原子写（tmp+rename），权限 0600；退出时仅当 PID 仍是自己才删除
 - 端口：首选 17888；被占且已有健康 okd 则新实例直接退出；否则回退随机端口并写回本文件
 

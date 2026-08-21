@@ -10,7 +10,7 @@ UI 原型：`web/prototype-manager-v2.html`（功能面以此为准）
 
 目标：拆成三个进程，各管一摊，单一写者：
 
-- **ok.exe**（console 子系统）：CLI + hook 入口，全部写操作转发给 okd，是 okd 的客户端
+- **ok.exe**（console 子系统）：CLI + hook 入口；hook 事件转发 okd（本地 fallback 例外），CLI 写操作直接写文件（多写者 + mtime sync，见 §4.1）
 - **okd.exe**（windowsgui 子系统）：唯一写者。管理 API + 托盘 + sidecar 托管 + Web 静态页分发
 - **OkManager.exe**（windowsgui 子系统）：配置中心入口，薄启动器，不含业务逻辑
 
@@ -35,12 +35,12 @@ UI 原型：`web/prototype-manager-v2.html`（功能面以此为准）
 
 消费方：ok.exe（Go）、OkManager.exe（Go，未来可能 C++ 重写）。
 
-- **实例凭证**：`~/.openknowledge/daemon.json`（`internal/daemonx`，原子写入、0600），字段 `port` / `token` / `pid`；首选端口 17888，被占回退随机端口并写回
+- **实例凭证**：`~/.openknowledge/daemon.json`（`internal/daemonx`，原子写入、0600），字段 `port` / `token` / `pid` / `fingerprint` / `started_at`；首选端口 17888，被占回退随机端口并写回
 - **健康检查**：`GET http://127.0.0.1:<port>/…`，请求头 `X-Ok-Token: <token>`
 - **管理 API**：现有 `internal/gui/api.go` 全部端点，token 认证保留
 - **拉起参数**：okd 无参数启动即服务（日志写 `daemon.log`，按行带时间戳——现有行为保留）
 
-契约需单独落成文档（参考 OpenViking README 的"运行契约"写法），作为 C++ 版 OkManager 或第三方客户端的依据。
+契约已落成文档：`docs/2026-08-21-okd-contract.md`（跨语言消费方——如未来 C++ 版 OkManager——的唯一契约依据，改动需同步全部消费方）。
 
 ## 4. 各 exe 设计
 
@@ -95,7 +95,7 @@ UI 原型：`web/prototype-manager-v2.html`（功能面以此为准）
 ## 7. 实施步骤（按依赖序）
 
 1. `cmd/okd`：搬 daemon+gui，加托盘，`-H windowsgui`，跑通独立驻留
-2. ok.exe 削薄：写操作全量转发 okd；拿掉 daemon/gui 子命令；hook fallback 保留并补注释
+2. ok.exe 标注：daemon/gui 子命令保留（daemon 隐藏弃用，作 spawn 回退；daemon stop 为安装器在用的客户端操作）；hook fallback 保留并补注释
 3. `cmd/okmanager`：Go 薄启动器
 4. 配置中心：按原型重写 `web/`（功能面与 CLI 对齐）
 5. 构建/安装包：scripts/build-dist.sh 出三 exe；installer 加快捷方式（指向 OkManager.exe）；版本号/winres 同步
