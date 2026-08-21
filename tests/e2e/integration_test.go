@@ -1,4 +1,4 @@
-package main
+package e2e
 
 import (
 	"bytes"
@@ -26,12 +26,12 @@ func TestMain(m *testing.M) {
 	}
 	binPath = filepath.Join(dir, name)
 	okdPath = filepath.Join(dir, okdName)
-	build := exec.Command("go", "build", "-o", binPath, ".")
+	build := exec.Command("go", "build", "-o", binPath, "openknowledge/cmd/ok")
 	if out, err := build.CombinedOutput(); err != nil {
 		panic(fmt.Sprintf("build ok failed: %v\n%s", err, out))
 	}
 	// 同目录提供 okd：spawn 走三 exe 拆分路径（daemonTarget 命中同目录 okd）
-	build = exec.Command("go", "build", "-o", okdPath, "../okd")
+	build = exec.Command("go", "build", "-o", okdPath, "openknowledge/cmd/okd")
 	if out, err := build.CombinedOutput(); err != nil {
 		panic(fmt.Sprintf("build okd failed: %v\n%s", err, out))
 	}
