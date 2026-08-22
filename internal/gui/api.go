@@ -1570,6 +1570,8 @@ func (h *Handler) apiProjectReadmeAsset(w http.ResponseWriter, r *http.Request) 
 	}
 	w.Header().Set("Content-Type", ctype)
 	w.Header().Set("Cache-Control", "no-cache")
+	// svg 直开（地址栏/新标签）时脚本会执行，CSP 禁脚本兜底硬化
+	w.Header().Set("Content-Security-Policy", "script-src 'none'")
 	_, _ = w.Write(data)
 }
 
