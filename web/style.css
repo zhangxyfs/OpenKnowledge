@@ -84,13 +84,23 @@ button { font:inherit; color:inherit; }
           width:calc(100% - 20px); background:var(--bg); color:var(--fg); font-size:12.5px; }
 .search::placeholder { color:var(--muted); }
 .tree-scroll { overflow-y:auto; flex:1; padding:0 6px 10px; }
-.tn-proj { display:flex; align-items:center; gap:5px; width:100%; border:none; background:none;
-           padding:5px 8px; border-radius:6px; cursor:pointer; font-weight:600; text-align:left; font-size:13px; }
-.tn-proj:hover { background:var(--hover); }
-.tn-proj .caret { width:12px; color:var(--muted); transition:transform .12s; flex:none; font-size:10px; }
+/* 项目行双热区（manage-fix3）：图标/箭头区 .pj-toggle=展开/收起（hover 显选中底色 +
+   图标变色提示可点），项目名区 .pj-name（含计数）=选中并预览 README；选中行 .psel 高亮 */
+.tn-proj { display:flex; align-items:center; gap:2px; width:100%; padding:2px 4px; border-radius:6px;
+           font-weight:600; text-align:left; font-size:13px; }
+.tn-proj.psel { background:var(--sel-bg); box-shadow:inset 2px 0 0 var(--primary); }
+.tn-proj .pj-toggle { display:flex; align-items:center; gap:5px; padding:3px 4px; border-radius:5px;
+                      cursor:pointer; flex:none; }
+.tn-proj .pj-toggle:hover { background:var(--sel-bg); }
+.tn-proj .pj-toggle:hover .caret, .tn-proj .pj-toggle:hover .folder { color:var(--primary); }
+.tn-proj .pj-name { display:flex; align-items:center; gap:5px; flex:1; min-width:0; padding:3px 4px;
+                    border-radius:5px; cursor:pointer; }
+.tn-proj .pj-name:hover { background:var(--hover); }
+.tn-proj .nm { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.tn-proj .caret { width:12px; color:var(--muted); transition:transform .12s; flex:none; font-size:10px; text-align:center; }
 .tn-proj.open .caret { transform:rotate(90deg); }
 .tn-proj .folder { color:var(--muted); display:flex; flex:none; }
-.tn-proj .cnt { margin-left:auto; color:var(--muted); font-size:11px; font-weight:400; }
+.tn-proj .cnt { margin-left:auto; color:var(--muted); font-size:11px; font-weight:400; flex:none; }
 .tn-kids { margin-left:15px; border-left:1px solid var(--border); padding-left:4px; }
 .leaf { display:block; width:100%; border:none; background:none; text-align:left;
         padding:4px 7px; border-radius:6px; cursor:pointer; }
@@ -161,6 +171,17 @@ body.tree-resizing { cursor:col-resize; user-select:none; }
 .md pre { background:var(--pre-bg); color:var(--pre-fg); border-radius:8px; padding:12px 14px; overflow-x:auto; }
 .md pre code { background:none; color:inherit; padding:0; }
 .md ul,.md ol { margin:8px 0; padding-left:24px; }
+/* README 增强渲染补充（manage-fix3）：h4-h6 / hr / 引用块 / GFM 表格 / 外链图 / 相对路径图占位徽标 */
+.md h4 { font-size:13.5px; margin:12px 0 6px; }
+.md h5,.md h6 { font-size:12.5px; margin:10px 0 4px; }
+.md hr { border:none; border-top:1px solid var(--border); margin:14px 0; }
+.md blockquote { margin:8px 0; padding:2px 12px; border-left:3px solid var(--border); color:var(--muted); }
+.md table { border-collapse:collapse; margin:10px 0; font-size:13px; }
+.md th,.md td { border:1px solid var(--border); padding:5px 10px; }
+.md th { background:var(--hover); }
+.md img { max-width:100%; }
+.img-ph { display:inline-block; padding:1px 8px; border:1px dashed var(--border); border-radius:4px;
+          background:var(--hover); color:var(--muted); font-size:12px; }
 
 .placeholder { flex:1; display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:15px; }
 

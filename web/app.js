@@ -636,6 +636,123 @@ function renderMd(src){
   return html;
 }
 
+/* ---- README 增强渲染（manage-fix3 反馈3）：仅 renderProjectReadme 使用，条目正文仍走上方
+   renderMd 不动。在 renderMd 基础上加：GFM 管道表格、h4-h6、有序列表、引用块、hr、
+   行内链接/图片、白名单内联 HTML；最终整串过 sanitizeHtml（DOMParser 解析后按白名单
+   重建，见下）兜底。README 与条目正文都不可全信：白名单外标签拆壳留内容，script/iframe/
+   object 等连内容剥除，on 事件属性与 style 等一律剥除，href/src 走协议白名单。 ---- */
+const RICH_TAGS = {p:1,br:1,b:1,strong:1,i:1,em:1,a:1,img:1,code:1,pre:1,span:1,div:1,
+  h1:1,h2:1,h3:1,h4:1,h5:1,h6:1,ul:1,ol:1,li:1,blockquote:1,sub:1,sup:1,hr:1,
+  table:1,thead:1,tbody:1,tr:1,th:1,td:1};
+const RICH_DROP = {script:1,iframe:1,object:1,style:1,svg:1,math:1,template:1,noscript:1};
+// inlineRich：先整体 esc；code 段占位保护（内容保持字面）；白名单标签的转义序列还原为真
+// 标签（属性仍带实体，交由 sanitizeHtml 清洗重建）；再做加粗/斜体/链接/图片行内替换
+function inlineRich(s){
+  const codes = [];
+  let t2 = esc(s).replace(/`([^`]+)`/g, (m,c)=>{ codes.push(c); return "\x00"+(codes.length-1)+"\x00"; });
+  t2 = t2.replace(/&lt;(\/?)([a-zA-Z][a-zA-Z0-9]*)((?:(?!&gt;)[\s\S])*?)&gt;/g, (m,slash,tag,attrs)=>{
+    if(!RICH_TAGS[tag.toLowerCase()]) return m;
+    return "<"+slash+tag.toLowerCase()+attrs+">";
+  });
+  t2 = t2.replace(/\*\*([^*]+)\*\*/g,"<b>$1</b>").replace(/\*([^*]+)\*/g,"<i>$1</i>");
+  t2 = t2.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g,'<img alt="$1" src="$2">');
+  t2 = t2.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g,'<a href="$2">$1</a>');
+  return t2.replace(/\x00(\d+)\x00/g, (m,n)=>"<code>"+codes[+n]+"</code>");
+}
+function richAttrs(n, extra){
+  let s = "";
+  const allow = ["align","title"].concat(extra||[]);
+  for(let i=0;i<allow.length;i++){
+    const v = n.getAttribute(allow[i]);
+    if(v===null) continue;
+    const tv = v.trim();
+    if(allow[i]==="href" && !/^(https?:|mailto:|#)/i.test(tv)) continue;   // javascript:/相对链接剥除
+    if(allow[i]==="align" && !/^(left|right|center|justify)$/i.test(tv)) continue;
+    if(/^(width|height)$/.test(allow[i]) && !/^\d{1,4}%?$/.test(tv)) continue;
+    if(/^(colspan|rowspan)$/.test(allow[i]) && !/^\d{1,2}$/.test(tv)) continue;
+    s += " "+allow[i]+'="'+esc(v)+'"';
+  }
+  return s;
+}
+function serKids(n){
+  let out = "";
+  for(let i=0;i<n.childNodes.length;i++) out += serNode(n.childNodes[i]);
+  return out;
+}
+function serNode(n){
+  if(n.nodeType===3) return esc(n.nodeValue);
+  if(n.nodeType!==1) return "";
+  const tag = n.tagName.toLowerCase();
+  if(RICH_DROP[tag]) return "";
+  if(!RICH_TAGS[tag]) return serKids(n);   // 白名单外标签拆壳、保留子内容
+  if(tag==="img"){
+    const src = (n.getAttribute("src")||"").trim();
+    if(/^https?:\/\//i.test(src))   // shields.io 等外链图正常放行
+      return '<img src="'+esc(src)+'"'+richAttrs(n,["alt","width","height"])+'>';
+    // 相对路径图 daemon 不分发（白名单静态文件）→ 占位徽标，避免 404 刷屏
+    const label = (n.getAttribute("alt")||"").trim() || src.split("/").pop() || "image";
+    return '<span class="img-ph" title="'+esc(src)+'">'+esc(label)+'</span>';
+  }
+  if(tag==="a") return "<a"+richAttrs(n,["href"])+">"+serKids(n)+"</a>";
+  if(tag==="td"||tag==="th") return "<"+tag+richAttrs(n,["colspan","rowspan"])+">"+serKids(n)+"</"+tag+">";
+  if(tag==="br"||tag==="hr") return "<"+tag+">";
+  return "<"+tag+richAttrs(n)+">"+serKids(n)+"</"+tag+">";
+}
+function sanitizeHtml(html){
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  return serKids(doc.body);
+}
+function renderMdRich(src){
+  const lines = src.split("\n"); let html="", i=0;
+  const cells = l=>{ let s=l.trim(); if(s.startsWith("|")) s=s.slice(1); if(s.endsWith("|")) s=s.slice(0,-1); return s.split("|").map(c=>c.trim()); };
+  const isDelim = l=>{ const cs=cells(l); return cs.length>0 && cs.every(c=>/^:?-+:?$/.test(c)); };
+  const aligns = l=>cells(l).map(c=>c.startsWith(":")&&c.endsWith(":")?"center":c.endsWith(":")?"right":"");
+  while(i<lines.length){
+    const l = lines[i];
+    if(l.startsWith("```")){
+      const buf=[]; i++;
+      while(i<lines.length && !lines[i].startsWith("```")) buf.push(lines[i++]);
+      i++; html += "<pre><code>"+esc(buf.join("\n"))+"</code></pre>"; continue;
+    }
+    // GFM 管道表格：表头行 + 分隔行（| --- | :---: |），分隔行冒号给对齐
+    if(l.trim().startsWith("|") && i+1<lines.length && isDelim(lines[i+1])){
+      const heads = cells(l), al = aligns(lines[i+1]); i += 2;
+      const rows = [];
+      while(i<lines.length && lines[i].trim().startsWith("|")) rows.push(cells(lines[i++]));
+      const at = j=>al[j]?' align="'+al[j]+'"':"";
+      html += "<table><thead><tr>"+heads.map((x,j)=>"<th"+at(j)+">"+inlineRich(x)+"</th>").join("")
+            + "</tr></thead><tbody>"
+            + rows.map(r=>"<tr>"+r.map((c,j)=>"<td"+at(j)+">"+inlineRich(c)+"</td>").join("")+"</tr>").join("")
+            + "</tbody></table>";
+      continue;
+    }
+    const h = l.match(/^(#{1,6})\s+(.*)/);
+    if(h){ html += "<h"+h[1].length+">"+inlineRich(h[2])+"</h"+h[1].length+">"; i++; continue; }
+    if(/^\s*(---+|\*\*\*+|___+)\s*$/.test(l)){ html += "<hr>"; i++; continue; }
+    if(/^\s*>/.test(l)){
+      const buf=[];
+      while(i<lines.length && /^\s*>/.test(lines[i])) buf.push(lines[i++].replace(/^\s*>\s?/,""));
+      html += "<blockquote>"+buf.map(x=>x.trim()===""?"":"<p>"+inlineRich(x)+"</p>").join("")+"</blockquote>"; continue;
+    }
+    if(/^\s*[-*]\s+/.test(l)){
+      const items=[];
+      while(i<lines.length && /^\s*[-*]\s+/.test(lines[i])) items.push(lines[i++].replace(/^\s*[-*]\s+/,""));
+      html += "<ul>"+items.map(x=>"<li>"+inlineRich(x)+"</li>").join("")+"</ul>"; continue;
+    }
+    if(/^\s*\d+[.)]\s+/.test(l)){
+      const items=[];
+      while(i<lines.length && /^\s*\d+[.)]\s+/.test(lines[i])) items.push(lines[i++].replace(/^\s*\d+[.)]\s+/,""));
+      html += "<ol>"+items.map(x=>"<li>"+inlineRich(x)+"</li>").join("")+"</ol>"; continue;
+    }
+    // 白名单标签开头的整行内联 HTML（README 徽标段/截图段常见）原样放行，sanitizeHtml 收尾
+    const raw = l.match(/^\s*<(\/?)([a-zA-Z][a-zA-Z0-9]*)[\s>\/]/);
+    if(raw && RICH_TAGS[raw[2].toLowerCase()]){ html += l+"\n"; i++; continue; }
+    if(l.trim()===""){ i++; continue; }
+    html += "<p>"+inlineRich(l)+"</p>"; i++;
+  }
+  return sanitizeHtml(html);
+}
+
 /* ================= 管理页 ================= */
 /* 两级树（项目→条目）+ markdown 详情，结构/交互照抄原型 renderTree/fillTree/renderDetail
    （prototype-manager-v2.html:1414-1473），mock 换真：项目=GET /api/projects，
@@ -653,7 +770,11 @@ function renderMd(src){
    200px~50% 钳制）；点项目节点右侧显示项目 README（GET /api/project/readme，无 README
    回落 wiki 概述条目）；截断标题悬停出完整标题浮窗（事件委托）；项目按 last_update
    降序 + 4s 轮询已展开项目条目，有变化才重渲；项目手风琴展开（默认展开最近更新项）
-   + 条目懒加载（>50 先渲 50，滚到底追加）。 */
+   + 条目懒加载（>50 先渲 50，滚到底追加）。
+   复验迭代（manage-fix3）：默认展开的项目同时默认选中（右侧直接显示其 README）；
+   项目行双热区——名前图标/箭头区（.pj-toggle）=展开/收起，项目名区（.pj-name，含计数）
+   =选中并预览 README；README 正文走 renderMdRich（GFM 表格 + 白名单内联 HTML +
+   协议白名单图链，相对路径图渲染为 .img-ph 占位徽标），条目正文仍走 renderMd 不动。 */
 const TYPE_LABEL = { pitfall:"坑", note:"注", rule:"规", reference:"参" };
 let MGMT = null;        // {list:[{name,paths,lastUpdate,entries,err}], loadErr} 缓存；loadManage 惰性加载
 let DETAIL = null;      // {key(project\nfile), data, err} 当前选中条目全文缓存
@@ -701,10 +822,14 @@ function refreshManage(){
   }).then(list=>{
     list.sort((a,b)=>(b.lastUpdate||0)-(a.lastUpdate||0) || (a.name<b.name?-1:a.name>b.name?1:0));
     MGMT = { list:list };
-    // 手风琴兜底（反馈7）：用户尚未手动展开/收起过且无展开项时，默认展开最近更新的项目
+    // 手风琴兜底（反馈7）：用户尚未手动展开/收起过且无展开项时，默认展开最近更新的项目；
+    // 同时默认选中该项目（manage-fix3 反馈1）→ 右侧直接显示其 README 视图而非空态
     if(!state.openTouched && list.length && !list.some(p=>state.open[p.name]===true)){
       state.open = {}; state.open[list[0].name] = true;
+      if(!state.sel){ state.projSel = list[0].name; loadReadme(list[0].name); }
     }
+    // 选中项目已被外部删除 → 清项目选择，避免 README 视图卡在加载态
+    if(!state.sel && state.projSel && !list.some(p=>p.name===state.projSel)) state.projSel = null;
     // 选中条目已消失（外部删除/项目删除）→ 清选择与详情缓存（编辑/对照态中不动选择，保存时报错兜底）
     if(!edBusy() && state.sel && !findEntry(state.sel.project, state.sel.file)){ state.sel = null; DETAIL = null; }
   }).catch(err=>{
@@ -879,19 +1004,29 @@ function fillTree(scroll){
     const list = p.entries.filter(e=>!q || e.title.toLowerCase().includes(q));
     if(q && !list.length) return;   // 过滤时无命中项目整组隐藏（原型语义）；无过滤时空项目也显示（否则树里不可见）
     const open = q ? true : state.open[p.name] === true;   // 手风琴（反馈7）：至多一个项目展开
-    const pj = el("button","tn-proj"+(open?" open":""));
-    pj.innerHTML = '<span class="caret">▶</span><span class="folder">'+ICON.folder+'</span>'+esc(p.name)
-      +'<span class="cnt">'+(p.err?"!":list.length)+'</span>';
+    // 项目行双热区（manage-fix3 反馈2）：名前 图标/箭头区=展开/收起；项目名区（含计数）=选中
+    // 项目并右侧预览 README。两区行为独立，hover 各有视觉提示（style.css .pj-toggle/.pj-name）
+    const pj = el("div","tn-proj"+(open?" open":"")+(!state.sel && state.projSel===p.name?" psel":""));
     pj.title = p.err ? t("mgTreeErr")+p.err : (p.paths||[]).join("\n");
-    pj.onclick = ()=>{
+    const tg = el("span","pj-toggle");
+    tg.innerHTML = '<span class="caret">▶</span><span class="folder">'+ICON.folder+'</span>';
+    tg.onclick = ev=>{
+      ev.stopPropagation();
       exitEdit();
       state.openTouched = true;
       if(open){ state.open[p.name] = false; }              // 再点收起 → 全收起
       else { state.open = {}; state.open[p.name] = true; } // 展开即互斥收起其他
-      state.sel = null; DETAIL = null;
-      state.projSel = p.name; loadReadme(p.name);          // 点项目节点 → 右侧显示项目 README（反馈3）
       render();
     };
+    const nm = el("span","pj-name");
+    nm.innerHTML = '<span class="nm">'+esc(p.name)+'</span><span class="cnt">'+(p.err?"!":list.length)+'</span>';
+    nm.onclick = ()=>{
+      exitEdit();
+      state.sel = null; DETAIL = null;
+      state.projSel = p.name; loadReadme(p.name);          // 点项目名 → 右侧显示项目 README（反馈3）
+      render();
+    };
+    pj.appendChild(tg); pj.appendChild(nm);
     scroll.appendChild(pj);
     if(open){
       const kids = el("div","tn-kids");
@@ -978,7 +1113,8 @@ function renderTreeResizer(){
   return bar;
 }
 
-// 项目节点详情（反馈3）：项目名 + README/wiki 概述来源行 + renderMd 正文；无 README 给空态提示
+// 项目节点详情（反馈3）：项目名 + README/wiki 概述来源行 + renderMdRich 正文（manage-fix3：
+// 表格/白名单内联 HTML/外链图，相对路径图显示占位徽标）；无 README 给空态提示
 function renderProjectReadme(d, project){
   const rm = README[project];
   d.appendChild(Object.assign(el("div","d-path"),{textContent:"projects/"+project+"/"}));
@@ -999,7 +1135,7 @@ function renderProjectReadme(d, project){
   const src = r.source==="wiki" ? t("readmeSrcWiki") : t("readmeSrcReadme");
   d.appendChild(Object.assign(el("div","d-filemeta"),{textContent:src.replace("{p}", r.path||"")}));
   const bd = el("div","d-body md");
-  bd.innerHTML = renderMd(r.content||"");
+  bd.innerHTML = renderMdRich(r.content||"");
   d.appendChild(bd);
 }
 
