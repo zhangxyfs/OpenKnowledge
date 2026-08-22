@@ -19,8 +19,9 @@ async function api(path, opts){
   }
   let res;
   try {
-    res = await fetch(path, { method: opts.method || "GET", headers: headers, body: body });
+    res = await fetch(path, { method: opts.method || "GET", headers: headers, body: body, signal: opts.signal });
   } catch(err){
+    if(err && err.name === "AbortError") throw err;   // 主动取消原样上抛（调用方静默处理）
     throw new Error("网络错误: " + err.message);
   }
   if(res.ok) sessionStorage.removeItem("ok-401-reload");
@@ -106,6 +107,26 @@ const I18N = {
     xDelPartial:"项目已注销，但{w}，请手动清理 {d}",
     xAbout:"关于", xVer:"版本", xHome:"数据目录", xProjCount:"已注册项目", xProjUnit:" 个",
     xLoadFail:"数据加载失败：",
+    mgNew:"+ 新建", mgLoading:"加载中…", mgTreeErr:"条目加载失败：",
+    opEdit:"编辑", opApprove:"批准", opArchive:"归档", opUnarchive:"取消归档", opDelete:"删除",
+    cfmDelete:"确定删除条目「{t}」？",
+    cfmArchive:"归档条目「{t}」？归档后退出 INDEX 与强制注入，仍可被检索命中。",
+    emNew:"新建条目", emEdit:"编辑条目", emExists:"条目已存在", emNoProject:"尚无已注册项目，请先 ok init",
+    fTitle:"标题", fType:"类型", fTags:"tags（逗号分隔）", fMand:"mandatory（每会话必注入）",
+    fSummary:"摘要", fBody:"正文",
+    typeRule:"规则", typePitfall:"踩坑", typeNote:"笔记", typeReference:"参考",
+    optBtn:"✨ 优化", optBusy:"优化中…", optEmpty:"正文为空，无可优化内容",
+    optTip:"结合项目真实代码与相关条目据实润色标题/标签/摘要/正文（类型与 mandatory 不动）；先出对照预览，确认回填后点保存才生效。",
+    cmpTitle:"优化对照预览", cmpBasis:"依据：条目引用的真实代码 + 相关条目 + INDEX 摘录",
+    cmpNotice:"模型判断：当前内容已足够简练准确，无需优化。如下仍有差异仅为排版/标点，可逐字段回填或直接放弃。",
+    cmpApply:"回填表单", cmpDiscard:"放弃", cmpFill:"回填", cmpFilled:"已回填",
+    cmpOld:"原数据", cmpNew:"优化后", cmpNote:"回填只改表单，点「保存」才写入 .md",
+    cmpUsage:"消耗 {t} token（入 {p} / 出 {c}）",
+    llmTitle:"尚未配置模型",
+    llmMsg:"「优化」需要调用大模型。请先到 设置页 → 模型配置 添加一个 OpenAI 兼容或 Anthropic 兼容服务。",
+    llmGo:"去配置",
+    inheritBadge:"继承基线",
+    inheritBubble:"wiki 基线继承自 {src} · 落后 {n} commit",
   },
   en: {
     manage:"Manage", setup:"Setup", prefs:"Settings", logs:"Logs", misc:"Misc",
@@ -172,6 +193,26 @@ const I18N = {
     xDelPartial:"Project unregistered, but {w}; please remove {d} manually",
     xAbout:"About", xVer:"Version", xHome:"Data dir", xProjCount:"Registered projects", xProjUnit:"",
     xLoadFail:"Failed to load data: ",
+    mgNew:"+ New", mgLoading:"Loading…", mgTreeErr:"Failed to load entries: ",
+    opEdit:"Edit", opApprove:"Approve", opArchive:"Archive", opUnarchive:"Unarchive", opDelete:"Delete",
+    cfmDelete:"Delete entry \"{t}\"?",
+    cfmArchive:"Archive entry \"{t}\"? It leaves INDEX and mandatory injection, but stays searchable.",
+    emNew:"New entry", emEdit:"Edit entry", emExists:"Entry already exists", emNoProject:"No registered project yet; run ok init first",
+    fTitle:"Title", fType:"Type", fTags:"tags (comma-separated)", fMand:"mandatory (injected every session)",
+    fSummary:"Summary", fBody:"Body",
+    typeRule:"Rule", typePitfall:"Pitfall", typeNote:"Note", typeReference:"Reference",
+    optBtn:"✨ Optimize", optBusy:"Optimizing…", optEmpty:"Body is empty; nothing to optimize",
+    optTip:"Polishes title/tags/summary/body against real code and related entries (type and mandatory untouched); shows a diff preview first — nothing is written until you fill back and save.",
+    cmpTitle:"Optimize preview", cmpBasis:"Basis: real code referenced by the entry + related entries + INDEX excerpt",
+    cmpNotice:"The model considers the content already concise and accurate — no optimization needed. Any difference below is layout/punctuation only; fill back per field or discard.",
+    cmpApply:"Fill all back", cmpDiscard:"Discard", cmpFill:"Fill", cmpFilled:"Filled",
+    cmpOld:"Original", cmpNew:"Optimized", cmpNote:"Fill-back only edits the form; Save writes the .md",
+    cmpUsage:"Cost {t} tokens (in {p} / out {c})",
+    llmTitle:"No model configured",
+    llmMsg:"Optimize calls an LLM. Add an OpenAI-compatible or Anthropic-compatible service under Settings → Model config first.",
+    llmGo:"Configure",
+    inheritBadge:"Inherited baseline",
+    inheritBubble:"wiki baseline inherited from {src} · {n} commits behind",
   },
 };
 
@@ -200,6 +241,7 @@ const MENUS = [
 
 /* ================= 状态 ================= */
 const state = { menu:"manage", lang:"zh", theme:"light", collapsed:false,
+                open:{}, sel:null, q:"", mgmtFb:null,
                 logSrc:{ ok:true, daemon:true, sidecar:true }, logSem:false, logQ:"",
                 logAuto:true, logStick:true, miscFb:null };
 const t = k => I18N[state.lang][k];
@@ -304,6 +346,454 @@ function renderMd(src){
     html += "<p>"+inline(l)+"</p>"; i++;
   }
   return html;
+}
+
+/* ================= 管理页 ================= */
+/* 两级树（项目→条目）+ markdown 详情，结构/交互照抄原型 renderTree/fillTree/renderDetail
+   （prototype-manager-v2.html:1414-1473），mock 换真：项目=GET /api/projects，
+   条目=GET /api/entries?project=（逐项目拉取），详情正文=GET /api/entry?project=&file=。
+   响应字段已核 api.go:302-352（entrySummaryJSON：file/title/type/tags/mandatory/draft/
+   archived/summary/mtime[unix 秒]；无 size/born——born 从 tags 的 born:<名> 提取，
+   大小后端不返回故详情不展示）。条目操作沿用旧 GUI 语义（旧 app.js:638-825）：
+   操作组在详情页右上（编辑/归档或取消归档/删除，草稿额外批准）；新建按钮在树头部
+   搜索框旁；新建/编辑复用同一弹窗 + ✨优化走 /api/entry/optimize（对照预览回填，
+   保存才落盘）。born/继承徽标 hover 浮动窗沿用 v2.18.2 行为（branch-info，旧
+   app.js:321-374）。弹窗挂 document.body（position:fixed），不进 #app 渲染周期——
+   后台刷新（refreshManage/loadDetail/loadBranchInfo 完成）整页重渲不会打掉表单输入态。 */
+const TYPE_LABEL = { pitfall:"坑", note:"注", rule:"规", reference:"参" };
+let MGMT = null;        // {list:[{name,paths,entries,err}], loadErr} 缓存；loadManage 惰性加载
+let DETAIL = null;      // {key(project\nfile), data, err} 当前选中条目全文缓存
+const BRANCH = {};      // project → branch-info（会话级缓存；null=已拉取但失败/无数据，占位防重拉）
+let entryMask = null, cmpMask = null, llmMask = null;   // 管理页弹窗节点（body 级，同时只各存一个）
+let optAbort = null;    // 优化进行中的 AbortController；关闭编辑弹窗即取消
+
+function fmtTime(unix){
+  if(!unix) return "";
+  const d = new Date(unix*1000);
+  const p = n=>String(n).padStart(2,"0");
+  return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate())+" "+p(d.getHours())+":"+p(d.getMinutes());
+}
+// bornOf 取条目出生分支（born:<名>，第一个）；无则空串（旧 app.js:312 同款）
+function bornOf(e){
+  const tags = e.tags || [];
+  for(let i=0;i<tags.length;i++) if(tags[i].indexOf("born:")===0) return tags[i].slice(5);
+  return "";
+}
+function findEntry(project, file){
+  if(!MGMT || !MGMT.list) return null;
+  for(const p of MGMT.list){
+    if(p.name!==project) continue;
+    for(const e of p.entries) if(e.file===file) return { project:project, entry:e };
+  }
+  return null;
+}
+
+function loadManage(){ if(MGMT) return; MGMT = { list:[] }; refreshManage(); }
+// refreshManage 全量重拉项目+条目；完成时原位刷新（过滤框聚焦中只重填树、不整页重渲，保焦点）
+function refreshManage(){
+  api("/api/projects").then(ps=>{
+    return Promise.all((ps||[]).map(p=>
+      api("/api/entries?project="+encodeURIComponent(p.name))
+        .then(es=>({ name:p.name, paths:p.paths||[], entries:es||[] }))
+        .catch(err=>({ name:p.name, paths:p.paths||[], entries:[], err:err.message }))));
+  }).then(list=>{
+    MGMT = { list:list };
+    // 选中条目已消失（外部删除/项目删除）→ 清选择与详情缓存
+    if(state.sel && !findEntry(state.sel.project, state.sel.file)){ state.sel = null; DETAIL = null; }
+  }).catch(err=>{
+    MGMT = { list:[], loadErr: err.message };
+  }).then(()=>{
+    if(state.menu!=="manage") return;
+    const ae = document.activeElement;
+    if(ae && ae.classList && ae.classList.contains("search")){
+      const sc = document.querySelector(".tree-scroll");
+      if(sc) fillTree(sc);
+      return;
+    }
+    render();
+  });
+}
+// loadDetail 拉选中条目全文（force 用于条目操作后绕过缓存重拉）；竞态按 key 匹配丢弃过期响应
+function loadDetail(force){
+  if(!state.sel){ DETAIL = null; return; }
+  const key = state.sel.project+"\n"+state.sel.file;
+  if(!force && DETAIL && DETAIL.key===key && (DETAIL.data || DETAIL.err)) return;
+  DETAIL = { key:key, data:null, err:"" };
+  api("/api/entry?project="+encodeURIComponent(state.sel.project)+"&file="+encodeURIComponent(state.sel.file))
+    .then(d=>{ if(DETAIL && DETAIL.key===key) DETAIL = { key:key, data:d, err:"" }; })
+    .catch(err=>{ if(DETAIL && DETAIL.key===key) DETAIL = { key:key, data:null, err:err.message }; })
+    .then(()=>{ if(state.menu==="manage") render(); });
+}
+// loadBranchInfo 惰性拉项目分支上下文（继承徽标 hover 数据，v2.18.2 既有端点）
+function loadBranchInfo(project){
+  if(!project || project in BRANCH) return;
+  BRANCH[project] = null;
+  api("/api/project/branch-info?project="+encodeURIComponent(project))
+    .then(info=>{ BRANCH[project] = info || null; })
+    .catch(()=>{ BRANCH[project] = null; })
+    .then(()=>{ if(state.menu==="manage") render(); });
+}
+
+function badges(e){
+  const born = bornOf(e);
+  return (born ? '<span class="badge-born" title="born">'+ICON.branch+esc(born)+'</span>' : "")
+       + '<span class="badge-type t-'+e.type+'" title="'+esc(e.type)+'">'+(TYPE_LABEL[e.type]||"?")+'</span>';
+}
+function detailAttrs(e, proj){
+  let s = "";
+  const born = bornOf(e);
+  if(born) s += '<span class="badge-born" title="born">'+ICON.branch+esc(born)+'</span>';
+  s += (e.tags||[]).map(x=>'<span class="tag">'+esc(x)+'</span>').join("");
+  s += e.mandatory ? '<span class="badge-mand">'+t("mandatory")+'</span>'
+                   : '<span class="tag" style="opacity:.6">'+t("optional")+'</span>';
+  if(e.draft) s += '<span class="badge-draft">'+t("draft")+'</span>';
+  if(e.archived) s += '<span class="badge-arch">'+t("archived")+'</span>';
+  // 继承徽标 + hover 浮动窗（v2.18.2 行为）：inherited 态显示「当前分支 · 继承基线」，
+  // hover 出 bubble——wiki 基线继承自 <来源>@<commit 短 7 位> · 落后 N commit
+  const bi = BRANCH[proj];
+  if(bi && bi.branch_state==="inherited"){
+    const src = bi.inherited_from || bi.base_branch || "—";
+    const short = String(bi.last_commit || "").slice(0,7);
+    const bubble = t("inheritBubble")
+      .replace("{src}", src+(short?"@"+short:"")).replace("{n}", String(bi.behind||0));
+    s += '<span class="tip"><span class="badge-inherit">'
+       + esc((bi.current_branch||"—")+" · "+t("inheritBadge"))+'</span>'
+       + '<span class="bubble">'+esc(bubble)+'</span></span>';
+  }
+  return s;
+}
+
+function renderTree(){
+  const tree = el("div","tree");
+  const head = el("div","tree-head");
+  head.appendChild(Object.assign(el("span","caption"),{textContent:t("treeCaption")}));
+  tree.appendChild(head);
+  // 工具行：过滤框 + 新建按钮（方案决策：新建在树头部搜索框旁）
+  const tools = el("div","tree-tools");
+  const search = el("input","search");
+  search.placeholder = t("filter"); search.value = state.q;
+  search.oninput = ()=>{ state.q = search.value; fillTree(scroll); };
+  tools.appendChild(search);
+  const add = el("button","btn tree-add");
+  add.textContent = t("mgNew");
+  add.disabled = !MGMT || !MGMT.list.length;
+  add.onclick = ()=>{
+    const def = (state.sel && findEntry(state.sel.project, state.sel.file) && state.sel.project)
+      || (MGMT.list[0] && MGMT.list[0].name) || "";
+    openEntryModal(def, null);
+  };
+  tools.appendChild(add);
+  tree.appendChild(tools);
+  const scroll = el("div","tree-scroll");
+  tree.appendChild(scroll);
+  fillTree(scroll);
+  return tree;
+}
+function fillTree(scroll){
+  scroll.innerHTML = "";
+  if(!MGMT) return;
+  if(MGMT.loadErr){
+    scroll.appendChild(Object.assign(el("div","pdesc fb2 err"),{textContent:t("mgTreeErr")+MGMT.loadErr}));
+    return;
+  }
+  const q = state.q.trim().toLowerCase();
+  MGMT.list.forEach(p=>{
+    const list = p.entries.filter(e=>!q || e.title.toLowerCase().includes(q));
+    if(q && !list.length) return;   // 过滤时无命中项目整组隐藏（原型语义）；无过滤时空项目也显示（否则树里不可见）
+    const open = q ? true : state.open[p.name] !== false;   // 默认展开；点项目名折叠/展开
+    const pj = el("button","tn-proj"+(open?" open":""));
+    pj.innerHTML = '<span class="caret">▶</span><span class="folder">'+ICON.folder+'</span>'+esc(p.name)
+      +'<span class="cnt">'+(p.err?"!":list.length)+'</span>';
+    pj.title = p.err ? t("mgTreeErr")+p.err : (p.paths||[]).join("\n");
+    pj.onclick = ()=>{ state.open[p.name]=!open; render(); };
+    scroll.appendChild(pj);
+    if(open){
+      const kids = el("div","tn-kids");
+      list.forEach(e=>{
+        const sel = state.sel && state.sel.project===p.name && state.sel.file===e.file;
+        const leaf = el("button","leaf"+(sel?" sel":"")+(e.archived?" archived":""));
+        leaf.innerHTML = '<span class="l1">'+badges(e)
+          +(e.mandatory?'<span class="badge-mand">★</span>':"")
+          +(e.draft?'<span class="badge-draft">'+t("draft")+'</span>':"")+'</span>'
+          +'<span class="t2">'+esc(e.title)+'</span>';
+        leaf.onclick = ()=>{ state.sel={ project:p.name, file:e.file }; state.mgmtFb=null; loadDetail(); render(); };
+        kids.appendChild(leaf);
+      });
+      scroll.appendChild(kids);
+    }
+  });
+}
+
+function renderDetail(){
+  const d = el("div","detail");
+  const sel = state.sel && findEntry(state.sel.project, state.sel.file);
+  if(!sel){
+    d.appendChild(Object.assign(el("div","placeholder"),{textContent:t("pickEntry")}));
+    return d;
+  }
+  const e = sel.entry, proj = sel.project;
+  // 右上操作组（方案决策位置）：编辑 /（草稿额外）批准 / 归档或取消归档 / 删除；左侧为操作反馈行
+  const ops = el("div","d-ops");
+  if(state.mgmtFb)
+    ops.appendChild(Object.assign(el("span","fb2"+(state.mgmtFb.err?" err":"")),{textContent:state.mgmtFb.txt}));
+  const mk = (label, cls, fn)=>{ const b=el("button",cls); b.textContent=label; b.onclick=fn; return b; };
+  ops.appendChild(mk(t("opEdit"), "btn", ()=>openEntryModal(proj, e.file)));
+  if(e.draft) ops.appendChild(mk(t("opApprove"), "btn", ()=>approveEntry(proj, e)));
+  ops.appendChild(mk(e.archived?t("opUnarchive"):t("opArchive"), "btn", ()=>archiveEntry(proj, e, e.archived)));
+  ops.appendChild(mk(t("opDelete"), "btn btn-danger", ()=>delEntry(proj, e)));
+  d.appendChild(ops);
+  // 相对路径（相对数据目录）/ 文件名 + mtime（后端不返回 size，见段头注释）
+  d.appendChild(Object.assign(el("div","d-path"),
+    {textContent:"projects/"+proj+"/knowledge/"+e.file}));
+  const fm = el("div","d-filemeta");
+  fm.innerHTML = "<b>"+esc(e.file)+"</b> · "+t("modified")+" "+fmtTime(e.mtime);
+  d.appendChild(fm);
+  d.appendChild(Object.assign(el("h1","d-title"),{textContent:e.title}));
+  const at = el("div","d-attrs"); at.innerHTML = detailAttrs(e, proj); d.appendChild(at);
+  const sm = el("div","d-summary"); sm.textContent = e.summary; d.appendChild(sm);
+  const bd = el("div","d-body md");
+  const det = DETAIL && DETAIL.key===(proj+"\n"+e.file) ? DETAIL : null;
+  if(det && det.err) bd.innerHTML = '<p class="fb2 err">'+esc(det.err)+'</p>';
+  else if(det && det.data) bd.innerHTML = renderMd(det.data.body||"");
+  else bd.innerHTML = "<p>"+esc(t("mgLoading"))+"</p>";
+  d.appendChild(bd);
+  loadBranchInfo(proj);
+  return d;
+}
+
+/* ---------- 条目操作（旧 GUI 语义：批准/归档/删除后刷新树与详情） ---------- */
+function afterEntryOp(){
+  state.mgmtFb = null;
+  refreshManage();               // 树刷新（选中项消失则自动清选择）
+  if(state.sel) loadDetail(true);
+  if(MISC) refreshMisc();        // 其他页缓存联动（Task 4 评审约定：项目/条目增删改后其他页可刷新）
+  render();
+}
+function opFail(err){ state.mgmtFb = { txt:err.message, err:true }; render(); }
+// 批准草稿：draft 翻正并同步索引与向量（POST /api/approve）
+function approveEntry(proj, e){
+  api("/api/approve", { method:"POST", body:{ project:proj, file:e.file } })
+    .then(afterEntryOp).catch(opFail);
+}
+// 归档/取消归档（POST /api/entry/archive {undo}）；归档需确认（旧 app.js:819 文案）
+function archiveEntry(proj, e, undo){
+  if(!undo && !confirm(t("cfmArchive").replace("{t}", e.title))) return;
+  api("/api/entry/archive", { method:"POST", body:{ project:proj, file:e.file, undo:!!undo } })
+    .then(afterEntryOp).catch(opFail);
+}
+// 删除（DELETE /api/entry?project=&file=），确认后执行；删除的是当前选中项时清选择
+function delEntry(proj, e){
+  if(!confirm(t("cfmDelete").replace("{t}", e.title))) return;
+  api("/api/entry?project="+encodeURIComponent(proj)+"&file="+encodeURIComponent(e.file),
+      { method:"DELETE" })
+    .then(()=>{ state.sel=null; DETAIL=null; afterEntryOp(); })
+    .catch(opFail);
+}
+
+/* ---------- 新建/编辑复用弹窗（含 ✨优化） ----------
+   表单值由 DOM 直读（弹窗期间不整页重渲）；保存成功才落盘——新建 POST /api/entry，
+   编辑 PUT /api/entry（file 为身份，不可改名；created/draft/archived 由后端继承）。 */
+function openEntryModal(project, file){
+  if(!project){
+    state.mgmtFb = { txt:t("emNoProject"), err:true }; render(); return;
+  }
+  if(!file){
+    editModal_open(project, null, null);
+    return;
+  }
+  api("/api/entry?project="+encodeURIComponent(project)+"&file="+encodeURIComponent(file))
+    .then(d=>{ editModal_open(project, file, d); })
+    .catch(opFail);
+}
+function editModal_open(project, file, init){
+  init = init || {};
+  const isEdit = !!file;
+  const mask = el("div","mask");
+  entryMask = mask;
+  const m = el("div","modal");
+  m.appendChild(Object.assign(el("h3"),{textContent:isEdit?t("emEdit"):t("emNew")}));
+  // 字段行构造器
+  const row = (label, input)=>{
+    const r = el("div","efield");
+    r.appendChild(Object.assign(el("span","k"),{textContent:label}));
+    r.appendChild(input);
+    m.appendChild(r);
+    return input;
+  };
+  // 项目：新建可选（条目身份=项目+文件名）；编辑只读
+  if(isEdit){
+    row(t("xProject"), Object.assign(el("span"),{textContent:project}));
+  }
+  let projSel = null;
+  if(!isEdit){
+    projSel = el("select","pselect");
+    MGMT.list.forEach(p=>{ const o=el("option"); o.value=p.name; o.textContent=p.name; projSel.appendChild(o); });
+    projSel.value = project;
+    row(t("xProject"), projSel);
+  }
+  const fTitle = row(t("fTitle"), el("input","pinput")); fTitle.value = init.title||"";
+  const fType = el("select","pselect");
+  [["rule","typeRule"],["pitfall","typePitfall"],["note","typeNote"],["reference","typeReference"]]
+    .forEach(([v,k])=>{ const o=el("option"); o.value=v; o.textContent=t(k); fType.appendChild(o); });
+  fType.value = init.type||"note";
+  row(t("fType"), fType);
+  const fTags = row(t("fTags"), el("input","pinput")); fTags.value = (init.tags||[]).join(", ");
+  const fMand = el("input"); fMand.type="checkbox"; fMand.className="radio"; fMand.checked = !!init.mandatory;
+  {
+    const r = el("label","efield");
+    r.appendChild(fMand);
+    r.appendChild(document.createTextNode(t("fMand")));
+    m.appendChild(r);
+  }
+  const fSummary = row(t("fSummary"), el("input","pinput")); fSummary.value = init.summary||"";
+  const fBody = el("textarea","pinput"); fBody.rows = 10; fBody.value = init.body||"";
+  row(t("fBody"), fBody);
+  const errLine = el("div","pdesc fb2 err");
+  m.appendChild(errLine);
+
+  const curProject = ()=>isEdit ? project : projSel.value;
+  const fields = { title:fTitle, tags:fTags, summary:fSummary, body:fBody };
+  const close = ()=>{
+    if(optAbort){ optAbort.abort(); optAbort=null; }   // 关闭弹窗 = 取消进行中的优化
+    if(cmpMask){ cmpMask.remove(); cmpMask=null; }
+    if(llmMask){ llmMask.remove(); llmMask=null; }
+    mask.remove();
+    if(entryMask===mask) entryMask=null;
+  };
+
+  const foot = el("div","mfoot");
+  const save = el("button","btn btn-primary"); save.textContent = t("save");
+  save.onclick = ()=>{
+    const payload = { project:curProject(), title:fTitle.value, type:fType.value,
+      tags:fTags.value.split(",").map(s=>s.trim()).filter(Boolean),
+      mandatory:fMand.checked, summary:fSummary.value, body:fBody.value };
+    save.disabled = true;
+    if(isEdit) payload.file = file;
+    api("/api/entry", { method:isEdit?"PUT":"POST", body:payload })
+      .then(()=>{ close(); afterEntryOp(); })
+      .catch(err=>{
+        errLine.textContent = err.status===409 ? t("emExists") : err.message;
+        save.disabled = false;
+      });
+  };
+  const cancel = el("button","btn"); cancel.textContent = t("fCancel");
+  cancel.onclick = close;
+  // ✨优化：loading（禁用+文案）→ 对照预览弹窗；409=未配置模型弹窗；关闭编辑弹窗取消请求
+  const opt = el("button","btn"); opt.textContent = t("optBtn"); opt.title = t("optTip");
+  opt.onclick = ()=>{
+    if(!fBody.value.trim()){ errLine.textContent = t("optEmpty"); return; }
+    errLine.textContent = "";
+    opt.disabled = true;
+    const oldText = opt.textContent;
+    opt.textContent = t("optBusy");
+    optAbort = new AbortController();
+    api("/api/entry/optimize", {
+      method:"POST", signal:optAbort.signal,
+      body:{ project:curProject(), file:file||"", title:fTitle.value,
+             tags:fTags.value, summary:fSummary.value, body:fBody.value },
+    }).then(out=>{
+      // 一律打开对照预览（no_change 提示在弹窗内展示）
+      openCmpModal({ title:fTitle.value, tags:fTags.value, summary:fSummary.value, body:fBody.value },
+                   out||{}, fields);
+    }).catch(err=>{
+      if(err && err.name==="AbortError") return;   // 关弹窗主动取消，静默
+      if(err.status===409) openLlmNeededModal();
+      else errLine.textContent = err.message;
+    }).finally(()=>{
+      optAbort = null;
+      opt.disabled = false;
+      opt.textContent = oldText;
+    });
+  };
+  foot.appendChild(save); foot.appendChild(cancel); foot.appendChild(opt);
+  m.appendChild(foot);
+  mask.appendChild(m);
+  mask.onclick = ev=>{ if(ev.target===mask) close(); };
+  document.body.appendChild(mask);
+}
+
+/* ---------- 优化对照预览弹窗（旧 app.js:689-748 平移；回填只改表单，保存才落盘） ---------- */
+const CMP_FIELDS = [["title","fTitle"],["tags","fTags"],["summary","fSummary"],["body","fBody"]];
+function usageText(u){
+  if(!u || (!u.prompt && !u.completion)) return "";
+  return t("cmpUsage").replace("{t}", u.prompt+u.completion)
+    .replace("{p}", u.prompt).replace("{c}", u.completion);
+}
+function openCmpModal(oldV, newV, fields){
+  const mask = el("div","mask");
+  cmpMask = mask;
+  const m = el("div","modal cmp-box");
+  const h = el("h3"); h.textContent = t("cmpTitle");
+  const basis = el("span","cmp-basis"); basis.textContent = " "+t("cmpBasis");
+  h.appendChild(basis);
+  m.appendChild(h);
+  const usage = el("span","cmp-note"); usage.textContent = usageText(newV.usage);
+  if(newV.no_change){
+    m.appendChild(Object.assign(el("div","cmp-notice"),{textContent:t("cmpNotice")}));
+  }
+  const box = el("div");
+  // 单字段回填值：no_change 场景模型可能不回字段，空值回退原值（不得清空表单）
+  const fillVal = key=>{
+    if(key==="tags") return (newV.tags||[]).join(", ") || oldV.tags || "";
+    return newV[key] || oldV[key] || "";
+  };
+  CMP_FIELDS.forEach(([key,labelKey])=>{
+    const oldText = oldV[key] || "";
+    const newText = fillVal(key);
+    const div = el("div","cmp-field");
+    const name = el("div","cmp-name");
+    name.appendChild(Object.assign(el("span"),{textContent:t(labelKey)}));
+    const fill = el("button","btn cmp-fill"); fill.textContent = t("cmpFill");
+    fill.onclick = ()=>{ fields[key].value = fillVal(key); fill.textContent = t("cmpFilled"); };
+    name.appendChild(fill);
+    div.appendChild(name);
+    const oldD = el("div","cmp-old");
+    oldD.appendChild(Object.assign(el("span","cmp-tag old"),{textContent:t("cmpOld")}));
+    oldD.appendChild(document.createTextNode(oldText));
+    div.appendChild(oldD);
+    const newD = el("div","cmp-new");
+    newD.appendChild(Object.assign(el("span","cmp-tag new"),{textContent:t("cmpNew")}));
+    newD.appendChild(document.createTextNode(newText));
+    div.appendChild(newD);
+    box.appendChild(div);
+  });
+  m.appendChild(box);
+  const foot = el("div","mfoot");
+  const apply = el("button","btn btn-primary"); apply.textContent = t("cmpApply");
+  apply.onclick = ()=>{ CMP_FIELDS.forEach(([key])=>{ fields[key].value = fillVal(key); }); close(); };
+  const discard = el("button","btn"); discard.textContent = t("cmpDiscard");
+  const close = ()=>{ mask.remove(); if(cmpMask===mask) cmpMask=null; };
+  discard.onclick = close;
+  foot.appendChild(apply); foot.appendChild(discard); foot.appendChild(usage);
+  foot.appendChild(Object.assign(el("span","cmp-note"),{textContent:t("cmpNote")}));
+  m.appendChild(foot);
+  mask.appendChild(m);
+  mask.onclick = ev=>{ if(ev.target===mask) close(); };
+  document.body.appendChild(mask);
+}
+
+/* ---------- 未配置模型提示弹窗（409 no_llm；去配置 → 设置页） ---------- */
+function openLlmNeededModal(){
+  const mask = el("div","mask");
+  llmMask = mask;
+  const m = el("div","modal"); m.style.width = "400px";
+  m.appendChild(Object.assign(el("h3"),{textContent:t("llmTitle")}));
+  m.appendChild(Object.assign(el("div","pdesc"),{textContent:t("llmMsg")}));
+  const foot = el("div","mfoot");
+  const close = ()=>{ mask.remove(); if(llmMask===mask) llmMask=null; };
+  const go = el("button","btn btn-primary"); go.textContent = t("llmGo");
+  go.onclick = ()=>{
+    if(entryMask){ entryMask.remove(); entryMask=null; }
+    if(cmpMask){ cmpMask.remove(); cmpMask=null; }
+    close();
+    state.menu = "prefs"; location.hash = "prefs"; render();
+  };
+  const ok = el("button","btn"); ok.textContent = t("xGotIt"); ok.onclick = close;
+  foot.appendChild(go); foot.appendChild(ok);
+  m.appendChild(foot);
+  mask.appendChild(m);
+  mask.onclick = ev=>{ if(ev.target===mask) close(); };
+  document.body.appendChild(mask);
 }
 
 /* ================= 日志页 ================= */
@@ -763,13 +1253,25 @@ function renderBody(app){
     const b = el("button","mi"+(state.menu===m.key?" active":""));
     b.innerHTML = '<span class="ico">'+m.ico+'</span><span class="txt">'+t(m.key)+'</span>'
                 + '<span class="tip">'+t(m.key)+'</span>';
-    b.onclick = ()=>{ state.menu=m.key; location.hash=m.key; render(); };
+    b.onclick = ()=>{
+      state.menu=m.key; location.hash=m.key;
+      // 跨页缓存联动（Task 4 评审约定）：切到其他页重拉项目列表缓存；切到管理页重拉树数据
+      if(m.key==="misc" && MISC) refreshMisc();
+      if(m.key==="manage" && MGMT) refreshManage();
+      render();
+    };
     side.appendChild(b);
   });
   main.appendChild(side);
 
-  // 日志页（Task 3）与其他页（Task 4）已接入真实数据；管理/引导/设置三页仍为占位：
-  // 真实内容（管理树+详情 / 引导卡 / 设置卡）按实施计划 Task 5-7 逐页接入，占位文案走 i18n（notImpl 键）
+  // 管理页（Task 5）、日志页（Task 3）与其他页（Task 4）已接入真实数据；引导/设置两页仍为占位：
+  // 真实内容（引导卡 / 设置卡）按实施计划 Task 6-7 接入，占位文案走 i18n（notImpl 键）
+  if(state.menu==="manage"){
+    loadManage();
+    main.appendChild(renderTree());
+    main.appendChild(renderDetail());
+    return;
+  }
   if(state.menu==="logs"){
     main.appendChild(renderLogs());
     return;
