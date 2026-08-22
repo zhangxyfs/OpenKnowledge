@@ -79,9 +79,10 @@ const I18N = {
     tagOpenai:"OpenAI 兼容", tagAnthropic:"Anthropic 兼容",
     fTemp:"temperature（高级，留空 = 不传）", fMaxTokens:"max_tokens（高级，0 = 默认）",
     eTitle:"语义检索（embedding）", eDesc:"混合检索的语义通道；不配置任何服务时退化为纯关键词检索",
-    eNone:"未配置（仅关键词检索）", eTimeout:"调用超时（秒）", eDir:"内置模型目录", eActive:"使用中",
+    eNone:"未配置（仅关键词检索）", eDir:"内置模型目录", eActive:"使用中",
     lTitle:"模型配置（LLM）", lDesc:"生成场景（条目优化等）调用的大模型服务；temperature 留空 = 不传",
-    lTimeout:"生成超时（秒）", lTest:"测试连接", lTesting:"测试中…", lTestOk:"✓ 连通（{ms}ms）",
+    lTest:"测试连接", lTesting:"测试中…", lTestOk:"✓ 连通（{ms}ms）",
+    lNone:"未配置（✨ 优化不可用）",
     hTitle:"Hook 超时", hDesc:"写入各 agent hooks 的超时秒数。2026-08-04 曾发生 Windows 高负载下 5s 超时致 PostToolUse 整会话静默丢失，故默认 10", hSec:"超时（秒）",
     gtTitle:"泛化门控", gtDesc:"命中内置/自定义短语的泛化 prompt 跳过检索注入与 embed 调用",
     gtOn:"启用门控", gtStatus:"内置 {b} 条 · 自定义 {n} 条", gtManage:"管理短语表",
@@ -106,6 +107,7 @@ const I18N = {
     xExportFail:"导出失败：", xImportFail:"导入失败：", xImportPick:"请先选择 zip 文件",
     xChlog:"更新日志", xChlogDesc:"查看各版本的新功能与修复；升级后首次打开会自动弹出",
     xChlogEmpty:"暂无更新日志",
+    upTitle1:"新版本 v{v} 更新内容", upTitleN:"已更新到 v{v}（含最近 {n} 个版本）",
     xHelp:"使用帮助", xHelpDesc:"怎么调用、怎么配置、常见问题", xView:"查看", xGotIt:"知道了",
     xHelpErr:"帮助文档加载失败，请检查安装是否完整。",
     xDel:"删除项目知识库", xDelDesc:"永久删除所选项目的全部知识、索引与配置，并注销注册表（hooks 不再注入）。项目源码目录不受影响。",
@@ -177,9 +179,10 @@ const I18N = {
     tagOpenai:"OpenAI-compat", tagAnthropic:"Anthropic-compat",
     fTemp:"temperature (advanced, empty = not sent)", fMaxTokens:"max_tokens (advanced, 0 = default)",
     eTitle:"Semantic retrieval (embedding)", eDesc:"The semantic channel of hybrid retrieval; degrades to keyword-only when no service is configured",
-    eNone:"Not configured (keyword-only)", eTimeout:"Timeout (s)", eDir:"Builtin models dir", eActive:"Active",
+    eNone:"Not configured (keyword-only)", eDir:"Builtin models dir", eActive:"Active",
     lTitle:"Model config (LLM)", lDesc:"LLM services for generation tasks (entry polishing etc.); empty temperature = not sent",
-    lTimeout:"Generation timeout (s)", lTest:"Test connection", lTesting:"Testing…", lTestOk:"✓ Connected ({ms}ms)",
+    lTest:"Test connection", lTesting:"Testing…", lTestOk:"✓ Connected ({ms}ms)",
+    lNone:"Not configured (✨ polish unavailable)",
     hTitle:"Hook timeout", hDesc:"Timeout seconds written into each agent's hooks. On 2026-08-04 a 5s timeout under Windows load silently dropped PostToolUse for an entire session — hence default 10", hSec:"Timeout (s)",
     gtTitle:"Generalization gate", gtDesc:"Prompts matching builtin/custom phrases skip retrieval injection and embed calls",
     gtOn:"Enable gate", gtStatus:"{b} builtin · {n} custom", gtManage:"Manage phrases",
@@ -204,6 +207,7 @@ const I18N = {
     xExportFail:"Export failed: ", xImportFail:"Import failed: ", xImportPick:"Choose a zip file first",
     xChlog:"Changelog", xChlogDesc:"New features and fixes per release; pops up automatically on first open after an upgrade",
     xChlogEmpty:"No changelog entries",
+    upTitle1:"What's new in v{v}", upTitleN:"Updated to v{v} (includes the last {n} versions)",
     xHelp:"User guide", xHelpDesc:"How to call, configure, and FAQ", xView:"View", xGotIt:"Got it",
     xHelpErr:"Failed to load the help doc; please check the installation.",
     xDel:"Delete project KB", xDelDesc:"Permanently deletes all entries, index and config of the selected project, and unregisters it (hooks stop injecting). Source directory is untouched.",
@@ -322,8 +326,8 @@ const AGENT_META = {
     desc:"hooks 注入（claude 协议），技能目录独立。",
     descEn:"Hooks injection (claude protocol) with its own skills dir." },
   reasonix:  { kind:"hook",   color:"#4f46e5", abbr:"Rx",
-    target:"~/.reasonix/plugins/openknowledge/（含 extensions 注册）",
-    targetEn:"~/.reasonix/plugins/openknowledge/ (incl. extensions registry)",
+    target:"%APPDATA%\\reasonix\\plugins\\openknowledge\\（含 extensions 注册）",
+    targetEn:"%APPDATA%\\reasonix\\plugins\\openknowledge\\ (incl. extensions registry)",
     desc:"sidecar 扩展接入，强制检查走拦截器。",
     descEn:"Sidecar extension; enforce checks run through the interceptor." },
   dsh:       { kind:"plugin", color:"#0284c7", abbr:"DS",
@@ -599,7 +603,8 @@ function ptext(val, commit, width){
   return i;
 }
 /* ================= 极简 markdown 渲染 ================= */
-function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+// esc 转义引号：badges 等处会把 esc 结果拼进 title="..." 属性上下文（Task 5 评审 Minor 1）
+function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 function inline(s){
   return esc(s).replace(/`([^`]+)`/g,"<code>$1</code>").replace(/\*\*([^*]+)\*\*/g,"<b>$1</b>");
 }
@@ -714,7 +719,7 @@ function loadBranchInfo(project){
 function badges(e){
   const born = bornOf(e);
   return (born ? '<span class="badge-born" title="born">'+ICON.branch+esc(born)+'</span>' : "")
-       + '<span class="badge-type t-'+e.type+'" title="'+esc(e.type)+'">'+(TYPE_LABEL[e.type]||"?")+'</span>';
+       + '<span class="badge-type t-'+esc(e.type)+'" title="'+esc(e.type)+'">'+(TYPE_LABEL[e.type]||"?")+'</span>';
 }
 function detailAttrs(e, proj){
   let s = "";
@@ -1275,7 +1280,7 @@ function renderPrefs(){
           + esc(cur.kind==="anthropic"?t("tagAnthropic"):t("tagOpenai")) + '</span>'
           + ' <b>'+esc(cur.name)+'</b> <span class="mono">'+esc((cur.model||"")+(cur.base_url?" @ "+cur.base_url:""))+'</span>';
       } else {
-        sumBody.innerHTML = '<span class="muted">'+t("eNone")+'</span>';
+        sumBody.innerHTML = '<span class="muted">'+t("lNone")+'</span>';
       }
     }
     const mg = el("button","btn"); mg.textContent = t("eManage");
@@ -1354,7 +1359,9 @@ function renderPrefs(){
       prefsErr.cap = "";
       api("/api/capture", { method:"POST", body:{ project:PREFS.project,
         mode:PREFS_D.capMode, turn_interval:PREFS_D.capInterval } }).then(r=>{
-        PREFS.cap.mode = r.mode; PREFS.cap.turn_interval = r.turn_interval; pSave("cap");
+        // 后端 turn_interval=0 语义为"保持不变"（api.go）：草稿回写响应真值，显示不与服务端背离
+        PREFS.cap.mode = r.mode; PREFS.cap.turn_interval = r.turn_interval;
+        PREFS_D.capMode = r.mode; PREFS_D.capInterval = r.turn_interval; pSave("cap");
       }).catch(err=>{ prefsErr.cap = err.message; render(); });
     });
     d.appendChild(card);
@@ -2250,6 +2257,45 @@ function renderDocModal(){
   return mask;
 }
 
+/* ================= 升级首弹（旧 GUI checkChangelog 语义保留，Task 8 核对清单 1） =================
+   启动时拉 /api/changelog：pending 非空 → 弹更新日志（API 升序 → 展示翻转为降序，版本间 <hr>）。
+   弹窗挂 document.body、不进 render() 周期——任何菜单页启动都会弹且不被页面重渲打掉。
+   仅升级弹窗关闭时 POST /api/changelog/seen；其他页「查看」入口只读 all，不影响 seen 状态。 */
+function checkUpgrade(){
+  api("/api/changelog").then(c=>{
+    const p = c && c.pending;
+    if(!p || !p.length) return;
+    const latest = p[p.length-1].version;
+    const title = p.length>1
+      ? t("upTitleN").replace("{v}",latest).replace("{n}",p.length)
+      : t("upTitle1").replace("{v}",latest);
+    openUpgradeModal(title, p);
+  }).catch(()=>{ /* 拉取失败不阻断主界面（旧语义） */ });
+}
+function openUpgradeModal(title, entries){
+  const mask = el("div","mask");
+  const m = el("div","modal");
+  m.appendChild(Object.assign(el("h3"),{textContent:title}));
+  const body = el("div","md");
+  body.innerHTML = entries.slice().reverse().map(e=>renderMd(e.log)).join("<hr>");
+  m.appendChild(body);
+  const foot = el("div","mfoot");
+  const ok = el("button","btn btn-primary"); ok.textContent = t("xGotIt");
+  let closed = false;
+  const close = ()=>{
+    if(closed) return; closed = true;
+    mask.remove();
+    // seen 失败则下次启动再弹，自行愈合，不打扰本次使用
+    api("/api/changelog/seen", { method:"POST" }).catch(()=>{});
+  };
+  ok.onclick = close;
+  foot.appendChild(ok);
+  m.appendChild(foot);
+  mask.appendChild(m);
+  mask.onclick = e=>{ if(e.target===mask) close(); };
+  document.body.appendChild(mask);
+}
+
 /* 删除项目知识库确认弹窗：备份勾选 + ack 勾选 + 输入完整项目名，三齐备才解锁「永久删除」
    （计划/原型注释语义——原型代码漏查 backup，此处按注释与计划文本落实）。确认后先导出
    zip 备份（失败中止删除，旧 GUI 语义），再 DELETE；已注销但目录删除失败时按 warning
@@ -2430,3 +2476,13 @@ function renderBody(app){
 render();
 
 
+
+/* 启动横切（旧 GUI 语义，Task 8 核对清单 1/6）：
+   1. 无项目 → 落 setup 引导页（旧：无项目隐藏管理 tab 只展示引导页；新 UI 树对空数据健壮，
+      只落页不隐藏菜单，覆盖 hash 恢复——首次运行的引导意图优先）
+   2. 升级后首次打开自动弹更新日志（pending 非空 → 弹窗，关闭时 POST seen） */
+api("/api/projects").then(ps=>{
+  if(ps && ps.length) return;
+  state.menu = "setup"; location.hash = "setup"; render();
+}).catch(()=>{ /* 拉取失败保持 hash/默认页，不阻断 */ });
+checkUpgrade();
