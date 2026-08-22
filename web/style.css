@@ -240,7 +240,9 @@ button { font:inherit; color:inherit; }
 .pinput, .pselect { padding:5px 10px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--fg); font-size:13px; }
 .pinput:focus, .pselect:focus { outline:none; border-color:var(--primary); }
 .pfoot { margin-top:12px; display:flex; align-items:center; gap:10px; }
-.pfoot .fb2 { font-size:12px; color:var(--ok); }
+/* 反馈小字：设置卡页脚与其他页卡右端共用（.pfoot .fb2 为同一规则的历史写法，保留兼容） */
+.fb2, .pfoot .fb2 { font-size:12px; color:var(--ok); }
+.fb2.err { color:#dc2626; }
 .switch { position:relative; width:38px; height:22px; border-radius:999px; background:var(--border); border:none; cursor:pointer; transition:background .15s; flex:none; padding:0; }
 .switch.on { background:var(--ok); }
 .switch::after { content:""; position:absolute; top:3px; left:3px; width:16px; height:16px; border-radius:50%; background:#fff; transition:left .15s; }
