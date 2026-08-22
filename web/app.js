@@ -120,6 +120,9 @@ const I18N = {
     xAbout:"关于", xVer:"版本", xHome:"数据目录", xProjCount:"已注册项目", xProjUnit:" 个",
     xLoadFail:"数据加载失败：",
     mgNew:"+ 新建", mgLoading:"加载中…", mgTreeErr:"条目加载失败：",
+    readmeEmpty:"该项目没有 README，也没有 wiki 概述条目。可在项目根目录添加 README.md，或用 ok wiki / openknowledge-wiki 技能生成项目概述。",
+    readmeSrcReadme:"项目 README · {p}", readmeSrcWiki:"项目 wiki 概述 · {p}",
+    readmeLoadFail:"README 加载失败：", lazyMore:"还有 {n} 条…",
     opEdit:"编辑", opApprove:"批准", opArchive:"归档", opUnarchive:"取消归档", opDelete:"删除",
     cfmDelete:"确定删除条目「{t}」？",
     cfmArchive:"归档条目「{t}」？归档后退出 INDEX 与强制注入，仍可被检索命中。",
@@ -219,6 +222,9 @@ const I18N = {
     xAbout:"About", xVer:"Version", xHome:"Data dir", xProjCount:"Registered projects", xProjUnit:"",
     xLoadFail:"Failed to load data: ",
     mgNew:"+ New", mgLoading:"Loading…", mgTreeErr:"Failed to load entries: ",
+    readmeEmpty:"This project has no README and no wiki overview entry. Add a README.md to the project root, or generate an overview with ok wiki / the openknowledge-wiki skill.",
+    readmeSrcReadme:"Project README · {p}", readmeSrcWiki:"Project wiki overview · {p}",
+    readmeLoadFail:"Failed to load README: ", lazyMore:"{n} more…",
     opEdit:"Edit", opApprove:"Approve", opArchive:"Archive", opUnarchive:"Unarchive", opDelete:"Delete",
     cfmDelete:"Delete entry \"{t}\"?",
     cfmArchive:"Archive entry \"{t}\"? It leaves INDEX and mandatory injection, but stays searchable.",
@@ -518,7 +524,7 @@ async function toggleAgent(a){
 
 /* ================= 状态 ================= */
 const state = { menu:"manage", lang:"zh", theme:"light", collapsed:false,
-                open:{}, sel:null, q:"", mgmtFb:null,
+                open:{}, openTouched:false, sel:null, projSel:null, q:"", mgmtFb:null, treeShown:{},
                 logSrc:{ ok:true, daemon:true, sidecar:true }, logSem:false, logQ:"",
                 logAuto:true, logStick:true, miscFb:null };
 const t = k => I18N[state.lang][k];
@@ -638,13 +644,23 @@ function renderMd(src){
    搜索框旁；新建/编辑复用同一弹窗 + ✨优化走 /api/entry/optimize（对照预览回填，
    保存才落盘）。born/继承徽标 hover 浮动窗沿用 v2.18.2 行为（branch-info，旧
    app.js:321-374）。弹窗挂 document.body（position:fixed），不进 #app 渲染周期——
-   后台刷新（refreshManage/loadDetail/loadBranchInfo 完成）整页重渲不会打掉表单输入态。 */
+   后台刷新（refreshManage/loadDetail/loadBranchInfo 完成）整页重渲不会打掉表单输入态。
+   试用反馈迭代（manage-v2）：树栏加宽至 360px + 可拖拽分隔条（localStorage 持久化，
+   200px~50% 钳制）；点项目节点右侧显示项目 README（GET /api/project/readme，无 README
+   回落 wiki 概述条目）；截断标题悬停出完整标题浮窗（事件委托）；项目按 last_update
+   降序 + 4s 轮询已展开项目条目，有变化才重渲；项目手风琴展开（默认展开最近更新项）
+   + 条目懒加载（>50 先渲 50，滚到底追加）。 */
 const TYPE_LABEL = { pitfall:"坑", note:"注", rule:"规", reference:"参" };
-let MGMT = null;        // {list:[{name,paths,entries,err}], loadErr} 缓存；loadManage 惰性加载
+let MGMT = null;        // {list:[{name,paths,lastUpdate,entries,err}], loadErr} 缓存；loadManage 惰性加载
 let DETAIL = null;      // {key(project\nfile), data, err} 当前选中条目全文缓存
 const BRANCH = {};      // project → branch-info（会话级缓存；null=已拉取但失败/无数据，占位防重拉）
 let entryMask = null, cmpMask = null, llmMask = null;   // 管理页弹窗节点（body 级，同时只各存一个）
 let optAbort = null;    // 优化进行中的 AbortController；关闭编辑弹窗即取消
+const README = {};      // project → {data, err} 项目 README/wiki 概述缓存（条目变更即失效）
+const LAZY_STEP = 50;   // 树内条目懒加载步进：项目条目 >50 时先渲 50，滚到底附近再追加下一批
+const TREE_W_KEY = "ok-tree-w";   // 树栏宽度 localStorage 键（拖拽分隔条持久化）
+let treeTip = null;     // 截断标题悬浮窗节点（body 级，同时只一个）
+let mgmtPollBusy = false;         // 管理页 4s 轮询重入保护
 
 function fmtTime(unix){
   if(!unix) return "";
@@ -668,15 +684,21 @@ function findEntry(project, file){
 }
 
 function loadManage(){ if(MGMT) return; MGMT = { list:[] }; refreshManage(); }
-// refreshManage 全量重拉项目+条目；完成时原位刷新（过滤框聚焦中只重填树、不整页重渲，保焦点）
+// refreshManage 全量重拉项目+条目；项目按 last_update 降序（kb.db mtime，api.go listProjects
+// 口径，最近有知识写入的排前）。完成时原位刷新（过滤框聚焦中只重填树、不整页重渲，保焦点）
 function refreshManage(){
   api("/api/projects").then(ps=>{
     return Promise.all((ps||[]).map(p=>
       api("/api/entries?project="+encodeURIComponent(p.name))
-        .then(es=>({ name:p.name, paths:p.paths||[], entries:es||[] }))
-        .catch(err=>({ name:p.name, paths:p.paths||[], entries:[], err:err.message }))));
+        .then(es=>({ name:p.name, paths:p.paths||[], lastUpdate:p.last_update||0, entries:es||[] }))
+        .catch(err=>({ name:p.name, paths:p.paths||[], lastUpdate:p.last_update||0, entries:[], err:err.message }))));
   }).then(list=>{
+    list.sort((a,b)=>(b.lastUpdate||0)-(a.lastUpdate||0) || (a.name<b.name?-1:a.name>b.name?1:0));
     MGMT = { list:list };
+    // 手风琴兜底（反馈7）：用户尚未手动展开/收起过且无展开项时，默认展开最近更新的项目
+    if(!state.openTouched && list.length && !list.some(p=>state.open[p.name]===true)){
+      state.open = {}; state.open[list[0].name] = true;
+    }
     // 选中条目已消失（外部删除/项目删除）→ 清选择与详情缓存
     if(state.sel && !findEntry(state.sel.project, state.sel.file)){ state.sel = null; DETAIL = null; }
   }).catch(err=>{
@@ -712,6 +734,59 @@ function loadBranchInfo(project){
     .catch(()=>{ BRANCH[project] = null; })
     .then(()=>{ if(state.menu==="manage") render(); });
 }
+// loadReadme 拉项目 README/wiki 概述（点项目节点时，反馈3）；条目变更后由调用方删缓存重拉
+function loadReadme(project, force){
+  if(!project) return;
+  if(!force && README[project] && (README[project].data || README[project].err)) return;
+  README[project] = { data:null, err:"" };
+  api("/api/project/readme?project="+encodeURIComponent(project))
+    .then(d=>{ README[project] = { data:d, err:"" }; })
+    .catch(err=>{ README[project] = { data:null, err:err.message }; })
+    .then(()=>{ if(state.menu==="manage" && !state.sel && state.projSel===project) render(); });
+}
+
+/* 管理页 ~4s 轮询（反馈6，沿用日志页轮询范式）：菜单在管理页且页面可见时，重拉
+   /api/projects 与当前展开项目的 /api/entries，与 MGMT 缓存对比有变化才重渲；
+   项目增删走 refreshManage 全量。重渲保持树滚动（render 外壳）、展开项（state.open
+   不动）、当前选中条目与过滤框内容；CLI 侧 ok add/修改 4 秒内反映到界面。 */
+async function pollManage(){
+  if(state.menu!=="manage" || !MGMT || MGMT.loadErr || document.hidden || mgmtPollBusy) return;
+  if(document.body.classList.contains("tree-resizing")) return;   // 拖拽分隔条期间不重渲
+  mgmtPollBusy = true;
+  try {
+    const ps = await api("/api/projects").catch(()=>null);
+    if(!ps) return;   // 轮询失败静默、下轮重试（401 由 api() 自动刷新取新 token）
+    const names = ps.map(p=>p.name).sort().join("\n");
+    if(names !== MGMT.list.map(p=>p.name).sort().join("\n")){ refreshManage(); return; }   // 项目增删 → 全量
+    const lu = {}; ps.forEach(p=>{ lu[p.name] = p.last_update||0; });
+    const luChanged = MGMT.list.some(p=>(p.lastUpdate||0)!==(lu[p.name]||0));
+    const openP = MGMT.list.find(p=>state.open[p.name]===true);
+    let newEntries = null;
+    if(openP && !openP.err){
+      const es = await api("/api/entries?project="+encodeURIComponent(openP.name)).catch(()=>null);
+      if(es && JSON.stringify(es)!==JSON.stringify(openP.entries)) newEntries = es;
+    }
+    if(!luChanged && !newEntries) return;   // 无变化不重渲
+    MGMT.list.forEach(p=>{ p.lastUpdate = lu[p.name]||0; });
+    MGMT.list.sort((a,b)=>(b.lastUpdate||0)-(a.lastUpdate||0) || (a.name<b.name?-1:a.name>b.name?1:0));
+    if(newEntries){
+      openP.entries = newEntries;
+      delete README[openP.name];   // wiki 概述回落可能随条目变化
+      if(state.projSel===openP.name && !state.sel) loadReadme(openP.name);
+    }
+    if(state.sel && !findEntry(state.sel.project, state.sel.file)){ state.sel = null; DETAIL = null; }
+    const ae = document.activeElement;
+    if(ae && ae.classList && ae.classList.contains("search")){
+      const sc = document.querySelector(".tree-scroll");
+      if(sc) fillTree(sc);
+      return;
+    }
+    render();
+  } finally { mgmtPollBusy = false; }
+}
+setInterval(pollManage, 4000);
+// 页面从最小化/切 tab 回来立即补一轮（不可见期间 pollManage 自行跳过，即停轮）
+document.addEventListener("visibilitychange", ()=>{ if(!document.hidden) pollManage(); });
 
 function badges(e){
   const born = bornOf(e);
@@ -744,6 +819,7 @@ function detailAttrs(e, proj){
 
 function renderTree(){
   const tree = el("div","tree");
+  tree.style.width = treeWidth()+"px";   // 拖拽分隔条的持久化宽度（反馈2）
   const head = el("div","tree-head");
   head.appendChild(Object.assign(el("span","caption"),{textContent:t("treeCaption")}));
   tree.appendChild(head);
@@ -758,17 +834,33 @@ function renderTree(){
   add.disabled = !MGMT || !MGMT.list.length;
   add.onclick = ()=>{
     const def = (state.sel && findEntry(state.sel.project, state.sel.file) && state.sel.project)
+      || state.projSel
       || (MGMT.list[0] && MGMT.list[0].name) || "";
     openEntryModal(def, null);
   };
   tools.appendChild(add);
   tree.appendChild(tools);
   const scroll = el("div","tree-scroll");
+  // 截断标题悬浮窗（反馈5）：事件委托挂在树容器，仅当标题被截断（scrollWidth>clientWidth）才显示
+  scroll.addEventListener("mouseover", ev=>{
+    const leaf = ev.target && ev.target.closest ? ev.target.closest(".leaf") : null;
+    const t2 = leaf && leaf.querySelector(".t2");
+    if(!t2 || t2.scrollWidth <= t2.clientWidth){ hideTreeTip(); return; }
+    if(treeTip && treeTip._for === leaf) return;
+    showTreeTip(leaf, t2.textContent);
+  });
+  scroll.addEventListener("mouseleave", hideTreeTip);
+  // 懒加载（反馈7）：滚到底附近时给还有未渲条目的展开项目追加一批
+  scroll.addEventListener("scroll", ()=>{
+    hideTreeTip();
+    if(scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 60) growTreeShown(scroll);
+  });
   tree.appendChild(scroll);
   fillTree(scroll);
   return tree;
 }
 function fillTree(scroll){
+  hideTreeTip();
   scroll.innerHTML = "";
   if(!MGMT) return;
   if(MGMT.loadErr){
@@ -779,16 +871,24 @@ function fillTree(scroll){
   MGMT.list.forEach(p=>{
     const list = p.entries.filter(e=>!q || e.title.toLowerCase().includes(q));
     if(q && !list.length) return;   // 过滤时无命中项目整组隐藏（原型语义）；无过滤时空项目也显示（否则树里不可见）
-    const open = q ? true : state.open[p.name] !== false;   // 默认展开；点项目名折叠/展开
+    const open = q ? true : state.open[p.name] === true;   // 手风琴（反馈7）：至多一个项目展开
     const pj = el("button","tn-proj"+(open?" open":""));
     pj.innerHTML = '<span class="caret">▶</span><span class="folder">'+ICON.folder+'</span>'+esc(p.name)
       +'<span class="cnt">'+(p.err?"!":list.length)+'</span>';
     pj.title = p.err ? t("mgTreeErr")+p.err : (p.paths||[]).join("\n");
-    pj.onclick = ()=>{ state.open[p.name]=!open; render(); };
+    pj.onclick = ()=>{
+      state.openTouched = true;
+      if(open){ state.open[p.name] = false; }              // 再点收起 → 全收起
+      else { state.open = {}; state.open[p.name] = true; } // 展开即互斥收起其他
+      state.sel = null; DETAIL = null;
+      state.projSel = p.name; loadReadme(p.name);          // 点项目节点 → 右侧显示项目 README（反馈3）
+      render();
+    };
     scroll.appendChild(pj);
     if(open){
       const kids = el("div","tn-kids");
-      list.forEach(e=>{
+      const shown = state.treeShown[p.name] || LAZY_STEP;
+      list.slice(0, shown).forEach(e=>{
         const sel = state.sel && state.sel.project===p.name && state.sel.file===e.file;
         const leaf = el("button","leaf"+(sel?" sel":"")+(e.archived?" archived":""));
         leaf.innerHTML = '<span class="l1">'+badges(e)
@@ -798,15 +898,108 @@ function fillTree(scroll){
         leaf.onclick = ()=>{ state.sel={ project:p.name, file:e.file }; state.mgmtFb=null; loadDetail(); render(); };
         kids.appendChild(leaf);
       });
+      if(list.length > shown){
+        kids.appendChild(Object.assign(el("div","lazy-more"),
+          {textContent:t("lazyMore").replace("{n}", String(list.length - shown))}));
+      }
       scroll.appendChild(kids);
     }
   });
+}
+// growTreeShown 懒加载追加（反馈7）：第一个还有未渲条目的展开项目步进 LAZY_STEP，
+// 原位重填树；追加在列表尾部，scrollTop 天然不变
+function growTreeShown(scroll){
+  if(!MGMT || !MGMT.list) return;
+  const q = state.q.trim().toLowerCase();
+  for(const p of MGMT.list){
+    if(!(q ? true : state.open[p.name]===true)) continue;
+    const total = p.entries.filter(e=>!q || e.title.toLowerCase().includes(q)).length;
+    const shown = state.treeShown[p.name] || LAZY_STEP;
+    if(total > shown){
+      state.treeShown[p.name] = shown + LAZY_STEP;
+      fillTree(scroll);
+      return;
+    }
+  }
+}
+
+/* 截断标题悬浮窗（反馈5）：继承徽标 bubble 同款配色（#111827 深底）的 body 级浮窗，
+   定位在条目右侧；右边界放不下时收回视口内 */
+function showTreeTip(leaf, text){
+  hideTreeTip();
+  const n = el("div","tt-pop");
+  n.textContent = text;
+  n._for = leaf;
+  document.body.appendChild(n);
+  const r = leaf.getBoundingClientRect();
+  n.style.left = Math.max(8, Math.min(r.right+8, window.innerWidth-n.offsetWidth-8))+"px";
+  n.style.top = (r.top + r.height/2)+"px";
+  treeTip = n;
+}
+function hideTreeTip(){
+  if(treeTip){ treeTip.remove(); treeTip = null; }
+}
+
+/* 树栏宽度（反馈2）：localStorage 持久化，钳制 200px ~ 视口 50% */
+function clampTreeW(w){
+  return Math.round(Math.min(Math.max(240, window.innerWidth*0.5), Math.max(200, w)));
+}
+function treeWidth(){
+  const w = parseInt(localStorage.getItem(TREE_W_KEY)||"", 10);
+  return isNaN(w) ? 360 : clampTreeW(w);
+}
+// 拖拽分隔条：mousedown 后 document 级 mousemove/mouseup 跟随，松手写回 localStorage
+function renderTreeResizer(){
+  const bar = el("div","tree-resizer");
+  bar.addEventListener("mousedown", ev=>{
+    ev.preventDefault();
+    const treeEl = document.querySelector(".tree");
+    if(!treeEl) return;
+    const startX = ev.clientX, startW = treeEl.getBoundingClientRect().width;
+    document.body.classList.add("tree-resizing");
+    const move = e=>{ treeEl.style.width = clampTreeW(startW + e.clientX - startX)+"px"; };
+    const up = ()=>{
+      document.removeEventListener("mousemove", move);
+      document.removeEventListener("mouseup", up);
+      document.body.classList.remove("tree-resizing");
+      localStorage.setItem(TREE_W_KEY, String(clampTreeW(treeEl.getBoundingClientRect().width)));
+    };
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", up);
+  });
+  return bar;
+}
+
+// 项目节点详情（反馈3）：项目名 + README/wiki 概述来源行 + renderMd 正文；无 README 给空态提示
+function renderProjectReadme(d, project){
+  const rm = README[project];
+  d.appendChild(Object.assign(el("div","d-path"),{textContent:"projects/"+project+"/"}));
+  d.appendChild(Object.assign(el("h1","d-title"),{textContent:project}));
+  if(!rm || (!rm.data && !rm.err)){
+    d.appendChild(Object.assign(el("div","pdesc"),{textContent:t("mgLoading")}));
+    return;
+  }
+  if(rm.err){
+    d.appendChild(Object.assign(el("div","pdesc fb2 err"),{textContent:t("readmeLoadFail")+rm.err}));
+    return;
+  }
+  const r = rm.data;
+  if(!r || !r.found){
+    d.appendChild(Object.assign(el("div","d-summary pdesc"),{textContent:t("readmeEmpty")}));
+    return;
+  }
+  const src = r.source==="wiki" ? t("readmeSrcWiki") : t("readmeSrcReadme");
+  d.appendChild(Object.assign(el("div","d-filemeta"),{textContent:src.replace("{p}", r.path||"")}));
+  const bd = el("div","d-body md");
+  bd.innerHTML = renderMd(r.content||"");
+  d.appendChild(bd);
 }
 
 function renderDetail(){
   const d = el("div","detail");
   const sel = state.sel && findEntry(state.sel.project, state.sel.file);
   if(!sel){
+    if(state.projSel){ renderProjectReadme(d, state.projSel); return d; }   // 点项目节点 → README（反馈3）
     d.appendChild(Object.assign(el("div","placeholder"),{textContent:t("pickEntry")}));
     return d;
   }
@@ -843,8 +1036,10 @@ function renderDetail(){
 /* ---------- 条目操作（旧 GUI 语义：批准/归档/删除后刷新树与详情） ---------- */
 function afterEntryOp(){
   state.mgmtFb = null;
+  for(const k in README) delete README[k];   // 条目增删改可能影响 wiki 概述回落，README 缓存全失效
   refreshManage();               // 树刷新（选中项消失则自动清选择）
   if(state.sel) loadDetail(true);
+  if(!state.sel && state.projSel) loadReadme(state.projSel);   // README 视图原位重拉
   if(MISC) refreshMisc();        // 其他页缓存联动（Task 4 评审约定：项目/条目增删改后其他页可刷新）
   render();
 }
@@ -2428,6 +2623,7 @@ function renderBody(app){
   if(state.menu==="manage"){
     loadManage();
     main.appendChild(renderTree());
+    main.appendChild(renderTreeResizer());   // 树栏拖拽分隔条（反馈2）
     main.appendChild(renderDetail());
     return;
   }

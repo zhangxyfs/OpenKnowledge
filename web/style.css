@@ -71,8 +71,9 @@ button { font:inherit; color:inherit; }
                            font-size:12px; padding:3px 10px; border-radius:4px; white-space:nowrap; z-index:50; }
 .side.collapsed .mi:hover .tip { display:block; }
 
-/* 树（v1-B 形态：过滤框 + 紧凑叶节点） */
-.tree { width:272px; background:var(--card); border-right:1px solid var(--border);
+/* 树（v1-B 形态：过滤框 + 紧凑叶节点）；默认宽 360px（反馈2 自 272px 加宽约 1/3，
+   拖拽分隔条改动并持久化，JS 内联 width 为准） */
+.tree { width:360px; background:var(--card); border-right:1px solid var(--border);
         display:flex; flex-direction:column; flex:none; }
 .tree-head { padding:10px 10px 6px; display:flex; gap:6px; align-items:center; }
 .tree-head .caption { font-size:12px; font-weight:600; color:var(--muted); margin-right:auto; }
@@ -100,6 +101,17 @@ button { font:inherit; color:inherit; }
             white-space:nowrap; }
 .leaf.sel .t2 { color:var(--sel-fg); }
 .leaf.archived .t2 { color:var(--muted); text-decoration:line-through; }
+
+/* 树栏拖拽分隔条（反馈2）：常态透明 6px 热区，hover/拖拽中显选中底色细条 */
+.tree-resizer { width:6px; flex:none; cursor:col-resize; background:transparent; transition:background .12s; }
+.tree-resizer:hover, body.tree-resizing .tree-resizer { background:var(--sel-bg); }
+body.tree-resizing { cursor:col-resize; user-select:none; }
+/* 懒加载尾行（反馈7）：展开项目还有未渲条目时的提示行 */
+.lazy-more { color:var(--muted); font-size:11.5px; padding:4px 7px; }
+/* 截断标题悬浮窗（反馈5）：继承徽标 bubble 同款深底，body 级 fixed 定位 */
+.tt-pop { position:fixed; transform:translateY(-50%); background:#111827; color:#fff;
+          font-size:12px; padding:4px 10px; border-radius:4px; z-index:90;
+          max-width:min(480px,60vw); white-space:normal; word-break:break-all; }
 
 /* 详情（v1-A 文档流） */
 .detail { flex:1; overflow-y:auto; padding:20px 28px 60px; }
