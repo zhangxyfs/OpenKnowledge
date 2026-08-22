@@ -159,6 +159,6 @@ func OpenGUI(_, stderr io.Writer) int {
 			return 0
 		}
 	}
-	fmt.Fprintln(stderr, "daemon 启动超时，请重试 ok gui")
+	fmt.Fprintln(stderr, "daemon 启动超时，请重试")
 	return 1
 }

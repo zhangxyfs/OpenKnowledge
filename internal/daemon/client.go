@@ -24,7 +24,7 @@ const (
 
 var forwardTimeout = 9 * time.Second
 
-// SpawnDetached 后台拉起 `ok daemon`；测试可替换。
+// SpawnDetached 后台拉起 daemon（目标与参数由 daemonTarget 决定）；测试可替换。
 var SpawnDetached = spawnDetached
 
 func quickClient() *http.Client { return &http.Client{Timeout: healthTimeout} }
@@ -44,14 +44,11 @@ func Ensure() {
 	if err := os.WriteFile(mark, []byte("1"), 0o644); err != nil {
 		return
 	}
-	exe, err := os.Executable()
-	if err != nil {
+	exe, args := daemonTarget()
+	if exe == "" {
 		return
 	}
-	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
-		exe = resolved
-	}
-	_ = SpawnDetached(exe, filepath.Join(registry.Home(), "daemon.log"))
+	_ = SpawnDetached(exe, args, filepath.Join(registry.Home(), "daemon.log"))
 }
 
 // EnsureCurrent 返回健康且指纹一致的 daemon 凭证；
@@ -66,7 +63,8 @@ func EnsureCurrent() (*daemonx.Info, bool) {
 		Ensure()
 		return nil, false
 	}
-	if cur, err := daemonx.ExeFingerprint(); err != nil || cur != info.Fingerprint {
+	target, _ := daemonTarget()
+	if cur, err := daemonx.FingerprintOf(target); err != nil || cur != info.Fingerprint {
 		info.Shutdown(quickClient())
 		_ = daemonx.Remove() // 旧凭证作废，否则 Ensure 见旧 daemon 仍健康会直接返回
 		Ensure()

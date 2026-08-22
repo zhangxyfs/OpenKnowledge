@@ -34,7 +34,9 @@ func run(argv []string) int {
 		return runHook(argv[2:])
 	case "extension-serve":
 		return runExtensionServe()
-	case "daemon":
+	case "daemon": // 已弃用的兼容入口：生产部署由 okd.exe 承载（cmd/okd），此处仅为
+		// spawn 回退（无 okd.exe 的旧部署/单二进制开发）与 `daemon stop` 客户端操作保留。
+		// 见 docs/2026-08-21-gui-split-design.md §4.1。
 		if len(argv) > 2 && argv[2] == "stop" {
 			return daemon.Stop(os.Stdout, os.Stderr)
 		}
@@ -79,6 +81,8 @@ func run(argv []string) int {
 
 // runHook hook 路径全面 fail-open：panic 也只放行。
 // 优先转发给常驻 daemon；daemon 不在则本地直接处理并后台拉起。
+// 本地兜底是"单写者"架构中有意保留的例外：daemon 崩溃时 agent 会话不得被卡死，
+// daemon 恢复后由 mtime 增量 sync 收编兜底写入。删除此路径需先改设计文档 §4.1。
 func runHook(args []string) (code int) {
 	defer func() {
 		if r := recover(); r != nil {

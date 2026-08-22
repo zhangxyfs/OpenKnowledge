@@ -71,15 +71,18 @@ def main():
     if not args.skip_winres:
         winres = shutil.which("go-winres") or str(Path(os.environ.get("GOPATH", Path.home() / "go")) / "bin" / "go-winres.exe")
         if Path(winres).exists() if not shutil.which("go-winres") else True:
-            run([winres, "make", "--in", "winres.json"], cwd=ROOT / "cmd" / "ok")
+            for pkg in ("ok", "okd", "okmanager"):
+                run([winres, "make", "--in", "winres.json"], cwd=ROOT / "cmd" / pkg)
         else:
             print("go-winres 未安装，跳过 exe 图标嵌入")
             print("  安装: go install github.com/tc-hib/go-winres@latest")
 
-    # 2. 编译 dist/ok.exe + 拷贝 web/（注入版本号，与 build-dist.sh 一致）
+    # 2. 编译 dist/ 三 exe + 拷贝 web/（注入版本号，与 build-dist.sh 一致）
     ldflags = f"{LDFLAGS} -X openknowledge/internal/version.Version={app_version()}"
     (ROOT / "dist").mkdir(exist_ok=True)
     run(["go", "build", "-ldflags", ldflags, "-o", "dist/ok.exe", "./cmd/ok"])
+    run(["go", "build", "-ldflags", ldflags, "-o", "dist/okd.exe", "./cmd/okd"])
+    run(["go", "build", "-ldflags", ldflags, "-o", "dist/OkManager.exe", "./cmd/okmanager"])
     web_dist = ROOT / "dist" / "web"
     if web_dist.exists():
         shutil.rmtree(web_dist)
@@ -91,7 +94,7 @@ def main():
         shutil.rmtree(cl_dist)
     shutil.copytree(ROOT / "docs" / "changelogs", cl_dist)
     prepare_runtime()
-    print("dist/ built: ok.exe + web/ + changelogs/")
+    print("dist/ built: ok.exe + okd.exe + OkManager.exe + web/ + changelogs/")
 
     # 3. Inno Setup 打包
     if not args.skip_installer:

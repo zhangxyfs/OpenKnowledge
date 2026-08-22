@@ -69,13 +69,9 @@ func Remove() error {
 	return nil
 }
 
-// ExeFingerprint 返回当前可执行文件的指纹："路径|size|mtimeUnixNano"。
+// FingerprintOf 返回指定可执行文件的指纹："路径|size|mtimeUnixNano"。
 // exe 升级（重装/重新构建）后指纹必然变化，供版本不一致自动切换。
-func ExeFingerprint() (string, error) {
-	exe, err := os.Executable()
-	if err != nil {
-		return "", err
-	}
+func FingerprintOf(exe string) (string, error) {
 	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
 		exe = resolved
 	}
@@ -84,6 +80,16 @@ func ExeFingerprint() (string, error) {
 		return "", err
 	}
 	return fmt.Sprintf("%s|%d|%d", filepath.ToSlash(exe), fi.Size(), fi.ModTime().UnixNano()), nil
+}
+
+// ExeFingerprint 返回当前可执行文件的指纹（= FingerprintOf(自身)）。
+// daemon 进程内自报指纹用它；客户端比对请用 FingerprintOf(拉起目标)。
+func ExeFingerprint() (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	return FingerprintOf(exe)
 }
 
 // URL 返回 daemon 的 base URL。
