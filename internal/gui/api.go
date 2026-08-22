@@ -88,6 +88,7 @@ func NewHandler(webDir, token string, beats chan<- struct{}) *Handler {
 	api("POST /api/llm/test", h.apiLLMTest)
 	api("POST /api/entry/optimize", h.apiEntryOptimize)
 	api("GET /api/project/branch-info", h.apiProjectBranchInfo)
+	api("GET /api/project/readme", h.apiProjectReadme)
 	api("POST /api/heartbeat", h.apiHeartbeat)
 	api("POST /api/shutdown", h.apiShutdown)
 	api("POST /api/uninstall", h.apiUninstall)
@@ -1396,6 +1397,100 @@ func (h *Handler) apiProjectBranchInfo(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// apiProjectReadme 返回项目根目录的 README 正文，供管理页点击项目节点展示。
+// 依次尝试 README.md / README_EN.md / readme.md（项目根目录取注册表第一个路径）；
+// 无 README 文件时回落 wiki 概述条目——tags 含精确 wiki 标签（index/branch.go
+// hasWikiTag 口径）、已转正未归档、非分支差异（无 branch: 标签）的条目，取 mtime
+// 最新一条的正文。都没有返回 {"found":false}。正文截断至 256KB 防病态文件卡死页面。
+func (h *Handler) apiProjectReadme(w http.ResponseWriter, r *http.Request) {
+	name := r.URL.Query().Get("project")
+	st := resolveProject(w, name)
+	if st == nil {
+		return
+	}
+	reg, err := registry.Load(registry.DefaultPath())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	root := ""
+	for _, p := range reg.Projects {
+		if p.Name == name && len(p.Paths) > 0 {
+			root = p.Paths[0]
+			break
+		}
+	}
+	if root != "" {
+		for _, fn := range []string{"README.md", "README_EN.md", "readme.md"} {
+			data, err := os.ReadFile(filepath.Join(root, fn))
+			if err != nil || !utf8.Valid(data) {
+				continue
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"found":   true,
+				"source":  "readme",
+				"path":    fn,
+				"content": truncateUTF8(string(data), 256<<10),
+			})
+			return
+		}
+	}
+	// wiki 回落：概述类条目 = 精确 wiki 标签 + 非分支差异 + 已转正未归档
+	entries, err := entry.Load(st.KnowledgeDir())
+	if err == nil {
+		var best *entry.Entry
+		var bestMtime int64
+		for _, e := range entries {
+			if e.Draft || e.Archived || index.BranchOf(e.Tags) != "" {
+				continue
+			}
+			if !hasExactTag(e.Tags, "wiki") {
+				continue
+			}
+			var mtime int64
+			if fi, err := os.Stat(e.Path); err == nil {
+				mtime = fi.ModTime().Unix()
+			}
+			if best == nil || mtime > bestMtime {
+				best, bestMtime = e, mtime
+			}
+		}
+		if best != nil {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"found":   true,
+				"source":  "wiki",
+				"path":    "projects/" + name + "/knowledge/" + best.FileName(),
+				"title":   best.Title,
+				"content": truncateUTF8(best.Body, 256<<10),
+			})
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"found": false})
+}
+
+// hasExactTag 判定 tags 是否含精确等于 name 的标签（防 sewiki/nowiki 子串误判，
+// 与 index/branch.go hasWikiTag 同口径；index 层未导出该判定，此处按 tags 切片实现）。
+func hasExactTag(tags []string, name string) bool {
+	for _, t := range tags {
+		if t == name {
+			return true
+		}
+	}
+	return false
+}
+
+// truncateUTF8 截断至 max 字节且不切断多字节字符（越界短串原样返回）。
+func truncateUTF8(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	for max > 0 && !utf8.RuneStart(s[max]) {
+		max--
+	}
+	return s[:max] + "\n\n…"
 }
 
 // ---------- 心跳与停服 ----------
