@@ -162,13 +162,13 @@ OpenKnowledge/
 │   ├── setupx/                    # setup 共享逻辑（cli 与 gui 复用）
 │   │   ├── setupx.go              #   HooksBlockFor/UpsertHooksBlock/InstallSkills/SaveEmbedding/TestEmbedding/Enable/Disable
 │   │   └── setupx_test.go
-│   └── gui/                       # ★ Web GUI（ok gui / 无参数启动）
+│   └── gui/                       # ★ 配置中心 API + 静态页分发（okd 承载；ok gui / OkManager 双入口）
 │       ├── server.go              #   127.0.0.1 随机端口服务、令牌生成、浏览器自动打开（同步最大化）
 │       ├── api.go                 #   Handler 路由、令牌鉴权、管理 API（条目 CRUD/检索/setup/toggle）
 │       ├── window_windows.go      #   Windows 窗口最大化兜底（maximizeWindowByTitle）
 │       ├── window_other.go        #   非 Windows 平台无操作实现
 │       └── api_test.go
-├── web/                           # GUI 前端（零依赖原生 HTML/JS/CSS，四标签页：管理/引导/其他/日志）
+├── web/                           # 配置中心前端（零依赖原生 HTML/JS/CSS，五菜单：管理/引导/设置/日志/其他）
 │   ├── index.html                 #   页面骨架（{{TOKEN}} 占位符由服务端注入令牌）
 │   ├── app.js                     #   条目 CRUD、检索预览、引导流程、心跳（5s）
 │   └── style.css
@@ -264,54 +264,25 @@ v1 仅 `changelog_required`：触碰文件中存在匹配 `code_globs` 的 且 �
 - `setup.go`：见第 6.4 节
 - `toggle.go`：`On`/`Off` 即删除/创建 `~/.openknowledge/hooks-disabled` 标志文件
 
-### 5.11 gui — Web 管理界面（server.go 31 行 + window_*.go + api.go 1130 行 + changelog.go 156 行）
+### 5.11 gui — 配置中心 Web UI（api.go 1540 行 + changelog/embedding/llm/api_hookstimeout/api_enforce 五个专题文件 + browser/window 平台件）
 
-`ok gui` 或无参数运行（双击 exe）启动的本地 Web 管理界面，供不熟悉命令行的用户完成首次引导与日常知识维护。
+配置中心是五页单页应用（管理/引导/设置/日志/其他），供不熟悉命令行的用户完成首次引导与日常知识维护。gui 包只出 HTTP API 与静态页，进程生命周期由 internal/daemon 托管（okd 常驻，页面关闭不退出）。**双入口**：`ok gui`（或无参数运行）与 `OkManager.exe` 同为薄启动器——EnsureCurrent 确保 okd 在线后以应用模式打开浏览器即退（`daemon.OpenGUI`）；托盘双击同链路。
 
-- **server.go**：`net.Listen("tcp", "127.0.0.1:0")` 随机端口、仅监听回环；16 字节随机 hex 令牌；启动后自动打开浏览器（Edge/Chrome 应用模式 → 默认浏览器，全失败只打印 URL）；最大化窗口（`maximizeWindowByTitle`，window_windows.go 轮询置顶窗口标题，非 Windows 无操作）为**同步调用**——daemon 化后 `ok gui` 开浏览器即退，协程会随进程死亡。web 资源目录由 `cmd/ok` 定位：`<exe目录>/web` 优先，其次 `<当前目录>/web`（`scripts/build-dist.sh` 产出的 dist/ 布局正好满足前者）。
-- **api.go**：`/api/*` 全部经 `X-Ok-Token` 头鉴权（缺失/错误 401）；`/` 返回注入令牌的 index.html（`{{TOKEN}}` 替换）；静态资源仅白名单 `app.js`/`style.css`/`favicon.ico`/`help.md`；条目文件名参数必须是不含 `..` 与路径分隔符的 `.md` 基本名（防路径穿越）；写操作（POST/PUT/DELETE entry）落盘后自动 `index.Sync` 同步索引库。项目列表（`/api/status`、`/api/projects`）附 `last_update`（kb.db mtime）并按其降序——最近有知识写入的项目排最前。`DELETE /api/project` 删除项目知识库：**先注销注册表**（`registry.RemoveProject` + Save，失败 500 中止、目录不动）**再 `os.RemoveAll` 项目目录**（失败 200 + `warning`/`dir`——兜底永远偏向留数据）；目录名取注册表匹配后的 `p.Name`，不接受用户原始输入拼路径。
+- **server.go**：仅剩包注释（gui-split 后监听/托管全在 daemon）。web 资源目录由入口定位：`<exe目录>/web` 优先，其次 `<当前目录>/web`（dist/ 布局正好满足前者）；资源不内嵌、实时读盘分发（no-cache）。
+- **api.go**：`/` 返回注入令牌的 index.html（`{{TOKEN}}` 替换）；静态资源仅白名单 `app.js`/`style.css`/`favicon.ico`/`help.md`；`/api/*` 全部经 `X-Ok-Token` 头鉴权（缺失/错误 401）；条目文件名参数必须是不含 `..` 与路径分隔符的 `.md` 基本名（防路径穿越）；写操作（POST/PUT/DELETE entry）落盘后自动 `index.Sync` 同步索引库。项目列表（`/api/status`、`/api/projects`）附 `last_update`（kb.db mtime）并按其降序——最近有知识写入的项目排最前。`DELETE /api/project` 删除项目知识库：**先注销注册表**（`registry.RemoveProject` + Save，失败 500 中止、目录不动）**再 `os.RemoveAll` 项目目录**（失败 200 + `warning`/`dir`——兜底永远偏向留数据）；目录名取注册表匹配后的 `p.Name`，不接受用户原始输入拼路径。
 
-API 一览：
+端点面（按页分组）：
 
-| 方法 | 路径 | 作用 |
-|------|------|------|
-| GET | `/api/status` | 项目列表（含 `last_update`，按最近更新降序）+ `agents` 数组（每个已注册 agent 的 `id/name/detected/hooksInstalled`，顶层 `hooksInstalled` 已移除）+ `skillsInstalled` + embedding 安装状态 + 全局开关状态 + `app_version`（构建期注入版本）与 `home`（KB 根目录）（前端据此决定默认标签页） |
-| GET | `/api/projects` | 注册表项目列表（同 `last_update` 降序） |
-| GET | `/api/entries?project=` | 项目条目摘要列表 |
-| GET | `/api/entry?project=&file=` | 条目详情（含正文） |
-| POST | `/api/entry` | 新建条目（标题 slug 定文件名，重复 409）→ 同步索引 |
-| PUT | `/api/entry` | 编辑条目 → 同步索引 |
-| DELETE | `/api/entry?project=&file=` | 删除条目 → 同步索引 |
-| GET | `/api/search?project=&q=` | 检索预览（走 `index.Query`，无 embedding 客户端） |
-| POST | `/api/approve` | `{"project","file"}` 草稿转正（等价 `ok approve`；缺文件/非草稿 400）→ 同步索引与向量 |
-| GET | `/api/capture?project=` | 当前捕获模式 `{mode, turn_interval}`（合并配置） |
-| POST | `/api/capture` | `{"project","mode"}` 写项目 `[capture]` 小节（等价 `ok capture <mode>`；非法模式 400） |
-| POST | `/api/setup/hooks` | 等价 `ok setup` 的 hooks 步骤；body 可指定 `{"agent":"<id>"}` 只装单个 agent（未知 id 400），缺省为全部已检测 agent；响应 `installed` 列出每个 agent 的写入目标 |
-| POST | `/api/setup/skills` | 安装六个技能（init/on/off/propose/capture/wiki）到已检测 agent 的技能目录并集 |
-| GET | `/api/setup/embedding` | embedding 配置总览：profiles 列表 + active + 各 profile 形态/就绪状态（内置含模型下载进度） |
-| POST | `/api/setup/embedding/profile` | 保存（新增/更新）一个 profile（三形态表单） |
-| DELETE | `/api/setup/embedding/profile` | 删除 profile；删"使用中"的允许，`active` 置空退回纯关键词 |
-| POST | `/api/setup/embedding/active` | 显式"设为使用中"（`{"name"}`；builtin 要求模型已下载） |
-| POST | `/api/setup/embedding/test` | 单 profile 连通性验证（`{"ok":bool,"error":…}`） |
-| POST | `/api/setup/embedding/download` | 下载内置模型（断点续传 + sha256 校验；前端轮询进度） |
-| POST | `/api/setup/embedding/download/cancel` | 取消下载（保留 `.part` 供续传） |
-| POST | `/api/setup/embedding/models-dir` | `{"path"}` 设置内置模型目录（空串=恢复默认 `<安装目录>/models`；非空先 MkdirAll 校验/创建，失败 400） |
-| POST | `/api/setup/embedding/open-models-dir` | 系统文件管理器打开生效的模型目录（不存在先创建） |
-| GET | `/api/setup/embedding/ollama-models` | 探测 Ollama `/api/tags` 模型列表 |
-| POST | `/api/reasonix/enforce-mode` | `{"mode":"mixed"\|"soft"\|"hard"}` 写 reasonix 强制检查档位（落盘即生效，sidecar 实时读） |
-| POST | `/api/toggle` | `{"on":bool}` 全局开关（等价 `ok on`/`ok off`） |
-| POST | `/api/heartbeat?project=` | 页面心跳 + 返回该项目 kb.db mtime 作为 `version`——前端 5s 轮询，版本变化才重拉条目列表 |
-| GET | `/api/project/branch-info?project=` | 基准分支/当前分支/合并谱系（GUI 工具条分支上下文与谱系行数据源） |
-| DELETE | `/api/project?project=` | 删除项目知识库：先注销注册表（Save 失败 500 中止）再删目录（失败 200 + `warning`/`dir`）；未注册 404 |
-| GET | `/api/changelog` | 更新日志：`current/pending/all`（pending 只算严格大于 last_seen 且不超过 current 的版本） |
-| GET | `/api/logs?tail=` | 三类日志尾部（ok/daemon/sidecar，每文件 ≤256KB、tail 1~2000 默认 400），行带 `src` 来源与 `semantic` 标记（含 semantic/embed 关键字）；只读，「日志」页 2s 轮询数据源 |
-| POST | `/api/changelog/seen` | 标记已读（写 `~/.openknowledge/gui.json`；只有弹窗"知道了"才标记） |
-| POST | `/api/shutdown` | 停服 |
-| POST | `/api/uninstall` | 卸载集成：移除 hooks 标记块、技能目录、全局 [embedding]；KB 数据保留（`setupx.Uninstall`） |
-| GET | `/api/export?project=<名\|all>` | 知识库导出 zip（`backup.Export`；project 缺省 all，项目不存在 404） |
-| POST | `/api/import` | multipart `file` 上传备份 zip 导入（`backup.Import`，32MB 上限；`ErrBadPackage` → 400，成功返回 `Report{imported, skipped, projects}`） |
+| 页面 | 端点 |
+|------|------|
+| 管理 | `GET /api/projects`、`GET /api/entries?project=`、`GET/POST/PUT/DELETE /api/entry`（标题 slug 定文件名、重复 409、写后同步索引）、`POST /api/approve`（草稿转正）、`POST /api/entry/archive`（归档/取消）、`POST /api/entry/optimize`（LLM 优化对照，未配置 409 `no_llm`）、`GET /api/search?project=&q=`、`GET /api/project/branch-info?project=`（继承徽标 hover 数据） |
+| 引导 | `GET /api/status`（agents[id/name/detected/hooksInstalled]、skillsInstalled、hooksTimeout、rxEnforceMode、disabled、app_version、home）、`POST /api/setup/hooks`（`{"agent":id}` 单装 / 缺省全装）、`POST /api/setup/hooks/remove`（单 agent 卸载）、`POST /api/setup/skills`、`POST /api/reasonix/enforce-mode`（mixed/soft/hard，落盘即生效） |
+| 设置 | `POST /api/toggle`（全局开关）；`POST /api/hooks/timeout`（独立写 `[hooks] timeout_sec`，1~60，**不重装 hooks**）；`GET/POST /api/retrieve`（dedup_turns 跨轮冷却）；`GET/POST /api/capture`（沉淀 mode/turn_interval；`turn_interval:0`=保持不变）；`GET/POST /api/gate`（泛化门控开关+短语表）；`GET/POST /api/enforce/rules`（`[[enforce]]` 整体读写，type 仅 changelog、code_globs/message 非空，空数组=清空）；embedding：`GET /api/setup/embedding` + `profile`/`DELETE profile`/`active`/`test`/`download`（断点续传+sha256，前端 1s 轮询进度）/`download/cancel`（留 .part 续传）/`models-dir`/`open-models-dir`/`ollama-models`；LLM：`GET /api/llm` + `profile`/`delete`/`active`/`max-tokens`/`test` |
+| 日志 | `GET /api/logs?tail=&sig=`（ok/daemon/sidecar 三来源，行带 `src`/`semantic` 标记；sig 命中返回 `unchanged` 前端跳过重绘） |
+| 其他 | `GET /api/export?project=`（zip）、`POST /api/import`（multipart 32MB，`Report{imported,skipped,projects}`）、`GET /api/changelog`（`current/pending/all`，pending 只算严格大于 last_seen 且不超过 current 的版本）、`POST /api/changelog/seen`（仅升级首弹关闭才标已读，写 `~/.openknowledge/gui.json`）、`DELETE /api/project`、`GET /help.md`（静态） |
+| 横切 | `POST /api/heartbeat?project=`（返回该项目 kb.db mtime 作 `version`；beats 通道生产传 nil——存活感知由 daemon.json 自省 + 托盘承担，新前端不再 5s 轮询）、`POST /api/shutdown`、`POST /api/uninstall`、`GET/POST /api/inject`（注入预算） |
 
-前端 `web/`（零依赖原生 HTML/JS/CSS）：「管理」标签页（项目下拉按 `last_update` 降序、条目列表每页 12 条、新建/编辑/删除、检索预览带命中高亮、草稿徽标与「采纳」按钮、分支上下文/⎇born⇢scope 双徽标/分支过滤器/合并谱系行、摘要列两行截断+悬停浮窗显示全文、「刷新」按钮全量拉齐项目与条目并带三态反馈、全局开关；daemon 被替换致 token 过期 401 时自动刷新一次页面取新 token，sessionStorage 标志防循环）+「引导」标签页（hooks/技能/全局开关状态卡、**embedding 卡片显示使用中服务单行摘要 + "配置…"弹窗（左 profile 列表右三形态表单，内置含下载进度与显式"设为使用中"）**、agents 下拉联动、「经验沉淀」卡片查看/切换 capture 模式与轮次间隔、reasonix 强制检查三档卡、危险区「卸载」卡片）+「其他」标签页（数据导出/导入、更新日志弹窗与常驻入口、使用帮助卡、**「删除项目知识库」危险卡**——弹窗明示影响面 + 默认勾选的删除前 zip 备份 + 「我已了解后果」勾选与输入完整项目名双重解锁、关于卡片）+「日志」标签页（v2.16.0：三来源实时日志、来源 chips 多选 +「仅语义」开关 + 文本过滤、2 秒轮询仅标签激活时、上滚暂停自动贴底）。hooks 未安装时「管理」页隐藏，「引导」为默认页。
+前端 `web/`（零依赖原生 HTML/JS/CSS，无构建链；index.html 骨架 + app.js + style.css）：左右栏五菜单 + `location.hash` 路由（刷新恢复当前菜单）+ 中英切换（只翻界面 chrome 不翻数据）+ 昼夜 CSS 变量双主题 + 整页重渲保持各滚动容器 scrollTop。「管理」=项目→条目两级树（类型徽标/mandatory★/draft/归档置灰 + 标题过滤 + 计数）+ markdown 详情 + 右上操作组（编辑/批准/归档/删除）+ 新建/编辑弹窗内 ✨优化（loading→对照预览→逐字段回填，409 弹「尚未配置模型」）；「引导」=agent 卡片（品牌字形 data-URI、未检测不渲染、安装/卸载双态、明细展开）+ Reasonix 强制检查三档卡 + Codex 信任门说明卡；「设置」=八卡（全局开关/语义检索/模型配置/Hook 超时/跨轮注入冷却/经验沉淀/泛化门控/规则配置），开关即存、简单输入行内保存改回原值变灰、弹窗确定生效闪 ✓；「日志」=深色控制台（来源 chips+仅语义+过滤，贴底滚动）；「其他」=导出/导入/更新日志/使用帮助/删除项目知识库（备份+ack+输名三重解锁）/关于。启动横切：升级后首次打开自动弹更新日志（pending 非空 → body 级弹窗，不进 render 周期）；`/api/projects` 为空时落「引导」页（旧 GUI"无项目隐藏管理 tab"语义的等价形态）。daemon 被替换致 token 过期 401 时自动刷新一次页面取新 token（sessionStorage 标志防循环）。
 
 ### 5.12 backup — 知识库导出/导入（251 行）
 
@@ -388,7 +359,7 @@ ok setup [--agent <id>]
 
 ### 6.5 常驻 daemon（单进程架构）
 
-全系统只有一个 ok.exe 常驻进程，承载 GUI 与 kimi hook 请求：
+全系统只有一个 okd.exe 常驻进程（cmd/okd，gui-split 后 GUI 子系统从 ok.exe 分离），承载配置中心与 hook 请求：
 
 - internal/daemonx（叶子包）：daemon.json 凭证（pid/port/token/exe指纹）、健康检查、版本判定
 - internal/daemon（编排包）：HTTP mux（/api/health、/api/hook/* + gui.Handler）、Run（端口即单实例锁，
@@ -682,7 +653,7 @@ go build ./...         # 编译检查
 | 命令 | 作用 | 关键行为 |
 |------|------|----------|
 | `ok setup` | 首次引导 | 写 hooks 配置（标记块幂等）+ 装 6 个 kimi 技能 + 交互配 embedding + 连通性验证 |
-| `ok gui` | 启动 Web 管理界面 | 无参数运行同效；127.0.0.1:17888 + 令牌鉴权（由常驻 daemon 承载），自动开浏览器后即退；页面关闭不退出进程 |
+| `ok gui` | 打开配置中心 | 无参数运行同效；与 OkManager.exe 同为薄启动器——确保 okd 在线后开浏览器即退；127.0.0.1:17888 + 令牌鉴权（由常驻 okd 承载）；页面关闭不退出进程 |
 | `ok daemon [stop]` | 常驻进程管理 | 无参启动常驻 daemon（承载 GUI 与 hook 转发，端口 17888 即单实例锁）；`stop` 停止 daemon |
 | `ok init [名字]` | 注册当前项目 | 名字缺省取目录基名；建 KB 骨架；幂等写入/更新 hooks 配置（复用 setup 逻辑，失败仅提示） |
 | `ok add --title …` | 新建条目 | `--type/--tags/--mandatory/--file`；自动同步索引库（无 key 时向量跳过） |
@@ -993,9 +964,9 @@ os.ReadDir(knowledge/)                # 只拿文件名，不读内容
 
 | 参数 | 说明 |
 |------|------|
-| `capture.mode` | 经验沉淀模式：`propose`（默认，AI 主动提议草稿人批准）或 `auto`（Stop hook 周期阻断强制自省）；`ok capture <mode>` 或 GUI 沉淀卡写入 |
+| `capture.mode` | 经验沉淀模式：`propose`（默认，AI 主动提议草稿人批准）或 `auto`（Stop hook 周期阻断强制自省）；`ok capture <mode>` 或 GUI 设置页沉淀卡写入 |
 | `capture.turn_interval` | auto 模式的自省间隔（Stop 次数，默认 5）；仅项目/全局配置手改 |
-| `provenance.auto_born` | 新建条目自动记录 born 分支溯源标签（默认 true）；GUI 管理页"经验沉淀"卡 checkbox 或手改 |
+| `provenance.auto_born` | 新建条目自动记录 born 分支溯源标签（默认 true）；手改配置文件（新配置中心未暴露该键） |
 | `wiki.stale_commits` | wiki 落后多少 commit 触发 prompt 提示（默认 20，0 = 关闭；游标失效 gone/归属存疑 legacy_orphan 提示不受此阈值门控） |
 | `[[enforce]].type` | 规则类型，v1 仅 `changelog_required` |
 | `[[enforce]].code_globs` | "算改代码"的 glob 列表。**一律小写**；doublestar 语法，`**/*.go` 可匹配根目录文件 |
@@ -1022,7 +993,7 @@ os.ReadDir(knowledge/)                # 只拿文件名，不读内容
 | `event` | `UserPromptSubmit` / `PostToolUse` / `Stop` | 三个注入/追踪/强制时机 |
 | `matcher` | 仅 PostToolUse 用 `"Write\|Edit"` | 工具名正则过滤 |
 | `command` | `"<exe> hook prompt\|post-tool\|stop"` | `ok setup` 烧入绝对路径 |
-| `timeout` | 三条统一，默认 `10` 秒 | 取全局配置 `[hooks] timeout_sec`（GUI 引导页可调，1~60）；prompt 必须 > `embedding.timeout_sec`（默认 5），否则慢 API 会被 kimi 强杀；post-tool/stop 过短会在高负载下被 kimi 静默杀死（2026-08-04 整会话 touched 丢失事故） |
+| `timeout` | 三条统一，默认 `10` 秒 | 取全局配置 `[hooks] timeout_sec`（GUI 设置页可调，1~60，只写配置不重装 hooks）；prompt 必须 > `embedding.timeout_sec`（默认 5），否则慢 API 会被 kimi 强杀；post-tool/stop 过短会在高负载下被 kimi 静默杀死（2026-08-04 整会话 touched 丢失事故） |
 
 **pi**：写入 `~/.pi/agent/extensions/openknowledge.ts`（`PI_CODING_AGENT_DIR` 优先）。文件头为头标记（`// openknowledge hooks (managed by ok.exe; do not edit)`）+ `// fingerprint: <模板 sha256 前 12 位>` 行；`HooksInstalled` 要求头标记存在且指纹等于当前模板指纹——模板升级后旧扩展判为"非当前版本"，由 hook 入口 `EnsureHooks` 自愈重写。安装时既有非本工具生成的同名文件先备份为 `.bak-openknowledge`，卸载只删本工具生成的文件。
 
