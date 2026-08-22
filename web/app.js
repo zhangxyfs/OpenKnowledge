@@ -66,10 +66,10 @@ const I18N = {
     cxHelpBody:"① Codex 0.118 把 hooks 列为实验特性（默认关闭）：ok 安装时已自动在 <code>~/.codex/config.toml</code> 开启并写入信任记录，<strong>无需手动确认信任</strong>；在 Codex 的 设置 → 编码 → 钩子 页面可随时查看或逐条关闭。<br>② Windows 下 hook 命令经 <code>ok-hook-*.cmd</code> 包装文件执行（规避 Codex 引号 bug），exe 迁移/升级后 ok 自愈不再失效。<br>③ <strong>版本注意</strong>：桌面端 26.707 与命令行 codex 0.147+ 均已实证可用（更早版本未验证）；若集成不生效，先确认 Codex 已完全重启。<br>④ 手动修改 config.toml 后需重启 Codex 才能生效。",
     opInstallFail:"安装失败：", opUninstallFail:"卸载失败：",
     save:"保存", saved:"✓ 已保存",
-    gTitle:"全局开关", gDesc:"一键启停全部 agent 的 hooks 注入与强制检查（等同 CLI 的 ok on / ok off）", gLabel:"启用全部 hooks",
+    gTitle:"全局开关", gDesc:"一键启停全部 agent 的 hooks 注入与强制检查（等同 CLI 的 ok on / ok off）",
     gOnFb:"✓ 已开启全部 hooks", gOffFb:"✓ 已关闭全部 hooks",
     eManage:"管理配置", eProfiles:"服务列表", eAdd:"+ 新增服务", eEdit:"编辑", eDel:"删除", eSetActive:"设为使用中",
-    fName:"名称", fType:"类型", fBase:"base_url", fModel:"模型", fKey:"api_key", fKeyEnv:"api_key_env（环境变量名）", fMirror:"下载源（仅 builtin）",
+    fName:"名称", fType:"类型", fBase:"base_url", fModel:"模型", fKey:"api_key", fMirror:"下载源（仅 builtin）",
     eAddTitle:"新增服务", eEditTitle:"编辑服务", fOk:"确定", fCancel:"取消",
     typeBuiltin:"内置本地模型（ok 托管 · 无需联网）", typeOllama:"Ollama（本机/局域网服务）", typeOpenai:"自定义（OpenAI 兼容服务）",
     tagBuiltin:"内置", tagOllama:"Ollama", tagCustom:"自定义",
@@ -86,7 +86,7 @@ const I18N = {
     hTitle:"Hook 超时", hDesc:"写入各 agent hooks 的超时秒数。2026-08-04 曾发生 Windows 高负载下 5s 超时致 PostToolUse 整会话静默丢失，故默认 10", hSec:"超时（秒）",
     gtTitle:"泛化门控", gtDesc:"命中内置/自定义短语的泛化 prompt 跳过检索注入与 embed 调用",
     gtOn:"启用门控", gtStatus:"内置 {b} 条 · 自定义 {n} 条", gtManage:"管理短语表",
-    gtBuiltin:"内置短语（只读，随版本演进）", gtCustom:"自定义短语", gtAdd:"+ 添加", gtPh:"新短语…", gtClose:"关闭",
+    gtBuiltin:"内置短语（只读，随版本演进）", gtCustom:"自定义短语", gtAdd:"+ 添加", gtPh:"新短语…",
     noProject:"尚无已注册项目（先 ok init）——该项目级设置暂不可用",
     eDlReady:"✓ 模型已就绪（{dim} 维），sidecar 按需拉起、空闲自动退出",
     eDlBtn:"下载模型（{size}）", eDlDoing:"正在下载 — {done} / {total}", eDlErr:"上次下载失败：",
@@ -125,7 +125,7 @@ const I18N = {
     cfmDelete:"确定删除条目「{t}」？",
     cfmArchive:"归档条目「{t}」？归档后退出 INDEX 与强制注入，仍可被检索命中。",
     emNew:"新建条目", emEdit:"编辑条目", emExists:"条目已存在", emNoProject:"尚无已注册项目，请先 ok init",
-    fTitle:"标题", fType:"类型", fTags:"tags（逗号分隔）", fMand:"mandatory（每会话必注入）",
+    fTitle:"标题", fTags:"tags（逗号分隔）", fMand:"mandatory（每会话必注入）",
     fSummary:"摘要", fBody:"正文",
     typeRule:"规则", typePitfall:"踩坑", typeNote:"笔记", typeReference:"参考",
     optBtn:"✨ 优化", optBusy:"优化中…", optEmpty:"正文为空，无可优化内容",
@@ -166,10 +166,10 @@ const I18N = {
     cxHelpBody:"① Codex 0.118 marks hooks experimental (off by default): ok already enabled them in <code>~/.codex/config.toml</code> and wrote the trust record at install time — <strong>no manual trust confirmation needed</strong>; review or disable individual hooks under Codex Settings → Coding → Hooks.<br>② On Windows, hook commands run via <code>ok-hook-*.cmd</code> wrappers (working around a Codex quoting bug); ok self-heals after exe moves/upgrades.<br>③ <strong>Versions</strong>: desktop 26.707 and CLI codex 0.147+ are verified (earlier versions untested); if integration does not take effect, fully restart Codex first.<br>④ Restart Codex after manually editing config.toml.",
     opInstallFail:"Install failed: ", opUninstallFail:"Uninstall failed: ",
     save:"Save", saved:"✓ Saved",
-    gTitle:"Global switch", gDesc:"Enable/disable hooks injection and enforce checks for all agents (same as CLI ok on / ok off)", gLabel:"Enable all hooks",
+    gTitle:"Global switch", gDesc:"Enable/disable hooks injection and enforce checks for all agents (same as CLI ok on / ok off)",
     gOnFb:"✓ All hooks enabled", gOffFb:"✓ All hooks disabled",
     eManage:"Manage", eProfiles:"Services", eAdd:"+ Add service", eEdit:"Edit", eDel:"Delete", eSetActive:"Set active",
-    fName:"Name", fType:"Type", fBase:"base_url", fModel:"Model", fKey:"api_key", fKeyEnv:"api_key_env (env var)", fMirror:"Mirror (builtin only)",
+    fName:"Name", fType:"Type", fBase:"base_url", fModel:"Model", fKey:"api_key", fMirror:"Mirror (builtin only)",
     eAddTitle:"Add service", eEditTitle:"Edit service", fOk:"OK", fCancel:"Cancel",
     typeBuiltin:"Builtin local model (ok-managed, offline)", typeOllama:"Ollama (local/LAN service)", typeOpenai:"Custom (OpenAI-compatible)",
     tagBuiltin:"Builtin", tagOllama:"Ollama", tagCustom:"Custom",
@@ -186,7 +186,7 @@ const I18N = {
     hTitle:"Hook timeout", hDesc:"Timeout seconds written into each agent's hooks. On 2026-08-04 a 5s timeout under Windows load silently dropped PostToolUse for an entire session — hence default 10", hSec:"Timeout (s)",
     gtTitle:"Generalization gate", gtDesc:"Prompts matching builtin/custom phrases skip retrieval injection and embed calls",
     gtOn:"Enable gate", gtStatus:"{b} builtin · {n} custom", gtManage:"Manage phrases",
-    gtBuiltin:"Builtin phrases (read-only, evolve with releases)", gtCustom:"Custom phrases", gtAdd:"+ Add", gtPh:"New phrase…", gtClose:"Close",
+    gtBuiltin:"Builtin phrases (read-only, evolve with releases)", gtCustom:"Custom phrases", gtAdd:"+ Add", gtPh:"New phrase…",
     noProject:"No registered project yet (run ok init) — this project-level setting is unavailable",
     eDlReady:"✓ Model ready ({dim} dim); sidecar starts on demand and exits when idle",
     eDlBtn:"Download model ({size})", eDlDoing:"Downloading — {done} / {total}", eDlErr:"Last download failed: ",
@@ -225,7 +225,7 @@ const I18N = {
     cfmDelete:"Delete entry \"{t}\"?",
     cfmArchive:"Archive entry \"{t}\"? It leaves INDEX and mandatory injection, but stays searchable.",
     emNew:"New entry", emEdit:"Edit entry", emExists:"Entry already exists", emNoProject:"No registered project yet; run ok init first",
-    fTitle:"Title", fType:"Type", fTags:"tags (comma-separated)", fMand:"mandatory (injected every session)",
+    fTitle:"Title", fTags:"tags (comma-separated)", fMand:"mandatory (injected every session)",
     fSummary:"Summary", fBody:"Body",
     typeRule:"Rule", typePitfall:"Pitfall", typeNote:"Note", typeReference:"Reference",
     optBtn:"✨ Optimize", optBusy:"Optimizing…", optEmpty:"Body is empty; nothing to optimize",
@@ -538,7 +538,6 @@ function sumRow(label, content, btn){
   return r;
 }
 
-function pDirty(k){ prefsDirty[k]=true; render(); }
 // 实时脏态：不重渲，直接同步该卡保存按钮的禁用态（数字输入边打边响应，且改回原值即变回灰）
 function pDirtyLive(k, dirty){
   prefsDirty[k]=dirty;

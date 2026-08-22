@@ -556,7 +556,7 @@ dsh 适配器（`deepharness.go` + 内嵌模板 `dsh_plugin.js`）：DeepSeek Ha
 | 形态 | 端点 | 说明 |
 |------|------|------|
 | openai（自定义） | 用户给的 `base_url` | 线上或自建 OpenAI 兼容服务；`api_key` 可留空适配无鉴权本地服务；key 解析：profile `api_key` 字段 → `api_key_env` 环境变量 → 无 |
-| ollama | `base_url` + `/v1`（构造点自动补） | 本机/局域网 Ollama，免 key；GUI/CLI 经 `/api/tags` 自动探测模型列表 |
+| ollama | `base_url` + `/v1`（构造点自动补） | 本机/局域网 Ollama，免 key；CLI `ok setup` 经 `/api/tags` 自动探测模型列表（GUI 设置页手输模型名） |
 | builtin（内置） | sidecar 状态文件给出的 `http://127.0.0.1:<port>/v1` | ok 托管 llama.cpp `llama-server`，**完全离线、知识不出本机**；仅安装版可用（runtime 随安装包分发） |
 
 - 协议：`POST {base_url}/embeddings`，请求 `{model, input:[...]}`，响应 `{data:[{embedding,index}]}`（按 index 重排）
