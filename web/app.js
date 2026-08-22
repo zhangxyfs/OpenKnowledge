@@ -693,7 +693,12 @@ function serNode(n){
     const label = (n.getAttribute("alt")||"").trim() || src.split("/").pop() || "image";
     return '<span class="img-ph" title="'+esc(src)+'">'+esc(label)+'</span>';
   }
-  if(tag==="a") return "<a"+richAttrs(n,["href"])+">"+serKids(n)+"</a>";
+  if(tag==="a"){
+    const at = richAttrs(n,["href"]);
+    // 外链新窗口打开，避免整窗导航把 GUI 顶掉
+    const ext = /\shref="https?:\/\//i.test(at) ? ' target="_blank" rel="noopener noreferrer"' : "";
+    return "<a"+at+ext+">"+serKids(n)+"</a>";
+  }
   if(tag==="td"||tag==="th") return "<"+tag+richAttrs(n,["colspan","rowspan"])+">"+serKids(n)+"</"+tag+">";
   if(tag==="br"||tag==="hr") return "<"+tag+">";
   return "<"+tag+richAttrs(n)+">"+serKids(n)+"</"+tag+">";
