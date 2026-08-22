@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>PROTOTYPE · OkManager 配置中心管理页三变体</title>
+<!--
+  一次性原型（throwaway）：回答「独立配置中心（xxxManager）的管理页长什么样」
+  三个结构变体 ?variant=A|B|C，底部浮条或 ←/→ 切换。
+    A — 三栏文档流（严格按需求描述：竖排菜单 / 项目树 / 详情文档流）
+    B — 紧凑树 + sticky 属性卡（树让位、详情元信息卡片化）
+    C — 深色工作台（activity bar 菜单 + 面包屑 + 键值元信息条）
+  固定要素（用户需求，不在变体间变化）：左菜单=管理/引导/设置/日志/其他；
+  树两级（项目→.md 条目）；条目叶节点=分支徽标+类型徽标+标题；
+  详情字段序=相对路径/文件名+大小+时间/标题/tags+mandatory/摘要/markdown 正文。
+  数据为手工样例（OpenKnowledge 项目为真实条目节选）。色板沿用 web/style.css
+  与知识库既定约定：born 徽标实心 #4E5D73 白字；type 四色。
+-->
+<style>
+  * { box-sizing:border-box; }
+  html,body { height:100%; }
+  body { margin:0; font:14px/1.6 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif; }
+  button { font:inherit; }
+
+  /* ---------- 浮条（三变体共用，显然不属于被评估设计） ---------- */
+  #switcher { position:fixed; left:50%; bottom:18px; transform:translateX(-50%); background:#111827; color:#fff; border-radius:999px; padding:8px 10px; display:flex; gap:10px; align-items:center; box-shadow:0 6px 20px rgba(0,0,0,.3); font-size:13px; z-index:99; }
+  #switcher button { background:#374151; color:#fff; border:none; border-radius:999px; width:30px; height:30px; cursor:pointer; font-size:14px; }
+  #switcher button:hover { background:#4b5563; }
+  #switcher .lbl { min-width:250px; text-align:center; }
+  .proto-banner { position:fixed; top:10px; right:12px; z-index:99; background:#fff7ed; border:1px solid #fdba74; color:#9a3412; padding:4px 10px; border-radius:6px; font-size:12px; }
+
+  /* ---------- 徽标（沿用现有约定） ---------- */
+  .badge-born { background:#4E5D73; color:#fff; border-radius:4px; padding:0 6px; font-size:11px; white-space:nowrap; }
+  .badge-type { border-radius:4px; padding:0 6px; font-size:11px; white-space:nowrap; }
+  .t-pitfall   { background:#fee2e2; color:#b91c1c; }
+  .t-note      { background:#dbeafe; color:#1d4ed8; }
+  .t-rule      { background:#ede9fe; color:#6d28d9; }
+  .t-reference { background:#e0e7ff; color:#3730a3; }
+  .badge-mand  { background:#fef3c7; color:#92400e; border-radius:4px; padding:0 6px; font-size:11px; }
+  .badge-draft { background:#f3f4f6; color:#6b7280; border:1px dashed #d1d5db; border-radius:4px; padding:0 6px; font-size:11px; }
+  .badge-arch  { background:#f3f4f6; color:#9ca3af; border-radius:4px; padding:0 6px; font-size:11px; }
+  .tag { background:#eef2f7; color:#475569; border-radius:4px; padding:0 6px; font-size:12px; }
+
+  /* ================================================================
+     变体 A — 三栏文档流（浅色，贴 web/style.css 视觉语言）
+     ================================================================ */
+  .a-root { display:flex; height:100vh; background:#f5f6f8; color:#1f2329; }
+  .a-menu { width:180px; background:#fff; border-right:1px solid #d9dce1; padding:12px 8px; display:flex; flex-direction:column; gap:2px; }
+  .a-brand { font-weight:700; font-size:15px; padding:6px 12px 14px; }
+  .a-menu .mi { display:flex; align-items:center; gap:10px; padding:9px 12px; border-radius:6px; color:#6b7280; cursor:pointer; border:none; background:none; text-align:left; width:100%; }
+  .a-menu .mi:hover { background:#f3f4f6; color:#1f2329; }
+  .a-menu .mi.active { background:#eff6ff; color:#2563eb; font-weight:600; }
+  .a-menu .ico { width:18px; text-align:center; }
+  .a-tree { width:340px; background:#fff; border-right:1px solid #d9dce1; overflow-y:auto; padding:8px 6px; }
+  .a-detail { flex:1; overflow-y:auto; padding:20px 28px 80px; }
+
+  .tn-proj { display:flex; align-items:center; gap:6px; width:100%; border:none; background:none; padding:6px 8px; border-radius:6px; cursor:pointer; font-weight:600; text-align:left; }
+  .tn-proj:hover { background:#f3f4f6; }
+  .tn-proj .caret { width:14px; color:#9ca3af; transition:transform .12s; }
+  .tn-proj.open .caret { transform:rotate(90deg); }
+  .tn-proj .cnt { margin-left:auto; color:#9ca3af; font-size:12px; font-weight:400; }
+  .tn-kids { margin-left:16px; border-left:1px solid #e5e7eb; padding-left:6px; }
+  .tn-leaf { display:flex; align-items:center; gap:6px; width:100%; border:none; background:none; padding:5px 8px; border-radius:6px; cursor:pointer; text-align:left; color:#374151; }
+  .tn-leaf:hover { background:#f3f4f6; }
+  .tn-leaf.sel { background:#eff6ff; color:#1d4ed8; }
+  .tn-leaf .ttl { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .tn-leaf.archived .ttl { color:#9ca3af; text-decoration:line-through; }
+
+  .d-path { font:12px/1.5 "Cascadia Code",Consolas,monospace; color:#6b7280; }
+  .d-filemeta { color:#6b7280; font-size:13px; margin-top:2px; }
+  .d-filemeta b { color:#1f2329; font-weight:600; }
+  .d-title { font-size:20px; margin:10px 0 6px; }
+  .d-attrs { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-bottom:10px; }
+  .d-summary { background:#fff; border:1px solid #d9dce1; border-left:3px solid #2563eb; border-radius:6px; padding:10px 14px; color:#374151; margin-bottom:16px; }
+  .d-body { background:#fff; border:1px solid #d9dce1; border-radius:8px; padding:18px 22px; }
+
+  /* markdown 正文（三变体共用类） */
+  .md h1 { font-size:18px; margin:18px 0 8px; }
+  .md h2 { font-size:16px; margin:16px 0 6px; }
+  .md h3 { font-size:14px; margin:14px 0 6px; }
+  .md p { margin:8px 0; }
+  .md code { background:#f1f5f9; border-radius:4px; padding:1px 5px; font:13px "Cascadia Code",Consolas,monospace; }
+  .md pre { background:#14171f; color:#d6dae4; border-radius:8px; padding:12px 14px; overflow-x:auto; }
+  .md pre code { background:none; color:inherit; padding:0; }
+  .md ul,.md ol { margin:8px 0; padding-left:24px; }
+  .md blockquote { margin:8px 0; padding:4px 14px; border-left:3px solid #d9dce1; color:#6b7280; }
+
+  /* ================================================================
+     变体 B — 紧凑树 + sticky 属性卡（树让位给详情，元信息卡片化）
+     ================================================================ */
+  .b-root { display:flex; height:100vh; background:#eef0f3; color:#1f2329; }
+  .b-menu { width:56px; background:#1f2430; display:flex; flex-direction:column; align-items:center; padding:10px 0; gap:4px; }
+  .b-menu .mi { width:44px; height:44px; border:none; background:none; color:#8a8f9c; border-radius:8px; cursor:pointer; font-size:17px; position:relative; }
+  .b-menu .mi:hover { background:#2d3340; color:#fff; }
+  .b-menu .mi.active { background:#2563eb; color:#fff; }
+  .b-menu .mi .tip { position:absolute; left:52px; top:50%; transform:translateY(-50%); background:#111827; color:#fff; font-size:12px; padding:3px 10px; border-radius:4px; white-space:nowrap; display:none; }
+  .b-menu .mi:hover .tip { display:block; }
+  .b-tree { width:270px; background:#fff; border-right:1px solid #d9dce1; display:flex; flex-direction:column; }
+  .b-tree .search { margin:10px; padding:6px 10px; border:1px solid #d9dce1; border-radius:6px; width:calc(100% - 20px); }
+  .b-tree .scroll { overflow-y:auto; flex:1; padding:0 6px 10px; }
+  .b-leaf { display:block; width:100%; border:none; background:none; text-align:left; padding:6px 8px; border-radius:6px; cursor:pointer; }
+  .b-leaf:hover { background:#f3f4f6; }
+  .b-leaf.sel { background:#eff6ff; box-shadow:inset 2px 0 0 #2563eb; }
+  .b-leaf .l1 { display:flex; gap:5px; align-items:center; }
+  .b-leaf .t2 { display:block; font-size:13px; color:#1f2329; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-top:1px; }
+  .b-detail { flex:1; overflow-y:auto; padding:18px 26px 80px; }
+  .b-card { position:sticky; top:0; z-index:5; background:#fff; border:1px solid #d9dce1; border-radius:10px; box-shadow:0 2px 10px rgba(0,0,0,.05); padding:14px 18px; margin-bottom:16px; }
+  .b-card table { border-collapse:collapse; font-size:13px; }
+  .b-card td { padding:2px 14px 2px 0; vertical-align:top; }
+  .b-card td.k { color:#6b7280; white-space:nowrap; }
+  .b-body { max-width:760px; margin:0 auto; background:#fff; border:1px solid #d9dce1; border-radius:10px; padding:20px 28px; }
+
+  /* ================================================================
+     变体 C — 深色工作台（activity bar + 面包屑 + 键值元信息条）
+     ================================================================ */
+  .c-root { display:flex; height:100vh; background:#14171f; color:#d6dae4; }
+  .c-menu { width:60px; background:#0f1218; border-right:1px solid #262c38; display:flex; flex-direction:column; align-items:center; padding:12px 0; gap:6px; }
+  .c-menu .mi { width:44px; height:44px; border:none; background:none; color:#6b7280; border-radius:8px; cursor:pointer; font-size:17px; border-left:2px solid transparent; }
+  .c-menu .mi:hover { color:#fff; }
+  .c-menu .mi.active { color:#79b8ff; border-left-color:#79b8ff; background:#1a1f2a; }
+  .c-tree { width:300px; background:#171b24; border-right:1px solid #262c38; overflow-y:auto; padding:10px 8px; }
+  .c-tn-proj { display:flex; align-items:center; gap:6px; width:100%; border:none; background:none; color:#d6dae4; padding:7px 8px; border-radius:6px; cursor:pointer; font-weight:600; text-align:left; }
+  .c-tn-proj:hover { background:#1f2430; }
+  .c-tn-kids { margin-left:15px; border-left:1px solid #2b3242; padding-left:6px; }
+  .c-tn-leaf { display:flex; align-items:center; gap:6px; width:100%; border:none; background:none; color:#aab2c0; padding:5px 8px; border-radius:6px; cursor:pointer; text-align:left; }
+  .c-tn-leaf:hover { background:#1f2430; color:#fff; }
+  .c-tn-leaf.sel { background:#24304a; color:#79b8ff; }
+  .c-tn-leaf .ttl { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .c-detail { flex:1; overflow-y:auto; padding:16px 24px 80px; }
+  .c-crumb { font-size:12px; color:#6b7280; margin-bottom:10px; }
+  .c-crumb b { color:#aab2c0; font-weight:600; }
+  .c-meta { display:flex; gap:18px; flex-wrap:wrap; background:#1a1f2a; border:1px solid #262c38; border-radius:8px; padding:10px 16px; font-size:12px; margin-bottom:14px; }
+  .c-meta .kv b { display:block; color:#6b7280; font-weight:400; font-size:11px; }
+  .c-meta .kv span { color:#d6dae4; }
+  .c-title { font-size:19px; margin:4px 0 8px; color:#fff; }
+  .c-summary { color:#8a8f9c; border-left:3px solid #79b8ff; padding:4px 12px; margin-bottom:16px; }
+  .c-body { background:#1a1f2a; border:1px solid #262c38; border-radius:8px; padding:18px 22px; }
+  .c-body.md code, .c-body .md code { background:#0f1218; color:#7ee787; }
+  .c-root .md pre { background:#0f1218; border:1px solid #262c38; }
+
+  .placeholder { flex:1; display:flex; align-items:center; justify-content:center; color:#9ca3af; font-size:15px; }
+</style>
+</head>
+<body>
+
+<div class="proto-banner">PROTOTYPE — 一次性原型，不进生产；数据为样例</div>
+
+<div id="app"></div>
+
+<div id="switcher">
+  <button id="prev" title="上一变体 (←)">◀</button>
+  <span class="lbl" id="lbl"></span>
+  <button id="next" title="下一变体 (→)">▶</button>
+</div>
+
+<script>
+"use strict";
+/* ================= 样例数据（OpenKnowledge 为真实条目节选） ================= */
+const PROJECTS = [
+  { name:"OpenKnowledge", root:"D:\\develop\\OpenKnowledge", entries:[
+    { file:"knowledge/Web-GUI.md", title:"Web GUI", type:"reference", born:"master",
+      tags:["wiki","gui"], mandatory:false, draft:false, archived:false,
+      size:"4.6 KB", mtime:"2026-08-17 21:34",
+      summary:"四标签 SPA：管理/引导/其他/日志；v2.18.2 管理页归档入口；v2.17 门控卡片；v2.8 双徽标/谱系行；v2.9.0 删除项目知识库",
+      body:"单页 SPA（`web/index.html` + `web/app.js` + `web/style.css`，随 exe 分发到 exe 旁 `web/` 目录，daemon 每次请求实时读盘、`Cache-Control: no-cache`），四个标签页：管理、引导、其他、日志。\n\n- **管理**：条目列表（时间排序/筛选/分页）、草稿批准、项目切换；所有请求带 token 认证。\n- **引导**：agents 下拉、hook 超时卡、embedding 配置、泛化门控卡。\n- **其他**：数据导出/导入（zip 备份）、版本显示、更新日志常驻入口。\n- **日志**：三来源实时日志查看器，2 秒轮询，只读。\n\n打开方式：`ok gui` 起 HTTP 服务后 `--app=` 模式开浏览器。" },
+    { file:"knowledge/SQLite-读写并发致整轮注入静默跳过：开-WAL-+-NORMAL.md", title:"SQLite 读写并发致整轮注入静默跳过：开 WAL + NORMAL", type:"pitfall", born:"master",
+      tags:["sqlite","WAL","并发","注入"], mandatory:true, draft:false, archived:false,
+      size:"1.8 KB", mtime:"2026-08-02 10:12",
+      summary:"kb.db 读写并发下 hook 注入整轮静默跳过；开 WAL + synchronous=NORMAL 后消失",
+      body:"hook 注入偶发整轮静默跳过，无报错。定位为 kb.db 读写并发：`index` 写事务与 `retrieve` 读相互阻塞，busy 超时后直接返回空。\n\n修复：\n\n```\nPRAGMA journal_mode=WAL;\nPRAGMA synchronous=NORMAL;\nPRAGMA busy_timeout=3000;\n```\n\n**教训**：SQLite 多进程读写必须开 WAL，默认 rollback journal 下读写互斥。" },
+    { file:"knowledge/GUI-开关类设置用勾选+保存按钮两段式，不用-change-即存.md", title:"GUI 开关类设置用勾选+保存按钮两段式，不用 change 即存", type:"note", born:"master",
+      tags:["gui","交互约定"], mandatory:false, draft:false, archived:false,
+      size:"0.9 KB", mtime:"2026-07-30 15:02",
+      summary:"引导页开关统一勾选+保存按钮两段式（首例泛化门控），即存模式误触无反悔",
+      body:"引导页的开关类设置统一为**勾选 + 保存按钮**两段式，不用 change 即存。首例：泛化门控。\n\n理由：即存模式下误触无反悔窗口，用户甚至意识不到状态已改。" },
+    { file:"knowledge/README-版本徽标会漂移：bump-时须跑-scriptssync-version.sh.md", title:"README 版本徽标会漂移：bump 时须跑 scripts/sync-version.sh", type:"pitfall", born:"master",
+      tags:["发布","版本号","README"], mandatory:true, draft:false, archived:false,
+      size:"1.1 KB", mtime:"2026-07-25 09:40",
+      summary:"版本徽标/引用会漂移（README + 官网 site）：bump 时须跑 scripts/sync-version.sh；pre-push 钩子已兜底",
+      body:"版本号 bump 后 README 徽标与 `site/` 官网引用不会自动跟随，曾发布出徽标落后的包。\n\n纪律：bump 时必跑 `scripts/sync-version.sh`；pre-push 钩子已加兜底校验。" },
+    { file:"knowledge/daemon-进程模型.md", title:"daemon 进程模型", type:"reference", born:"master",
+      tags:["daemon","架构"], mandatory:false, draft:false, archived:false,
+      size:"2.3 KB", mtime:"2026-08-10 18:20",
+      summary:"单实例端口即锁；daemon.json 凭证 + fingerprint 版本自检；hook 优先转发 daemon",
+      body:"`ok daemon` 以单实例运行：默认端口 17888 即锁，第二实例发现健康 daemon 即退出 0。\n\n- 凭证：`~/.openknowledge/daemon.json`（PID/port/token/fingerprint）\n- 自省：15s 一轮，daemon.json 丢失或易主自动退出\n- hook 路径优先转发 daemon，daemon 不在则本地处理并后台拉起" },
+    { file:"knowledge/Windows-宿主交叉构建-Linux-包：chmod-静默无效，权限位必须显式钉.md", title:"Windows 宿主交叉构建 Linux 包：chmod 静默无效，权限位必须显式钉", type:"pitfall", born:"master",
+      tags:["构建","跨平台","发布"], mandatory:false, draft:false, archived:false,
+      size:"1.5 KB", mtime:"2026-08-06 14:55",
+      summary:"Windows git-bash noacl 挂载下 chmod 静默失效，tar/nfpm 继承 0644；两段式 tar --mode 钉权限 + verify 断言 mode",
+      body:"Windows 宿主上交叉构建 Linux 包时，git-bash 的 noacl 挂载让 `chmod` **静默失效**，产物权限全是 0644。\n\n对策：两段式 `tar --mode` 显式钉权限位，verify 脚本断言 mode。" },
+    { file:"knowledge/混合检索准入必须按通道独立判定.md", title:"混合检索准入必须按通道独立判定", type:"pitfall", born:"master",
+      tags:["检索","混合检索","阈值"], mandatory:false, draft:true, archived:false,
+      size:"1.2 KB", mtime:"2026-08-15 11:08",
+      summary:"同域语料余弦基线会顶穿总分阈值；关键词与向量通道必须各自过准入",
+      body:"混合检索中，同域语料的向量余弦基线天然偏高，会把总分顶穿阈值，导致弱相关条目注入。\n\n准入必须**按通道独立判定**，再融合排序。" },
+    { file:"knowledge/旧版注入设计.md", title:"旧版注入设计（已归档）", type:"reference", born:"master",
+      tags:["注入","历史"], mandatory:false, draft:false, archived:true,
+      size:"3.0 KB", mtime:"2026-06-01 08:30",
+      summary:"v1 注入设计存档：单通道关键词检索，已被混合检索取代",
+      body:"（归档条目）v1 时代的注入设计，仅供考古。" },
+  ]},
+  { name:"claude-code-deepseek", root:"D:\\develop\\claude-code-deepseek", entries:[
+    { file:"knowledge/DeepSeek-API-超时重试策略.md", title:"DeepSeek API 超时重试策略", type:"note", born:"main",
+      tags:["api","超时"], mandatory:false, draft:false, archived:false,
+      size:"1.0 KB", mtime:"2026-08-12 20:11",
+      summary:"流式首字节 30s 超时；重试仅对连接错误，不对 4xx",
+      body:"DeepSeek 流式接口按**首字节**计 30s 超时；重试只针对连接错误，4xx 直接抛给上层。" },
+    { file:"knowledge/guest-kongball.md", title:"guest-kongball 会话记忆", type:"reference", born:"main",
+      tags:["memory","guest"], mandatory:false, draft:false, archived:false,
+      size:"2.1 KB", mtime:"2026-08-11 09:26",
+      summary:"guest-kongball 会话的偏好与上下文记忆",
+      body:"guest-kongball 会话沉淀：偏好中文回复、表格输出；关注 token 成本。" },
+  ]},
+  { name:"Reasonix", root:"D:\\develop\\Reasonix", entries:[
+    { file:"knowledge/Reasonix-扩展-SDK：拦截器-err-非-nil-会吞掉-Continue.md", title:"Reasonix 扩展 SDK：拦截器 err 非 nil 会吞掉 Continue", type:"pitfall", born:"master",
+      tags:["reasonix","sidecar","fail-open"], mandatory:true, draft:false, archived:false,
+      size:"1.3 KB", mtime:"2026-08-09 16:47",
+      summary:"sidecar 拦截器返回 err 非 nil 时宿主吞掉 Continue 决策，必须 fail-open",
+      body:"Reasonix sidecar 协议里，拦截器返回 `err != nil` 时宿主会吞掉 `Continue` 决策——放行语义丢失。\n\n扩展必须 **fail-open**：任何内部错误都映射为 Continue。" },
+  ]},
+];
+
+const TYPE_LABEL = { pitfall:"坑", note:"注", rule:"规", reference:"参" };
+const MENUS = [
+  { key:"manage", ico:"🗂", label:"管理" },
+  { key:"setup",  ico:"🧭", label:"引导" },
+  { key:"prefs",  ico:"⚙️", label:"设置" },
+  { key:"logs",   ico:"📜", label:"日志" },
+  { key:"misc",   ico:"🧩", label:"其他" },
+];
+
+/* ================= 极简 markdown 渲染（标题/列表/粗体/行内代码/代码块） ================= */
+function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function inline(s){
+  return esc(s)
+    .replace(/`([^`]+)`/g,"<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g,"<b>$1</b>");
+}
+function renderMd(src){
+  const lines = src.split("\n"); let html="", i=0;
+  while(i<lines.length){
+    const l = lines[i];
+    if(l.startsWith("```")){
+      let buf=[]; i++;
+      while(i<lines.length && !lines[i].startsWith("```")) buf.push(lines[i++]);
+      i++; html += "<pre><code>"+esc(buf.join("\n"))+"</code></pre>"; continue;
+    }
+    const h = l.match(/^(#{1,3})\s+(.*)/);
+    if(h){ html += "<h"+h[1].length+">"+inline(h[2])+"</h"+h[1].length+">"; i++; continue; }
+    if(/^\s*[-*]\s+/.test(l)){
+      let items=[];
+      while(i<lines.length && /^\s*[-*]\s+/.test(lines[i])) items.push(lines[i++].replace(/^\s*[-*]\s+/,""));
+      html += "<ul>"+items.map(x=>"<li>"+inline(x)+"</li>").join("")+"</ul>"; continue;
+    }
+    if(l.trim()===""){ i++; continue; }
+    html += "<p>"+inline(l)+"</p>"; i++;
+  }
+  return html;
+}
+
+/* ================= 状态 ================= */
+const state = { menu:"manage", open:{ "OpenKnowledge":true }, sel:null };
+
+function badges(e){
+  let s = '<span class="badge-born" title="出生分支">⎇ '+e.born+'</span>'
+        + '<span class="badge-type t-'+e.type+'" title="类型 '+e.type+'">'+TYPE_LABEL[e.type]+'</span>';
+  return s;
+}
+function detailAttrs(e){
+  let s = e.tags.map(t=>'<span class="tag">'+esc(t)+'</span>').join("");
+  s += e.mandatory ? '<span class="badge-mand">★ mandatory</span>' : '<span class="tag" style="opacity:.6">非 mandatory</span>';
+  if(e.draft) s += '<span class="badge-draft">草稿</span>';
+  if(e.archived) s += '<span class="badge-arch">已归档</span>';
+  return s;
+}
+
+/* ================= 变体 A — 三栏文档流 ================= */
+function renderA(){
+  const r = el("div","a-root");
+  // 菜单
+  const menu = el("div","a-menu");
+  menu.appendChild(Object.assign(el("div","a-brand"),{textContent:"OkManager"}));
+  MENUS.forEach(m=>{
+    const b = el("button","mi"+(state.menu===m.key?" active":""));
+    b.innerHTML = '<span class="ico">'+m.ico+'</span>'+m.label;
+    b.onclick = ()=>{ state.menu=m.key; draw(); };
+    menu.appendChild(b);
+  });
+  r.appendChild(menu);
+  if(state.menu!=="manage"){ r.appendChild(placeholder("「"+MENUS.find(m=>m.key===state.menu).label+"」页原型未实现 —— 本次只评管理页")); return r; }
+  // 树
+  const tree = el("div","a-tree");
+  PROJECTS.forEach(p=>{
+    const open = !!state.open[p.name];
+    const pj = el("button","tn-proj"+(open?" open":""));
+    pj.innerHTML = '<span class="caret">▶</span>📁 '+esc(p.name)+'<span class="cnt">'+p.entries.length+'</span>';
+    pj.title = p.root;
+    pj.onclick = ()=>{ state.open[p.name]=!open; draw(); };
+    tree.appendChild(pj);
+    if(open){
+      const kids = el("div","tn-kids");
+      p.entries.forEach(e=>{
+        const leaf = el("button","tn-leaf"+(state.sel===e?" sel":"")+(e.archived?" archived":""));
+        leaf.innerHTML = badges(e)+'<span class="ttl">'+esc(e.title)+'</span>';
+        leaf.onclick = ()=>{ state.sel=e; draw(); };
+        kids.appendChild(leaf);
+      });
+      tree.appendChild(kids);
+    }
+  });
+  r.appendChild(tree);
+  // 详情
+  const d = el("div","a-detail");
+  const e = state.sel;
+  if(!e){ d.appendChild(placeholder("← 从树中选择一条知识条目")); }
+  else{
+    d.appendChild(Object.assign(el("div","d-path"),{textContent:projOf(e).root+"\\"+e.file.replace(/\//g,"\\")}));
+    const fm = el("div","d-filemeta");
+    fm.innerHTML = "<b>"+esc(e.file.split("/").pop())+"</b> · "+e.size+" · 修改于 "+e.mtime;
+    d.appendChild(fm);
+    d.appendChild(Object.assign(el("h1","d-title"),{textContent:e.title}));
+    const at = el("div","d-attrs"); at.innerHTML = detailAttrs(e); d.appendChild(at);
+    const sm = el("div","d-summary"); sm.textContent = e.summary; d.appendChild(sm);
+    const bd = el("div","d-body md"); bd.innerHTML = renderMd(e.body); d.appendChild(bd);
+  }
+  r.appendChild(d);
+  return r;
+}
+
+/* ================= 变体 B — 紧凑树 + sticky 属性卡 ================= */
+function renderB(){
+  const r = el("div","b-root");
+  const menu = el("div","b-menu");
+  MENUS.forEach(m=>{
+    const b = el("button","mi"+(state.menu===m.key?" active":""));
+    b.innerHTML = m.ico+'<span class="tip">'+m.label+'</span>';
+    b.onclick = ()=>{ state.menu=m.key; draw(); };
+    menu.appendChild(b);
+  });
+  r.appendChild(menu);
+  if(state.menu!=="manage"){ r.appendChild(placeholder("「"+MENUS.find(m=>m.key===state.menu).label+"」页原型未实现 —— 本次只评管理页")); return r; }
+  const tree = el("div","b-tree");
+  const search = el("input","search"); search.placeholder="🔍 过滤条目…";
+  search.oninput = ()=>{ state.q = search.value; drawB(tree, search.value); };
+  tree.appendChild(search);
+  const scroll = el("div","scroll"); tree.appendChild(scroll);
+  r.appendChild(tree);
+  drawBEntries(scroll, "");
+  const d = el("div","b-detail"); d.id="b-detail";
+  r.appendChild(d);
+  renderBDetail(d);
+  // draw 后保持树内容
+  requestAnimationFrame(()=>drawBEntries(scroll, state.q||""));
+  return r;
+
+  function drawB(treeEl, q){ drawBEntries(treeEl.querySelector(".scroll"), q); }
+}
+function drawBEntries(scroll, q){
+  scroll.innerHTML="";
+  q = (q||"").toLowerCase();
+  PROJECTS.forEach(p=>{
+    const list = p.entries.filter(e=>!q || e.title.toLowerCase().includes(q));
+    if(!list.length) return;
+    const open = state.open[p.name]!==false && (q? true : !!state.open[p.name]);
+    const pj = el("button","tn-proj"+(open?" open":""));
+    pj.innerHTML = '<span class="caret">▶</span>📁 '+esc(p.name)+'<span class="cnt">'+list.length+'</span>';
+    pj.onclick = ()=>{ state.open[p.name]=!open; draw(); };
+    scroll.appendChild(pj);
+    if(open){
+      const kids = el("div","tn-kids");
+      list.forEach(e=>{
+        const leaf = el("button","b-leaf"+(state.sel===e?" sel":""));
+        leaf.innerHTML = '<span class="l1">'+badges(e)
+          +(e.mandatory?'<span class="badge-mand">★</span>':"")
+          +(e.draft?'<span class="badge-draft">草</span>':"")+'</span>'
+          +'<span class="t2">'+esc(e.title)+'</span>';
+        leaf.onclick = ()=>{ state.sel=e; draw(); };
+        kids.appendChild(leaf);
+      });
+      scroll.appendChild(kids);
+    }
+  });
+}
+function renderBDetail(d){
+  const e = state.sel;
+  if(!e){ d.appendChild(placeholder("← 从树中选择一条知识条目")); return; }
+  const card = el("div","b-card");
+  card.innerHTML = '<table>'
+    +'<tr><td class="k">路径</td><td style="font-family:Consolas,monospace;font-size:12px">'+esc(projOf(e).root+"\\"+e.file.replace(/\//g,"\\"))+'</td></tr>'
+    +'<tr><td class="k">文件</td><td>'+esc(e.file.split("/").pop())+" · "+e.size+" · 修改于 "+e.mtime+'</td></tr>'
+    +'<tr><td class="k">标题</td><td style="font-size:15px;font-weight:600">'+esc(e.title)+'</td></tr>'
+    +'<tr><td class="k">属性</td><td>'+detailAttrs(e)+'</td></tr>'
+    +'<tr><td class="k">摘要</td><td>'+esc(e.summary)+'</td></tr>'
+    +'</table>';
+  d.appendChild(card);
+  const bd = el("div","b-body md"); bd.innerHTML = renderMd(e.body); d.appendChild(bd);
+}
+
+/* ================= 变体 C — 深色工作台 ================= */
+function renderC(){
+  const r = el("div","c-root");
+  const menu = el("div","c-menu");
+  MENUS.forEach(m=>{
+    const b = el("button","mi"+(state.menu===m.key?" active":""));
+    b.textContent = m.ico; b.title = m.label;
+    b.onclick = ()=>{ state.menu=m.key; draw(); };
+    menu.appendChild(b);
+  });
+  r.appendChild(menu);
+  if(state.menu!=="manage"){ const ph=placeholder("「"+MENUS.find(m=>m.key===state.menu).label+"」页原型未实现 —— 本次只评管理页"); ph.style.color="#6b7280"; r.appendChild(ph); return r; }
+  const tree = el("div","c-tree");
+  PROJECTS.forEach(p=>{
+    const open = !!state.open[p.name];
+    const pj = el("button","c-tn-proj");
+    pj.innerHTML = '<span class="caret">'+(open?"▾":"▸")+'</span>📁 '+esc(p.name);
+    pj.onclick = ()=>{ state.open[p.name]=!open; draw(); };
+    tree.appendChild(pj);
+    if(open){
+      const kids = el("div","c-tn-kids");
+      p.entries.forEach(e=>{
+        const leaf = el("button","c-tn-leaf"+(state.sel===e?" sel":""));
+        leaf.innerHTML = badges(e)+'<span class="ttl">'+esc(e.title)+'</span>';
+        leaf.onclick = ()=>{ state.sel=e; draw(); };
+        kids.appendChild(leaf);
+      });
+      tree.appendChild(kids);
+    }
+  });
+  r.appendChild(tree);
+  const d = el("div","c-detail");
+  const e = state.sel;
+  if(!e){ const ph=placeholder("← 从树中选择一条知识条目"); ph.style.color="#6b7280"; d.appendChild(ph); }
+  else{
+    const p = projOf(e);
+    const crumb = el("div","c-crumb");
+    crumb.innerHTML = "<b>"+esc(p.name)+"</b> / "+esc(e.file);
+    d.appendChild(crumb);
+    d.appendChild(Object.assign(el("h1","c-title"),{textContent:e.title}));
+    const meta = el("div","c-meta");
+    meta.innerHTML = '<div class="kv"><b>文件</b><span>'+esc(e.file.split("/").pop())+'</span></div>'
+      +'<div class="kv"><b>大小</b><span>'+e.size+'</span></div>'
+      +'<div class="kv"><b>修改时间</b><span>'+e.mtime+'</span></div>'
+      +'<div class="kv"><b>属性</b><span>'+detailAttrs(e)+'</span></div>';
+    d.appendChild(meta);
+    const sm = el("div","c-summary"); sm.textContent = e.summary; d.appendChild(sm);
+    const bd = el("div","c-body md"); bd.innerHTML = renderMd(e.body); d.appendChild(bd);
+  }
+  r.appendChild(d);
+  return r;
+}
+
+/* ================= 骨架 ================= */
+function el(tag, cls){ const n=document.createElement(tag); if(cls) n.className=cls; return n; }
+function placeholder(t){ const p=el("div","placeholder"); p.textContent=t; return p; }
+function projOf(entry){ return PROJECTS.find(p=>p.entries.includes(entry)); }
+
+const VARIANTS = [
+  { key:"A", name:"三栏文档流（按需求描述）", render:renderA },
+  { key:"B", name:"紧凑树 + sticky 属性卡",   render:renderB },
+  { key:"C", name:"深色工作台",               render:renderC },
+];
+function currentVariant(){
+  const v = new URLSearchParams(location.search).get("variant");
+  return VARIANTS.find(x=>x.key===v) || VARIANTS[0];
+}
+function setVariant(key){
+  const u = new URL(location.href); u.searchParams.set("variant", key);
+  history.replaceState(null,"",u); draw();
+}
+function draw(){
+  const v = currentVariant();
+  document.getElementById("lbl").textContent = v.key+" — "+v.name;
+  const app = document.getElementById("app");
+  app.innerHTML=""; app.appendChild(v.render());
+}
+function step(dir){
+  const i = VARIANTS.indexOf(currentVariant());
+  setVariant(VARIANTS[(i+dir+VARIANTS.length)%VARIANTS.length].key);
+}
+document.getElementById("prev").onclick = ()=>step(-1);
+document.getElementById("next").onclick = ()=>step(1);
+document.addEventListener("keydown", ev=>{
+  const t = ev.target;
+  if(t && (t.tagName==="INPUT"||t.tagName==="TEXTAREA"||t.isContentEditable)) return;
+  if(ev.key==="ArrowLeft") step(-1);
+  if(ev.key==="ArrowRight") step(1);
+});
+draw();
+</script>
+</body>
+</html>

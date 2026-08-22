@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>PROTOTYPE · OkManager 引导页右区（agent 接入卡片）</title>
+<!--
+  一次性原型（throwaway）：单独评审「引导」页右侧区域，通过后整合进 prototype-manager-v2.html。
+  语义对照真实代码（internal/agentx）：
+    - 已检测到 N = agentx.Detected() 数量；已接入 M = HooksInstalled() 为 true 的数量
+    - 卡片按钮：未接入→「安装」（= cli.Setup 的写入 hooks + 安装技能）；
+                已接入→「卸载」（= RemoveHooks + 移除技能）；
+                未检测到→禁用「未检测到」
+    - 接入形态徽标：Hook（kimi/claude/codex/qoder/qoder-ide/zcode/reasonix）
+                    / 插件（opencode=TS 插件、pi=扩展、dsh=JS 插件）
+  原型中的安装/卸载为内存模拟（800ms 假耗时），仅演示交互与状态翻转。
+  视觉语言与 web/prototype-manager-v2.html 同一套 CSS 变量。
+-->
+<style>
+  :root {
+    --bg:#f5f6f8; --fg:#1f2329; --muted:#6b7280; --border:#d9dce1;
+    --card:#ffffff; --primary:#2563eb; --sel-bg:#eff6ff; --sel-fg:#1d4ed8;
+    --hover:#f3f4f6; --ok:#16a34a; --ok-bg:#dcfce7; --off-bg:#f3f4f6;
+    --warn:#b45309; --code-bg:#f1f5f9;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.6 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+         background:var(--bg); color:var(--fg); padding:20px 28px 60px; }
+  button { font:inherit; color:inherit; }
+  .proto-banner { position:fixed; top:10px; right:12px; z-index:99; background:#fff7ed; border:1px solid #fdba74; color:#9a3412; padding:3px 10px; border-radius:6px; font-size:12px; }
+
+  /* ---------- 页头：检测结论 + 重新检测 ---------- */
+  .head { display:flex; align-items:center; gap:14px; margin-bottom:16px; flex-wrap:wrap; }
+  .head .stat { font-size:15px; }
+  .head .stat b { font-size:17px; }
+  .head .stat .ok { color:var(--ok); font-weight:600; }
+  .head .sub { color:var(--muted); font-size:12.5px; }
+  .btn { padding:6px 14px; border:1px solid var(--border); border-radius:6px; background:var(--card);
+         font-size:13px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
+  .btn:hover { border-color:var(--primary); color:var(--primary); }
+  .btn:disabled { opacity:.5; cursor:not-allowed; border-color:var(--border); color:var(--muted); }
+  .btn-primary { background:var(--primary); border-color:var(--primary); color:#fff; }
+  .btn-primary:hover { color:#fff; filter:brightness(1.08); }
+  .btn-danger:hover { border-color:#dc2626; color:#dc2626; }
+  .head .btn { margin-left:auto; }
+
+  /* ---------- agent 卡片（竖排） ---------- */
+  .cards { display:flex; flex-direction:column; gap:10px; max-width:980px; }
+  .acard { background:var(--card); border:1px solid var(--border); border-radius:10px;
+           padding:14px 18px; display:flex; gap:14px; align-items:flex-start; }
+  .acard.undetected { opacity:.62; }
+  .aicon { width:38px; height:38px; border-radius:9px; flex:none; display:flex; align-items:center;
+           justify-content:center; font-weight:700; font-size:13px; color:#fff; letter-spacing:.3px; }
+  .amain { flex:1; min-width:0; }
+  .arow1 { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .aname { font-weight:700; font-size:14.5px; }
+  .akind { font-size:10.5px; padding:1px 7px; border-radius:999px; letter-spacing:.5px; }
+  .k-hook   { background:var(--sel-bg); color:var(--sel-fg); }
+  .k-plugin { background:#ede9fe; color:#6d28d9; }
+  .adesc { color:var(--muted); font-size:12.5px; margin-top:2px; }
+  .adetect { font-size:12px; margin-top:4px; display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .adetect .path { font-family:Consolas,monospace; font-size:11.5px; color:var(--muted);
+                   background:var(--code-bg); border-radius:4px; padding:0 6px; }
+  .adetect .yes { color:var(--ok); }
+  .adetect .no  { color:var(--muted); }
+  /* 右侧：状态徽标 + 动作按钮 */
+  .aside { display:flex; align-items:center; gap:8px; flex:none; padding-top:2px; flex-wrap:wrap; justify-content:flex-end; }
+  .chip { font-size:11.5px; padding:2px 9px; border-radius:999px; white-space:nowrap; }
+  .chip.on  { background:var(--ok-bg); color:var(--ok); }
+  .chip.off { background:var(--off-bg); color:var(--muted); }
+  /* 动作反馈行（安装/卸载后短暂可见） */
+  .fb { font-size:12px; color:var(--ok); margin-top:4px; display:none; }
+  .fb.show { display:block; }
+
+  /* 展开的安装内容明细（原型里默认收起，点「明细」看会动哪些文件） */
+  .detail-toggle { background:none; border:none; color:var(--muted); font-size:12px; cursor:pointer; padding:0; }
+  .detail-toggle:hover { color:var(--primary); }
+  .adetail { display:none; margin-top:6px; font-size:12px; color:var(--muted); background:var(--bg);
+             border-radius:6px; padding:8px 12px; }
+  .adetail.open { display:block; }
+  .adetail code { background:var(--code-bg); border-radius:4px; padding:0 5px; font-size:11.5px; }
+</style>
+</head>
+<body>
+
+<div class="proto-banner">PROTOTYPE — 引导页右区单独评审；安装/卸载为模拟</div>
+
+<div class="head">
+  <div class="stat">已检测到 <b id="nDetected">-</b> 个 agent · <span class="ok">已接入 <b id="nHooked">-</b> 个</span></div>
+  <div class="sub">接入 = 写入 hooks 配置 + 安装 ok 技能（等同 CLI 的 <code>ok setup</code>）</div>
+  <button class="btn" id="redetect">↻ 重新检测</button>
+</div>
+
+<div class="cards" id="cards"></div>
+
+<script>
+"use strict";
+/* 样例数据：10 个真实适配器（internal/agentx 注册表），detected/hooked/skills 为虚构状态 */
+const AGENTS = [
+  { id:"kimi",      name:"Kimi Code",   kind:"hook",   color:"#2563eb", abbr:"Ki",
+    detected:true,  hooked:true,  skills:true,
+    version:"kimi-cli 0.9.3", target:"~/.kimi-code/hooks/*.yaml",
+    desc:"会话注入、强制检查、沉淀提议全链路接入。" },
+  { id:"claude",    name:"Claude Code", kind:"hook",   color:"#b45309", abbr:"Cl",
+    detected:true,  hooked:false, skills:false,
+    version:"claude 2.1.177", target:"~/.claude/settings.json",
+    desc:"为 Claude Code 及 CodePilot 等兼容宿主接入 hooks 注入。" },
+  { id:"codex",     name:"Codex",       kind:"hook",   color:"#111827", abbr:"Cx",
+    detected:true,  hooked:true,  skills:true,
+    version:"codex-cli 0.118.0", target:"~/.codex/config.toml",
+    desc:"hooks 注入 + 会话后增量捕获。" },
+  { id:"qoder",     name:"Qoder CN CLI", kind:"hook",  color:"#0d9488", abbr:"Qo",
+    detected:true,  hooked:false, skills:false,
+    version:"qoder-cli 已安装", target:"~/.qoder/hooks.yaml",
+    desc:"Qoder 命令行 hooks 接入。" },
+  { id:"qoder-ide", name:"Qoder CN IDE", kind:"hook",  color:"#0f766e", abbr:"QI",
+    detected:false, hooked:false, skills:false,
+    version:"", target:"IDE 插件 hooks",
+    desc:"灵码内核 IDE 的 hooks 接入。" },
+  { id:"opencode",  name:"opencode",    kind:"plugin", color:"#7c3aed", abbr:"oc",
+    detected:true,  hooked:false, skills:false,
+    version:"opencode 1.2.27", target:"~/.config/opencode/plugins/ok.ts",
+    desc:"TS 插件：仓库上下文 + 会话同步。" },
+  { id:"pi",        name:"Pi",          kind:"plugin", color:"#db2777", abbr:"Pi",
+    detected:false, hooked:false, skills:false,
+    version:"", target:"Pi 扩展目录",
+    desc:"Pi 扩展方式接入。" },
+  { id:"zcode",     name:"ZCode",       kind:"hook",   color:"#ea580c", abbr:"Zc",
+    detected:true,  hooked:false, skills:false,
+    version:"zcode 已安装", target:"~/.zcode/hooks + 独立技能目录",
+    desc:"hooks 注入（claude 协议），技能目录独立。" },
+  { id:"reasonix",  name:"Reasonix",    kind:"hook",   color:"#4f46e5", abbr:"Rx",
+    detected:true,  hooked:true,  skills:true,
+    version:"reasonix 已安装", target:"sidecar 扩展注册",
+    desc:"sidecar 扩展接入，强制检查走拦截器。" },
+  { id:"dsh",       name:"DeepSeek Harness", kind:"plugin", color:"#0284c7", abbr:"DS",
+    detected:false, hooked:false, skills:false,
+    version:"", target:"DSH 本地插件目录",
+    desc:"file-URL 挂载的本地 JS 插件。" },
+];
+
+const state = Object.fromEntries(AGENTS.map(a=>[a.id,{hooked:a.hooked, skills:a.skills, busy:false, open:false}]));
+
+function el(tag, cls){ const n=document.createElement(tag); if(cls) n.className=cls; return n; }
+function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+function refreshCounts(){
+  document.getElementById("nDetected").textContent = AGENTS.filter(a=>a.detected).length;
+  document.getElementById("nHooked").textContent   = AGENTS.filter(a=>a.detected && state[a.id].hooked).length;
+}
+
+function render(){
+  refreshCounts();
+  const wrap = document.getElementById("cards");
+  wrap.innerHTML = "";
+  AGENTS.forEach(a=>{
+    const s = state[a.id];
+    const card = el("div","acard"+(a.detected?"":" undetected"));
+
+    const icon = el("div","aicon");
+    icon.style.background = a.color; icon.textContent = a.abbr;
+    card.appendChild(icon);
+
+    const main = el("div","amain");
+    const r1 = el("div","arow1");
+    r1.appendChild(Object.assign(el("span","aname"),{textContent:a.name}));
+    const kind = el("span","akind "+(a.kind==="hook"?"k-hook":"k-plugin"));
+    kind.textContent = a.kind==="hook" ? "HOOK" : "插件";
+    r1.appendChild(kind);
+    main.appendChild(r1);
+
+    main.appendChild(Object.assign(el("div","adesc"),{textContent:a.desc}));
+
+    const det = el("div","adetect");
+    if(a.detected){
+      det.innerHTML = '<span class="yes">✓ 已安装</span><span>'+esc(a.version)+'</span>'
+                    + '<span class="path" title="接入目标">'+esc(a.target)+'</span>';
+    } else {
+      det.innerHTML = '<span class="no">✗ 未检测到本机安装</span>';
+    }
+    main.appendChild(det);
+
+    // 明细：安装/卸载会动的文件（评审要点——按钮不是假功能）
+    if(a.detected){
+      const tog = el("button","detail-toggle");
+      tog.textContent = s.open ? "▾ 收起明细" : "▸ 安装会动哪些文件？";
+      tog.onclick = ()=>{ s.open=!s.open; render(); };
+      main.appendChild(tog);
+      const dl = el("div","adetail"+(s.open?" open":""));
+      dl.innerHTML = "<b>安装</b>：写入 hooks 配置 <code>"+esc(a.target)+"</code> + 安装 ok 技能到技能目录；"
+                   + "<b>卸载</b>：按标记移除 ok 写入的 hooks 段与技能目录条目，不动用户其他配置。";
+      main.appendChild(dl);
+    }
+
+    const fb = el("div","fb"+(s.fb?" show":""));
+    fb.textContent = s.fb||"";
+    main.appendChild(fb);
+    card.appendChild(main);
+
+    // 右侧状态 + 动作
+    const aside = el("div","aside");
+    if(a.detected){
+      const ch1 = el("span","chip "+(s.hooked?"on":"off"));
+      ch1.textContent = s.hooked ? "Hook 已接入" : "Hook 未接入";
+      aside.appendChild(ch1);
+      const ch2 = el("span","chip "+(s.skills?"on":"off"));
+      ch2.textContent = s.skills ? "技能已安装" : "技能未安装";
+      aside.appendChild(ch2);
+      const act = el("button","btn "+(s.hooked?"btn-danger":"btn-primary"));
+      act.disabled = s.busy;
+      act.textContent = s.busy ? (s.hooked?"卸载中…":"安装中…") : (s.hooked?"卸载":"安装");
+      act.onclick = ()=>toggle(a);
+      aside.appendChild(act);
+    } else {
+      const ch = el("span","chip off"); ch.textContent = "未检测到";
+      aside.appendChild(ch);
+      const act = el("button","btn"); act.disabled = true; act.textContent = "先安装客户端";
+      aside.appendChild(act);
+    }
+    card.appendChild(aside);
+    wrap.appendChild(card);
+  });
+}
+
+/* 模拟安装/卸载：800ms 假耗时 → 状态翻转 + 可见反馈（真实现=cli.Setup/RemoveHooks） */
+function toggle(a){
+  const s = state[a.id];
+  s.busy = true; s.fb = ""; render();
+  setTimeout(()=>{
+    s.busy = false;
+    s.hooked = !s.hooked;
+    s.skills = s.hooked;
+    s.fb = s.hooked ? "✓ 已接入：hooks 已写入，技能已安装（下次会话生效）"
+                    : "✓ 已卸载：ok 写入的 hooks 与技能已移除";
+    render();
+  }, 800);
+}
+
+document.getElementById("redetect").onclick = function(){
+  this.disabled = true; this.textContent = "↻ 检测中…";
+  setTimeout(()=>{ this.disabled=false; this.textContent="↻ 重新检测"; render(); }, 600);
+};
+
+render();
+</script>
+</body>
+</html>

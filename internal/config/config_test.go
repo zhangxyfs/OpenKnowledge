@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -414,5 +415,72 @@ func TestFeedbackConfigDefaultAndOverride(t *testing.T) {
 	}
 	if !cfg.Retrieve.Feedback.Enabled {
 		t.Fatalf("project 缺键应继承全局 %+v", cfg.Retrieve.Feedback)
+	}
+}
+
+// TestSetEnforceRules 行级重写 [[enforce]] 数组：整体替换既有块、保留其他小节键；
+// 空数组 = 删除全部 [[enforce]] 块。
+func TestSetEnforceRules(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	seed := "[retrieve]\ndedup_turns = 7\n\n[[enforce]]\ntype = \"changelog\"\ncode_globs = [\"**/*.old\"]\nchangelog_glob = \"docs/old/**\"\nmessage = \"旧规则\"\n"
+	if err := os.WriteFile(path, []byte(seed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rules := []EnforceRule{
+		{Type: "changelog", CodeGlobs: []string{"**/*.go"}, ChangelogGlob: "docs/changelogs/**", Message: "改代码必须写变更日志"},
+		{Type: "changelog", CodeGlobs: []string{"web/**", "internal/**"}, ChangelogGlob: "docs/changelogs/**", Message: "第二条"},
+	}
+	if err := SetEnforceRules(path, rules); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Enforce) != 2 || cfg.Enforce[0].Message != "改代码必须写变更日志" || len(cfg.Enforce[1].CodeGlobs) != 2 {
+		t.Fatalf("enforce rules mismatch: %+v", cfg.Enforce)
+	}
+	// 其他小节键原样保留
+	if cfg.Retrieve.DedupTurns != 7 {
+		t.Fatalf("[retrieve] dedup_turns lost: %+v", cfg.Retrieve)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "dedup_turns = 7") {
+		t.Fatalf("retrieve section should be preserved verbatim: %q", data)
+	}
+
+	// 空数组 → 删除全部 [[enforce]] 块，其余原样
+	if err := SetEnforceRules(path, nil); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Enforce) != 0 {
+		t.Fatalf("enforce should be empty after clear: %+v", cfg.Enforce)
+	}
+	data, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "[[enforce]]") || !strings.Contains(string(data), "dedup_turns = 7") {
+		t.Fatalf("clear should drop enforce blocks only: %q", data)
+	}
+
+	// 无区块时在文件末尾追加
+	if err := SetEnforceRules(path, rules[:1]); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Enforce) != 1 || cfg.Enforce[0].ChangelogGlob != "docs/changelogs/**" || cfg.Retrieve.DedupTurns != 7 {
+		t.Fatalf("append after clear failed: %+v", cfg)
 	}
 }

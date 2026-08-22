@@ -1,0 +1,1763 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>PROTOTYPE · OkManager 管理页（收敛版 v2）</title>
+<!--
+  一次性原型（throwaway）v2：v1 三变体评审后的收敛设计，不再多变体。
+  定稿要素：
+    - 顶栏左侧折叠按钮（◫）切换侧栏两态：展开=图标+文字菜单 / 收起=纯图标栏
+    - 菜单五项固定：管理/引导/设置/日志/其他
+    - 树 = v1 变体 B 的紧凑形态（顶部过滤框；叶节点首行徽标、次行标题）
+    - 详情 = v1 变体 A 的文档流（相对路径/文件名+大小+时间/标题/tags+mandatory/摘要/markdown 正文）
+    - 顶栏右侧：中/EN 语言切换 + 日/夜主题切换
+  数据为样例；昼夜主题走 CSS 变量（data-theme），语言走 i18n 字典（data 内容不翻译）。
+-->
+<style>
+  :root {
+    --bg:#f5f6f8; --fg:#1f2329; --muted:#6b7280; --border:#d9dce1;
+    --card:#ffffff; --primary:#2563eb; --sel-bg:#eff6ff; --sel-fg:#1d4ed8;
+    --hover:#f3f4f6; --menu-bg:#ffffff; --code-bg:#f1f5f9; --pre-bg:#14171f; --pre-fg:#d6dae4;
+    --born-bg:#4E5D73; --born-fg:#fff;
+    --pitfall-bg:#fee2e2; --pitfall-fg:#b91c1c;
+    --note-bg:#dbeafe; --note-fg:#1d4ed8;
+    --rule-bg:#ede9fe; --rule-fg:#6d28d9;
+    --ref-bg:#e0e7ff; --ref-fg:#3730a3;
+    --mand-bg:#fef3c7; --mand-fg:#92400e;
+    --draft-fg:#6b7280; --draft-bd:#d1d5db;
+    --tag-bg:#eef2f7; --tag-fg:#475569;
+  }
+  [data-theme="dark"] {
+    --bg:#14171f; --fg:#d6dae4; --muted:#8a8f9c; --border:#262c38;
+    --card:#1a1f2a; --primary:#79b8ff; --sel-bg:#24304a; --sel-fg:#79b8ff;
+    --hover:#1f2430; --menu-bg:#0f1218; --code-bg:#0f1218; --pre-bg:#0f1218; --pre-fg:#d6dae4;
+    --born-bg:#4E5D73; --born-fg:#fff;
+    --pitfall-bg:#3f1d1d; --pitfall-fg:#f87171;
+    --note-bg:#1e2a45; --note-fg:#79b8ff;
+    --rule-bg:#2a2340; --rule-fg:#c4b5fd;
+    --ref-bg:#232a45; --ref-fg:#a5b4fc;
+    --mand-bg:#3a2f14; --mand-fg:#fbbf24;
+    --draft-fg:#8a8f9c; --draft-bd:#3a4150;
+    --tag-bg:#232a38; --tag-fg:#aab2c0;
+  }
+  * { box-sizing:border-box; }
+  html,body { height:100%; }
+  body { margin:0; font:14px/1.6 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+         background:var(--bg); color:var(--fg); transition:background .15s,color .15s; }
+  button { font:inherit; color:inherit; }
+
+  .proto-banner { position:fixed; top:10px; right:230px; z-index:99; background:#fff7ed; border:1px solid #fdba74; color:#9a3412; padding:3px 10px; border-radius:6px; font-size:12px; }
+  [data-theme="dark"] .proto-banner { background:#3a2a14; }
+
+  /* ---------- 顶栏 ---------- */
+  .topbar { display:flex; align-items:center; gap:10px; height:52px; padding:0 14px;
+            background:var(--card); border-bottom:1px solid var(--border); }
+  .collapse-btn { width:32px; height:32px; border:none; background:none; border-radius:6px;
+                  cursor:pointer; color:var(--muted); display:flex; align-items:center; justify-content:center; }
+  .collapse-btn:hover { background:var(--hover); color:var(--fg); }
+  .brand { font-weight:700; font-size:15px; display:flex; align-items:center; gap:8px; }
+  .brand .logo { width:22px; height:22px; border-radius:6px; background:var(--primary); color:#fff;
+                 display:flex; align-items:center; justify-content:center; font-size:12px; }
+  /* 中/EN 胶囊切换（仿 OpenViking 右上角）；margin-left:auto 把右侧控件组推到顶栏尾部 */
+  .lang-seg { display:flex; border:1px solid var(--border); border-radius:999px; overflow:hidden; margin-left:auto; }
+  .lang-seg button { border:none; background:none; padding:4px 12px; cursor:pointer; font-size:12px; color:var(--muted); }
+  .lang-seg button.on { background:var(--fg); color:var(--bg); font-weight:600; }
+  .theme-btn { width:32px; height:32px; border:none; background:none; border-radius:999px;
+               cursor:pointer; color:var(--muted); display:flex; align-items:center; justify-content:center; }
+  .theme-btn:hover { background:var(--hover); color:var(--fg); }
+
+  /* ---------- 主体 ---------- */
+  .main { display:flex; height:calc(100vh - 52px); }
+
+  /* 侧栏：展开 180px（图标+文字）/ 收起 52px（纯图标），同一棵 DOM 两种形态 */
+  .side { width:180px; background:var(--menu-bg); border-right:1px solid var(--border);
+          padding:10px 8px; display:flex; flex-direction:column; gap:2px;
+          transition:width .15s; overflow:hidden; flex:none; }
+  .side.collapsed { width:52px; padding:10px 4px; }
+  .mi { display:flex; align-items:center; gap:10px; padding:9px 12px; border:none; background:none;
+        border-radius:6px; color:var(--muted); cursor:pointer; text-align:left; width:100%; white-space:nowrap; }
+  .mi:hover { background:var(--hover); color:var(--fg); }
+  .mi.active { background:var(--sel-bg); color:var(--sel-fg); font-weight:600; }
+  .mi .ico { width:18px; flex:none; display:flex; align-items:center; justify-content:center; }
+  .mi .tip { display:none; }  /* 仅收起态悬停时显示，展开态绝不渲染 */
+  .side.collapsed .mi { padding:9px 0; justify-content:center; position:relative; }
+  .side.collapsed .mi .txt { display:none; }
+  .side.collapsed .mi .tip { position:fixed; margin-left:46px; margin-top:-30px; background:#111827; color:#fff;
+                             font-size:12px; padding:3px 10px; border-radius:4px; white-space:nowrap; z-index:50; }
+  .side.collapsed .mi:hover .tip { display:block; }
+
+  /* 树（v1-B 形态：过滤框 + 紧凑叶节点） */
+  .tree { width:272px; background:var(--card); border-right:1px solid var(--border);
+          display:flex; flex-direction:column; flex:none; }
+  .tree-head { padding:10px 10px 6px; display:flex; gap:6px; align-items:center; }
+  .tree-head .caption { font-size:12px; font-weight:600; color:var(--muted); margin-right:auto; }
+  .search { margin:0 10px 8px; padding:5px 10px; border:1px solid var(--border); border-radius:6px;
+            width:calc(100% - 20px); background:var(--bg); color:var(--fg); font-size:12.5px; }
+  .search::placeholder { color:var(--muted); }
+  .tree-scroll { overflow-y:auto; flex:1; padding:0 6px 10px; }
+  .tn-proj { display:flex; align-items:center; gap:5px; width:100%; border:none; background:none;
+             padding:5px 8px; border-radius:6px; cursor:pointer; font-weight:600; text-align:left; font-size:13px; }
+  .tn-proj:hover { background:var(--hover); }
+  .tn-proj .caret { width:12px; color:var(--muted); transition:transform .12s; flex:none; font-size:10px; }
+  .tn-proj.open .caret { transform:rotate(90deg); }
+  .tn-proj .folder { color:var(--muted); display:flex; flex:none; }
+  .tn-proj .cnt { margin-left:auto; color:var(--muted); font-size:11px; font-weight:400; }
+  .tn-kids { margin-left:15px; border-left:1px solid var(--border); padding-left:4px; }
+  .leaf { display:block; width:100%; border:none; background:none; text-align:left;
+          padding:4px 7px; border-radius:6px; cursor:pointer; }
+  .leaf:hover { background:var(--hover); }
+  .leaf.sel { background:var(--sel-bg); box-shadow:inset 2px 0 0 var(--primary); }
+  .leaf .l1 { display:flex; gap:4px; align-items:center; }
+  .leaf .t2 { display:block; font-size:12.5px; line-height:1.45; color:var(--fg); overflow:hidden; text-overflow:ellipsis;
+              white-space:nowrap; }
+  .leaf.sel .t2 { color:var(--sel-fg); }
+  .leaf.archived .t2 { color:var(--muted); text-decoration:line-through; }
+
+  /* 详情（v1-A 文档流） */
+  .detail { flex:1; overflow-y:auto; padding:20px 28px 60px; }
+  .d-path { font:12px/1.5 "Cascadia Code",Consolas,monospace; color:var(--muted); word-break:break-all; }
+  .d-filemeta { color:var(--muted); font-size:13px; margin-top:2px; }
+  .d-filemeta b { color:var(--fg); font-weight:600; }
+  .d-title { font-size:20px; margin:10px 0 6px; }
+  .d-attrs { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-bottom:10px; }
+  .d-summary { background:var(--card); border:1px solid var(--border); border-left:3px solid var(--primary);
+               border-radius:6px; padding:10px 14px; margin-bottom:16px; }
+  .d-body { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:18px 22px; }
+
+  /* 徽标（紧凑化：10px、细圆角，树内不抢视线） */
+  .badge-born { background:var(--born-bg); color:var(--born-fg); border-radius:3px; padding:0 4px;
+                font-size:10px; line-height:16px; white-space:nowrap; display:inline-flex; align-items:center; gap:2px; }
+  .badge-type { border-radius:3px; padding:0 4px; display:inline-flex; align-items:center; justify-content:center;
+                font-size:10px; line-height:16px; white-space:nowrap; flex:none; }
+  .leaf .badge-type { width:16px; height:16px; padding:0; }  /* 方块紧凑态只限管理页树内 */
+  .t-pitfall   { background:var(--pitfall-bg); color:var(--pitfall-fg); }
+  .t-note      { background:var(--note-bg); color:var(--note-fg); }
+  .t-rule      { background:var(--rule-bg); color:var(--rule-fg); }
+  .t-reference { background:var(--ref-bg); color:var(--ref-fg); }
+  .badge-mand  { background:var(--mand-bg); color:var(--mand-fg); border-radius:3px; padding:0 4px; font-size:10px; line-height:16px; }
+  .badge-draft { background:none; color:var(--draft-fg); border:1px dashed var(--draft-bd); border-radius:3px; padding:0 4px; font-size:10px; line-height:14px; }
+  .badge-arch  { background:var(--hover); color:var(--muted); border-radius:3px; padding:0 4px; font-size:10px; line-height:16px; }
+  .tag { background:var(--tag-bg); color:var(--tag-fg); border-radius:4px; padding:0 6px; font-size:12px; }
+  /* 详情区徽标恢复常规尺寸 */
+  .d-attrs .badge-type, .d-attrs .badge-born, .d-attrs .badge-mand, .d-attrs .badge-draft, .d-attrs .badge-arch { font-size:12px; line-height:20px; }
+  .d-attrs .badge-type { width:auto; height:auto; padding:0 6px; }
+
+  /* markdown 正文 */
+  .md h1 { font-size:18px; margin:18px 0 8px; }
+  .md h2 { font-size:16px; margin:16px 0 6px; }
+  .md h3 { font-size:14px; margin:14px 0 6px; }
+  .md p { margin:8px 0; }
+  .md code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font:13px "Cascadia Code",Consolas,monospace; }
+  .md pre { background:var(--pre-bg); color:var(--pre-fg); border-radius:8px; padding:12px 14px; overflow-x:auto; }
+  .md pre code { background:none; color:inherit; padding:0; }
+  .md ul,.md ol { margin:8px 0; padding-left:24px; }
+
+  .placeholder { flex:1; display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:15px; }
+
+  /* ================================================================
+     日志页：三来源（ok / daemon / sidecar）实时日志查看器，2s 轮询，只读。
+     工具行=来源 chip + 语义 chip + 过滤框 + 行数统计 + 自动刷新开关；
+     主体为深色控制台（两主题下都保持深色），滚动贴底。
+     ================================================================ */
+  .logs { flex:1; display:flex; flex-direction:column; padding:20px 28px; min-height:0; }
+  .logbar { display:flex; align-items:center; gap:8px; margin-bottom:10px; flex-wrap:wrap; }
+  .logchip { font-size:11.5px; padding:3px 11px; border-radius:999px; cursor:pointer;
+             border:1px solid transparent; user-select:none; background:var(--hover); color:var(--muted); }
+  .logchip.on-ok      { background:var(--ok-bg); color:var(--ok); }
+  .logchip.on-daemon  { background:var(--sel-bg); color:var(--sel-fg); }
+  .logchip.on-sidecar { background:var(--mand-bg); color:var(--mand-fg); }
+  .logchip.on-sem     { background:var(--rule-bg); color:var(--rule-fg); }
+  .logfilter { flex:1; min-width:160px; padding:5px 10px; border:1px solid var(--border); border-radius:6px;
+               background:var(--card); color:var(--fg); font-size:12.5px; }
+  .logmeta { margin-left:auto; display:flex; align-items:center; gap:10px; color:var(--muted); font-size:12px; }
+  .logbody { flex:1; overflow-y:auto; background:var(--pre-bg); color:var(--pre-fg); border-radius:10px;
+             padding:12px 14px; font:12.5px/1.75 Consolas,monospace; white-space:pre-wrap; word-break:break-all; }
+  .logbody .ls { display:inline-block; min-width:56px; font-weight:700; }
+  .logbody .ls-ok { color:#4ade80; } .logbody .ls-daemon { color:#60a5fa; } .logbody .ls-sidecar { color:#fbbf24; }
+  .logbody .sem { color:#c084fc; } .logbody .sem.off { color:#4b5563; }
+  .logbody .empty { color:#6b7280; }
+
+  /* ---------- 其他页：复用 pcard 卡片语言；删除卡用危险红边 ---------- */
+  .misc { flex:1; overflow-y:auto; padding:20px 28px 60px; }
+  .pcard.danger { border-color:#f0b4b4; }
+  [data-theme="dark"] .pcard.danger { border-color:#5b2b2b; }
+  .pcard.danger h3 { color:#dc2626; }
+  [data-theme="dark"] .pcard.danger h3 { color:#f87171; }
+  .about-line { color:var(--muted); font-size:12.5px; margin:3px 0; }
+  .about-line .mono { font-family:Consolas,monospace; }
+  .modal .md { font-size:13px; }
+
+  /* ================================================================
+     引导页（agent 接入卡片，自 prototype-setup.html 整合；未检测到的不渲染）
+     ================================================================ */
+  .setup { flex:1; overflow-y:auto; padding:20px 28px 60px; }
+  .setup-head { display:flex; align-items:center; gap:14px; margin-bottom:16px; flex-wrap:wrap; }
+  .setup-head .stat { font-size:15px; }
+  .setup-head .stat b { font-size:17px; }
+  .setup-head .stat .ok { color:var(--ok); font-weight:600; }
+  .setup-head .sub { color:var(--muted); font-size:12.5px; }
+  .setup-head .btn { margin-left:auto; }
+  .acards { display:flex; flex-direction:column; gap:10px; }
+  .acard { background:var(--card); border:1px solid var(--border); border-radius:10px;
+           padding:14px 18px; display:flex; gap:14px; align-items:flex-start; }
+  .aicon { width:38px; height:38px; border-radius:9px; flex:none; display:flex; align-items:center;
+           justify-content:center; font-weight:700; font-size:13px; color:#fff; letter-spacing:.3px; overflow:hidden; }
+  .aicon svg { width:100%; height:100%; display:block; }
+  .aicon svg[width="20"] { width:20px; height:20px; }  /* logoSvg() 生成的字形保持 20px 不铺满 */
+  .aicon img { width:100%; height:100%; display:block; }
+  .amain { flex:1; min-width:0; }
+  .arow1 { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .aname { font-weight:700; font-size:14.5px; }
+  .akind { font-size:10.5px; padding:1px 7px; border-radius:999px; letter-spacing:.5px; }
+  .k-hook   { background:var(--sel-bg); color:var(--sel-fg); }
+  .k-plugin { background:var(--rule-bg); color:var(--rule-fg); }
+  .adesc { color:var(--muted); font-size:12.5px; margin-top:2px; }
+  .adetect { font-size:12px; margin-top:4px; display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .adetect .path { font-family:Consolas,monospace; font-size:11.5px; color:var(--muted);
+                   background:var(--code-bg); border-radius:4px; padding:0 6px; }
+  .adetect .yes { color:var(--ok); }
+  .aside2 { display:flex; align-items:center; gap:8px; flex:none; padding-top:2px; flex-wrap:wrap; justify-content:flex-end; }
+  .chip { font-size:11.5px; padding:2px 9px; border-radius:999px; white-space:nowrap; }
+  .chip.on  { background:var(--ok-bg); color:var(--ok); }
+  .chip.off { background:var(--hover); color:var(--muted); }
+  .fb { font-size:12px; color:var(--ok); margin-top:4px; display:none; }
+  .fb.show { display:block; }
+  .detail-toggle { background:none; border:none; color:var(--muted); font-size:12px; cursor:pointer; padding:0; }
+  .detail-toggle:hover { color:var(--primary); }
+  .adetail { display:none; margin-top:6px; font-size:12px; color:var(--muted); background:var(--bg);
+             border-radius:6px; padding:8px 12px; }
+  .adetail.open { display:block; }
+  .adetail code { background:var(--code-bg); border-radius:4px; padding:0 5px; font-size:11.5px; }
+  :root { --ok:#16a34a; --ok-bg:#dcfce7; }
+  [data-theme="dark"] { --ok:#4ade80; --ok-bg:#14301e; }
+  .btn { padding:6px 14px; border:1px solid var(--border); border-radius:6px; background:var(--card);
+         font-size:13px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
+  .btn:hover:not(:disabled) { border-color:var(--primary); color:var(--primary); }
+  .btn:disabled { opacity:.5; cursor:not-allowed; border-color:var(--border); color:var(--muted); }
+  /* 禁用态的保存按钮用中性灰（有改动可保存时才亮起主色），不做"褪色的蓝" */
+  .btn-primary:disabled { background:var(--hover); border-color:var(--border); color:var(--muted); opacity:1; filter:none; }
+  .btn-primary { background:var(--primary); border-color:var(--primary); color:#fff; }
+  .btn-primary:hover:not(:disabled) { color:#fff; filter:brightness(1.08); }
+  .btn-danger { border-color:#dc2626; color:#dc2626; }
+  .btn-danger:hover:not(:disabled) { background:#dc2626; border-color:#dc2626; color:#fff; }
+  .btn-danger:disabled { border-color:var(--border); color:var(--muted); }
+
+  /* ================================================================
+     设置页：功能卡片竖排；交互统一「勾选+保存」两段式（项目既定约定），
+     每张卡独立 dirty → 保存 → 已保存反馈。字段全部对应 config.toml 真实小节。
+     ================================================================ */
+  .prefs { flex:1; overflow-y:auto; padding:20px 28px 60px; }
+  .pcard { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:16px 20px; margin-bottom:12px; }
+  .pcard h3 { margin:0 0 2px; font-size:14.5px; display:flex; align-items:center; gap:8px; }
+  .pcard .pdesc { color:var(--muted); font-size:12.5px; margin-bottom:12px; }
+  .prow { display:flex; align-items:center; gap:10px; margin:8px 0; flex-wrap:wrap; }
+  .prow .k { width:140px; color:var(--muted); font-size:13px; flex:none; }
+  .pinput, .pselect { padding:5px 10px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--fg); font-size:13px; }
+  .pinput:focus, .pselect:focus { outline:none; border-color:var(--primary); }
+  .pfoot { margin-top:12px; display:flex; align-items:center; gap:10px; }
+  .pfoot .fb2 { font-size:12px; color:var(--ok); }
+  .switch { position:relative; width:38px; height:22px; border-radius:999px; background:var(--border); border:none; cursor:pointer; transition:background .15s; flex:none; padding:0; }
+  .switch.on { background:var(--ok); }
+  .switch::after { content:""; position:absolute; top:3px; left:3px; width:16px; height:16px; border-radius:50%; background:#fff; transition:left .15s; }
+  .switch.on::after { left:19px; }
+  .prof { display:flex; align-items:center; gap:10px; border:1px solid var(--border); border-radius:8px; padding:8px 12px; margin:6px 0; cursor:pointer; }
+  .prof.sel { border-color:var(--primary); background:var(--sel-bg); }
+  .prof .info { display:flex; align-items:center; gap:6px; min-width:0; flex:1; }
+  .prof .info b { white-space:nowrap; }
+  .prof .mono { font-family:Consolas,monospace; font-size:12px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+  .prof .radio { accent-color:var(--primary); }
+  table.rules { width:100%; border-collapse:collapse; font-size:12.5px; }
+  table.rules th { text-align:left; color:var(--muted); font-weight:600; padding:4px 8px; border-bottom:1px solid var(--border); }
+  table.rules td { padding:4px 8px; border-bottom:1px solid var(--border); vertical-align:top; }
+  table.rules .pinput { width:100%; padding:3px 8px; font-size:12.5px; }
+  .sec-label { font-size:12px; color:var(--muted); font-weight:600; margin:12px 0 4px; }
+  /* 门控短语弹窗 */
+  .mask { position:fixed; inset:0; background:rgba(0,0,0,.35); display:flex; align-items:center; justify-content:center; z-index:80; }
+  .modal { background:var(--card); border:1px solid var(--border); border-radius:10px; width:640px; max-width:92vw; max-height:80vh; overflow-y:auto; padding:18px 22px; }
+  .modal h3 { margin:0 0 6px; font-size:15px; }
+  .ph-builtin { display:flex; flex-wrap:wrap; gap:5px; margin-bottom:6px; }
+  .ph-row { display:flex; gap:6px; margin:5px 0; }
+  .ph-row .pinput { flex:1; }
+  .mfoot { display:flex; justify-content:flex-end; gap:8px; margin-top:14px; }
+</style>
+</head>
+<body>
+
+<div class="proto-banner">PROTOTYPE v2 — 收敛版，不进生产；数据为样例</div>
+<div id="app"></div>
+
+<script>
+"use strict";
+/* ================= 样例数据（OpenKnowledge 为真实条目节选） ================= */
+const PROJECTS = [
+  { name:"OpenKnowledge", root:"D:\\develop\\OpenKnowledge", entries:[
+    { file:"knowledge/Web-GUI.md", title:"Web GUI", type:"reference", born:"master",
+      tags:["wiki","gui"], mandatory:false, draft:false, archived:false,
+      size:"4.6 KB", mtime:"2026-08-17 21:34",
+      summary:"四标签 SPA：管理/引导/其他/日志；v2.18.2 管理页归档入口；v2.17 门控卡片；v2.8 双徽标/谱系行；v2.9.0 删除项目知识库",
+      body:"单页 SPA（`web/index.html` + `web/app.js` + `web/style.css`，随 exe 分发到 exe 旁 `web/` 目录，daemon 每次请求实时读盘、`Cache-Control: no-cache`），四个标签页：管理、引导、其他、日志。\n\n- **管理**：条目列表（时间排序/筛选/分页）、草稿批准、项目切换；所有请求带 token 认证。\n- **引导**：agents 下拉、hook 超时卡、embedding 配置、泛化门控卡。\n- **其他**：数据导出/导入（zip 备份）、版本显示、更新日志常驻入口。\n- **日志**：三来源实时日志查看器，2 秒轮询，只读。\n\n打开方式：`ok gui` 起 HTTP 服务后 `--app=` 模式开浏览器。" },
+    { file:"knowledge/SQLite-读写并发致整轮注入静默跳过：开-WAL-+-NORMAL.md", title:"SQLite 读写并发致整轮注入静默跳过：开 WAL + NORMAL", type:"pitfall", born:"master",
+      tags:["sqlite","WAL","并发","注入"], mandatory:true, draft:false, archived:false,
+      size:"1.8 KB", mtime:"2026-08-02 10:12",
+      summary:"kb.db 读写并发下 hook 注入整轮静默跳过；开 WAL + synchronous=NORMAL 后消失",
+      body:"hook 注入偶发整轮静默跳过，无报错。定位为 kb.db 读写并发：`index` 写事务与 `retrieve` 读相互阻塞，busy 超时后直接返回空。\n\n修复：\n\n```\nPRAGMA journal_mode=WAL;\nPRAGMA synchronous=NORMAL;\nPRAGMA busy_timeout=3000;\n```\n\n**教训**：SQLite 多进程读写必须开 WAL，默认 rollback journal 下读写互斥。" },
+    { file:"knowledge/GUI-开关类设置用勾选+保存按钮两段式，不用-change-即存.md", title:"GUI 开关类设置用勾选+保存按钮两段式，不用 change 即存", type:"note", born:"master",
+      tags:["gui","交互约定"], mandatory:false, draft:false, archived:false,
+      size:"0.9 KB", mtime:"2026-07-30 15:02",
+      summary:"引导页开关统一勾选+保存按钮两段式（首例泛化门控），即存模式误触无反悔",
+      body:"引导页的开关类设置统一为**勾选 + 保存按钮**两段式，不用 change 即存。首例：泛化门控。\n\n理由：即存模式下误触无反悔窗口，用户甚至意识不到状态已改。" },
+    { file:"knowledge/README-版本徽标会漂移：bump-时须跑-scriptssync-version.sh.md", title:"README 版本徽标会漂移：bump 时须跑 scripts/sync-version.sh", type:"pitfall", born:"master",
+      tags:["发布","版本号","README"], mandatory:true, draft:false, archived:false,
+      size:"1.1 KB", mtime:"2026-07-25 09:40",
+      summary:"版本徽标/引用会漂移（README + 官网 site）：bump 时须跑 scripts/sync-version.sh；pre-push 钩子已兜底",
+      body:"版本号 bump 后 README 徽标与 `site/` 官网引用不会自动跟随，曾发布出徽标落后的包。\n\n纪律：bump 时必跑 `scripts/sync-version.sh`；pre-push 钩子已加兜底校验。" },
+    { file:"knowledge/daemon-进程模型.md", title:"daemon 进程模型", type:"reference", born:"master",
+      tags:["daemon","架构"], mandatory:false, draft:false, archived:false,
+      size:"2.3 KB", mtime:"2026-08-10 18:20",
+      summary:"单实例端口即锁；daemon.json 凭证 + fingerprint 版本自检；hook 优先转发 daemon",
+      body:"`ok daemon` 以单实例运行：默认端口 17888 即锁，第二实例发现健康 daemon 即退出 0。\n\n- 凭证：`~/.openknowledge/daemon.json`（PID/port/token/fingerprint）\n- 自省：15s 一轮，daemon.json 丢失或易主自动退出\n- hook 路径优先转发 daemon，daemon 不在则本地处理并后台拉起" },
+    { file:"knowledge/Windows-宿主交叉构建-Linux-包：chmod-静默无效，权限位必须显式钉.md", title:"Windows 宿主交叉构建 Linux 包：chmod 静默无效，权限位必须显式钉", type:"pitfall", born:"master",
+      tags:["构建","跨平台","发布"], mandatory:false, draft:false, archived:false,
+      size:"1.5 KB", mtime:"2026-08-06 14:55",
+      summary:"Windows git-bash noacl 挂载下 chmod 静默失效，tar/nfpm 继承 0644；两段式 tar --mode 钉权限 + verify 断言 mode",
+      body:"Windows 宿主上交叉构建 Linux 包时，git-bash 的 noacl 挂载让 `chmod` **静默失效**，产物权限全是 0644。\n\n对策：两段式 `tar --mode` 显式钉权限位，verify 脚本断言 mode。" },
+    { file:"knowledge/混合检索准入必须按通道独立判定.md", title:"混合检索准入必须按通道独立判定", type:"pitfall", born:"master",
+      tags:["检索","混合检索","阈值"], mandatory:false, draft:true, archived:false,
+      size:"1.2 KB", mtime:"2026-08-15 11:08",
+      summary:"同域语料余弦基线会顶穿总分阈值；关键词与向量通道必须各自过准入",
+      body:"混合检索中，同域语料的向量余弦基线天然偏高，会把总分顶穿阈值，导致弱相关条目注入。\n\n准入必须**按通道独立判定**，再融合排序。" },
+    { file:"knowledge/旧版注入设计.md", title:"旧版注入设计（已归档）", type:"reference", born:"master",
+      tags:["注入","历史"], mandatory:false, draft:false, archived:true,
+      size:"3.0 KB", mtime:"2026-06-01 08:30",
+      summary:"v1 注入设计存档：单通道关键词检索，已被混合检索取代",
+      body:"（归档条目）v1 时代的注入设计，仅供考古。" },
+  ]},
+  { name:"claude-code-deepseek", root:"D:\\develop\\claude-code-deepseek", entries:[
+    { file:"knowledge/DeepSeek-API-超时重试策略.md", title:"DeepSeek API 超时重试策略", type:"note", born:"main",
+      tags:["api","超时"], mandatory:false, draft:false, archived:false,
+      size:"1.0 KB", mtime:"2026-08-12 20:11",
+      summary:"流式首字节 30s 超时；重试仅对连接错误，不对 4xx",
+      body:"DeepSeek 流式接口按**首字节**计 30s 超时；重试只针对连接错误，4xx 直接抛给上层。" },
+    { file:"knowledge/guest-kongball.md", title:"guest-kongball 会话记忆", type:"reference", born:"main",
+      tags:["memory","guest"], mandatory:false, draft:false, archived:false,
+      size:"2.1 KB", mtime:"2026-08-11 09:26",
+      summary:"guest-kongball 会话的偏好与上下文记忆",
+      body:"guest-kongball 会话沉淀：偏好中文回复、表格输出；关注 token 成本。" },
+  ]},
+  { name:"Reasonix", root:"D:\\develop\\Reasonix", entries:[
+    { file:"knowledge/Reasonix-扩展-SDK：拦截器-err-非-nil-会吞掉-Continue.md", title:"Reasonix 扩展 SDK：拦截器 err 非 nil 会吞掉 Continue", type:"pitfall", born:"master",
+      tags:["reasonix","sidecar","fail-open"], mandatory:true, draft:false, archived:false,
+      size:"1.3 KB", mtime:"2026-08-09 16:47",
+      summary:"sidecar 拦截器返回 err 非 nil 时宿主吞掉 Continue 决策，必须 fail-open",
+      body:"Reasonix sidecar 协议里，拦截器返回 `err != nil` 时宿主会吞掉 `Continue` 决策——放行语义丢失。\n\n扩展必须 **fail-open**：任何内部错误都映射为 Continue。" },
+  ]},
+];
+
+const TYPE_LABEL = { pitfall:"坑", note:"注", rule:"规", reference:"参" };
+
+/* ================= i18n（仅界面 chrome，条目数据不翻译） ================= */
+const I18N = {
+  zh: {
+    manage:"管理", setup:"引导", prefs:"设置", logs:"日志", misc:"其他",
+    treeCaption:"知识条目", filter:"过滤条目…", pickEntry:"← 从树中选择一条知识条目",
+    notImpl:"页原型未实现 —— 本次未实现该页", modified:"修改于",
+    mandatory:"★ mandatory", optional:"非 mandatory", draft:"草稿", archived:"已归档",
+    collapseTip:"收起/展开侧栏",
+    stDetected:"已检测到", stAgentUnit:"个 agent", stHooked:"已接入", stHookedUnit:"个",
+    setupSub:"接入 = 写入 hooks 配置 + 安装 ok 技能（等同 CLI 的 ok setup）",
+    redetect:"↻ 重新检测", detecting:"↻ 检测中…",
+    hookOn:"Hook 已接入", hookOff:"Hook 未接入", skillOn:"技能已安装", skillOff:"技能未安装",
+    install:"安装", uninstall:"卸载", installing:"安装中…", uninstalling:"卸载中…",
+    kindHook:"HOOK", kindPlugin:"插件",
+    detailQ:"▸ 安装会动哪些文件？", detailClose:"▾ 收起明细",
+    detailInstall:"<b>安装</b>：写入 hooks 配置", detailJoin:" + 安装 ok 技能到技能目录；",
+    detailRemove:"<b>卸载</b>：按标记移除 ok 写入的 hooks 段与技能目录条目，不动用户其他配置。",
+    fbInstall:"✓ 已接入：hooks 已写入，技能已安装（下次会话生效）",
+    fbUninstall:"✓ 已卸载：ok 写入的 hooks 与技能已移除",
+    noneDetected:"未检测到任何已安装的 agent",
+    save:"保存", saved:"✓ 已保存",
+    gTitle:"全局开关", gDesc:"一键启停全部 agent 的 hooks 注入与强制检查（等同 CLI 的 ok on / ok off）", gLabel:"启用全部 hooks",
+    gOnFb:"✓ 已开启全部 hooks", gOffFb:"✓ 已关闭全部 hooks",
+    eManage:"管理配置", eProfiles:"服务列表", eAdd:"+ 新增服务", eEdit:"编辑", eDel:"删除", eSetActive:"设为使用中",
+    fName:"名称", fType:"类型", fBase:"base_url", fModel:"模型", fKey:"api_key", fKeyEnv:"api_key_env（环境变量名）", fMirror:"下载源（仅 builtin）",
+    eAddTitle:"新增服务", eEditTitle:"编辑服务", fOk:"确定", fCancel:"取消",
+    typeBuiltin:"内置本地模型（ok 托管 · 无需联网）", typeOllama:"Ollama（本机/局域网服务）", typeOpenai:"自定义（OpenAI 兼容服务）",
+    tagBuiltin:"内置", tagOllama:"Ollama", tagCustom:"自定义",
+    mirrorHf:"hf-mirror 镜像（国内推荐）", mirrorOfficial:"huggingface 官方", downloaded:"（已下载）",
+    fOlUrl:"服务地址", keySaved:"已保存（留空保持不变）", eGlobal:"全局",
+    kindOpenai:"OpenAI 兼容（/chat/completions）", kindAnthropic:"Anthropic 兼容（/v1/messages）",
+    tagOpenai:"OpenAI 兼容", tagAnthropic:"Anthropic 兼容",
+    fTemp:"temperature（高级，留空 = 不传）", fMaxTokens:"max_tokens（高级，0 = 默认）",
+    eTitle:"语义检索（embedding）", eDesc:"混合检索的语义通道；不配置任何服务时退化为纯关键词检索",
+    eNone:"未配置（仅关键词检索）", eTimeout:"调用超时（秒）", eDir:"内置模型目录", eActive:"使用中",
+    lTitle:"模型配置（LLM）", lDesc:"生成场景（条目优化等）调用的大模型服务；temperature 留空 = 不传",
+    lTimeout:"生成超时（秒）", lTest:"测试连接", lTesting:"测试中…", lTestOk:"✓ 连通（231ms）",
+    hTitle:"Hook 超时", hDesc:"写入各 agent hooks 的超时秒数。2026-08-04 曾发生 Windows 高负载下 5s 超时致 PostToolUse 整会话静默丢失，故默认 10", hSec:"超时（秒）",
+    gtTitle:"泛化门控", gtDesc:"命中内置/自定义短语的泛化 prompt 跳过检索注入与 embed 调用",
+    gtOn:"启用门控", gtStatus:"内置 21 条 · 自定义 {n} 条", gtManage:"管理短语表",
+    gtBuiltin:"内置短语（只读，随版本演进）", gtCustom:"自定义短语", gtAdd:"+ 添加", gtPh:"新短语…", gtClose:"关闭",
+    cTitle:"跨轮注入冷却", cDesc:"同会话内已注入的检索条目冷却 N 个 prompt 轮不再注入（门控轮也计）；0 = 关闭（每轮都可注入）", cTurns:"冷却轮数",
+    rTitle:"规则配置（强制检查）", rDesc:"AI 改动命中 code globs 的文件时，回合结束校验 changelog 是否同步更新",
+    rType:"类型", rGlobs:"code globs", rCl:"changelog glob", rMsg:"提示语", rAdd:"+ 添加规则",
+    capTitle:"经验沉淀", capDesc:"propose = AI 提议草稿、人批准后入库；auto = 按轮次间隔自动提取",
+    capMode:"模式", capPropose:"propose（人批准）", capAuto:"auto（自动提取）", capInterval:"轮次间隔",
+    lgSemantic:"◆ 语义", lgFilter:"过滤日志…", lgAuto:"自动刷新",
+    lgMeta:"共 {n} 行 · 显示 {m} 行", lgEmpty:"（无匹配日志）",
+    xExport:"数据导出", xExportDesc:"导出 registry 与条目（不含索引，导入时自动重建）",
+    xImport:"数据导入", xImportDesc:"导入 zip 备份（数据导出的产物）；条目合并入库，索引自动重建",
+    xProject:"项目", xAllProjects:"全部项目", xDoExport:"导出", xDoImport:"导入",
+    xExported:"✓ 已导出（样例）", xImported:"✓ 已导入：恢复 42 条（样例）", xFile:"文件",
+    xChlog:"更新日志", xChlogDesc:"查看各版本的新功能与修复；升级后首次打开会自动弹出",
+    xHelp:"使用帮助", xHelpDesc:"怎么调用、怎么配置、常见问题", xView:"查看", xGotIt:"知道了",
+    xDel:"删除项目知识库", xDelDesc:"永久删除所选项目的全部知识、索引与配置，并注销注册表（hooks 不再注入）。项目源码目录不受影响。",
+    xDelBtn:"删除…", xDelImpact:"将永久删除 {p} 的 {n} 条知识条目、索引与项目配置，并从注册表注销（hooks 不再注入）。",
+    xDelBackup:"删除前先导出 zip 备份", xDelAck:"我已了解后果，此操作不可撤销", xDelHint:"请输入完整项目名以确认",
+    xDelConfirm:"永久删除", xDeleted:"✓ 已删除 {p}（样例）",
+    xAbout:"关于", xVer:"版本", xHome:"数据目录", xProjCount:"已注册项目", xProjUnit:" 个",
+  },
+  en: {
+    manage:"Manage", setup:"Setup", prefs:"Settings", logs:"Logs", misc:"Misc",
+    treeCaption:"Entries", filter:"Filter entries…", pickEntry:"← Select an entry from the tree",
+    notImpl:"is not part of this prototype", modified:"Modified",
+    mandatory:"★ mandatory", optional:"optional", draft:"Draft", archived:"Archived",
+    collapseTip:"Collapse/expand sidebar",
+    stDetected:"Detected", stAgentUnit:"agents", stHooked:"integrated", stHookedUnit:"",
+    setupSub:"Integrating = writing hooks config + installing ok skills (same as CLI ok setup)",
+    redetect:"↻ Re-detect", detecting:"↻ Detecting…",
+    hookOn:"Hook integrated", hookOff:"Hook not integrated", skillOn:"Skills installed", skillOff:"Skills not installed",
+    install:"Install", uninstall:"Uninstall", installing:"Installing…", uninstalling:"Uninstalling…",
+    kindHook:"HOOK", kindPlugin:"PLUGIN",
+    detailQ:"▸ What files does install touch?", detailClose:"▾ Collapse",
+    detailInstall:"<b>Install</b>: writes hooks config to ", detailJoin:" and installs ok skills into the skills dir; ",
+    detailRemove:"<b>Uninstall</b>: removes only the ok-marked hooks block and skill entries, leaving other config untouched.",
+    fbInstall:"✓ Integrated: hooks written, skills installed (takes effect next session)",
+    fbUninstall:"✓ Uninstalled: ok-written hooks and skills removed",
+    noneDetected:"No installed agents detected",
+    save:"Save", saved:"✓ Saved",
+    gTitle:"Global switch", gDesc:"Enable/disable hooks injection and enforce checks for all agents (same as CLI ok on / ok off)", gLabel:"Enable all hooks",
+    gOnFb:"✓ All hooks enabled", gOffFb:"✓ All hooks disabled",
+    eManage:"Manage", eProfiles:"Services", eAdd:"+ Add service", eEdit:"Edit", eDel:"Delete", eSetActive:"Set active",
+    fName:"Name", fType:"Type", fBase:"base_url", fModel:"Model", fKey:"api_key", fKeyEnv:"api_key_env (env var)", fMirror:"Mirror (builtin only)",
+    eAddTitle:"Add service", eEditTitle:"Edit service", fOk:"OK", fCancel:"Cancel",
+    typeBuiltin:"Builtin local model (ok-managed, offline)", typeOllama:"Ollama (local/LAN service)", typeOpenai:"Custom (OpenAI-compatible)",
+    tagBuiltin:"Builtin", tagOllama:"Ollama", tagCustom:"Custom",
+    mirrorHf:"hf-mirror (recommended in CN)", mirrorOfficial:"huggingface official", downloaded:" (downloaded)",
+    fOlUrl:"Service URL", keySaved:"Saved (leave empty to keep)", eGlobal:"Global",
+    kindOpenai:"OpenAI-compatible (/chat/completions)", kindAnthropic:"Anthropic-compatible (/v1/messages)",
+    tagOpenai:"OpenAI-compat", tagAnthropic:"Anthropic-compat",
+    fTemp:"temperature (advanced, empty = not sent)", fMaxTokens:"max_tokens (advanced, 0 = default)",
+    eTitle:"Semantic retrieval (embedding)", eDesc:"The semantic channel of hybrid retrieval; degrades to keyword-only when no service is configured",
+    eNone:"Not configured (keyword-only)", eTimeout:"Timeout (s)", eDir:"Builtin models dir", eActive:"Active",
+    lTitle:"Model config (LLM)", lDesc:"LLM services for generation tasks (entry polishing etc.); empty temperature = not sent",
+    lTimeout:"Generation timeout (s)", lTest:"Test connection", lTesting:"Testing…", lTestOk:"✓ Connected (231ms)",
+    hTitle:"Hook timeout", hDesc:"Timeout seconds written into each agent's hooks. On 2026-08-04 a 5s timeout under Windows load silently dropped PostToolUse for an entire session — hence default 10", hSec:"Timeout (s)",
+    gtTitle:"Generalization gate", gtDesc:"Prompts matching builtin/custom phrases skip retrieval injection and embed calls",
+    gtOn:"Enable gate", gtStatus:"21 builtin · {n} custom", gtManage:"Manage phrases",
+    gtBuiltin:"Builtin phrases (read-only, evolve with releases)", gtCustom:"Custom phrases", gtAdd:"+ Add", gtPh:"New phrase…", gtClose:"Close",
+    cTitle:"Cross-turn injection cooldown", cDesc:"Retrieved entries already injected in this session cool down for N prompt turns (gate turns count too); 0 = off", cTurns:"Cooldown turns",
+    rTitle:"Rules (enforce checks)", rDesc:"When AI edits files matching code globs, session end verifies the changelog was updated",
+    rType:"Type", rGlobs:"code globs", rCl:"changelog glob", rMsg:"Message", rAdd:"+ Add rule",
+    capTitle:"Experience capture", capDesc:"propose = AI drafts, human approves; auto = extract every N turns",
+    capMode:"Mode", capPropose:"propose (human-approved)", capAuto:"auto (automatic)", capInterval:"Turn interval",
+    lgSemantic:"◆ Semantic", lgFilter:"Filter logs…", lgAuto:"Auto-refresh",
+    lgMeta:"{n} lines · showing {m}", lgEmpty:"(no matching logs)",
+    xExport:"Export data", xExportDesc:"Exports the registry and entries (no index — rebuilt on import).",
+    xImport:"Import data", xImportDesc:"Import a zip backup (produced by Export); entries merge in, index rebuilds automatically",
+    xProject:"Project", xAllProjects:"All projects", xDoExport:"Export", xDoImport:"Import",
+    xExported:"✓ Exported (sample)", xImported:"✓ Imported: 42 entries restored (sample)", xFile:"File",
+    xChlog:"Changelog", xChlogDesc:"New features and fixes per release; pops up automatically on first open after an upgrade",
+    xHelp:"User guide", xHelpDesc:"How to call, configure, and FAQ", xView:"View", xGotIt:"Got it",
+    xDel:"Delete project KB", xDelDesc:"Permanently deletes all entries, index and config of the selected project, and unregisters it (hooks stop injecting). Source directory is untouched.",
+    xDelBtn:"Delete…", xDelImpact:"This will permanently delete {p}'s {n} entries, index and project config, and unregister it (hooks stop injecting).",
+    xDelBackup:"Export a zip backup first", xDelAck:"I understand this cannot be undone", xDelHint:"Type the full project name to confirm",
+    xDelConfirm:"Delete forever", xDeleted:"✓ Deleted {p} (sample)",
+    xAbout:"About", xVer:"Version", xHome:"Data dir", xProjCount:"Registered projects", xProjUnit:"",
+  },
+};
+/* 线性 SVG 图标（Lucide 风格，stroke=currentColor，随主题/选中态变色） */
+function svg(inner, size){
+  size = size||16;
+  return '<svg viewBox="0 0 24 24" width="'+size+'" height="'+size+'" fill="none" stroke="currentColor"'
+       + ' stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+inner+'</svg>';
+}
+const ICON = {
+  manage: svg('<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>'),
+  setup:  svg('<circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/>'),
+  prefs:  svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>'),
+  logs:   svg('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>'),
+  misc:   svg('<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>'),
+  folder: svg('<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>', 14),
+  branch: svg('<line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>', 10),
+  panel:  svg('<rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/>'),
+  moon:   svg('<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>'),
+  sun:    svg('<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>'),
+};
+const MENUS = [
+  { key:"manage", ico:ICON.manage }, { key:"setup", ico:ICON.setup }, { key:"prefs", ico:ICON.prefs },
+  { key:"logs", ico:ICON.logs }, { key:"misc", ico:ICON.misc },
+];
+
+/* ================= 引导页（agent 接入卡片；未检测到的不显示） ================= */
+/* 真实品牌字形（simple-icons / Wikimedia 官方 SVG 路径，原型内联；生产应落 web/assets/ 文件） */
+const LOGOS = {
+  kimi: { bg:"#111827", fg:"#fff", vb:"0 0 24 24",
+    d:"M21.765.351C22.998.351 24 1.353 24 2.586S22.998 4.82 21.765 4.82h-1.974c-.15 0-.26-.12-.26-.26V2.586A2.237 2.237 0 0 1 21.765.35M9.41 13.388l8.447-8.377c.16-.16.07-.471-.14-.471h-4.55s-.1.02-.14.06l-9.099 9.029c-.14.14-.35.02-.35-.21V4.81c0-.15-.1-.27-.221-.27H.22c-.12 0-.22.12-.22.27v18.57c0 .15.1.27.22.27h3.137c.12 0 .22-.12.22-.27v-3.79c0-.08.03-.16.08-.21l2.826-2.796c.07-.07.16-.08.241-.03l7.546 5.551a8.9 8.9 0 0 0 4.018 1.493c.12.01.23-.11.23-.27V19.76c0-.14-.08-.25-.19-.26a5.8 5.8 0 0 1-2.355-.942l-6.533-4.73c-.14-.09-.15-.32-.03-.441" },
+  claude: { bg:"#D97757", fg:"#fff", vb:"0 0 24 24",
+    d:"m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z" },
+  codex: { bg:"#111827", fg:"#fff", vb:"0 0 20 20",
+    d:"M11.248 18.25q-.825 0-1.568-.314a4.3 4.3 0 0 1-1.32-.874 4 4 0 0 1-1.304.214 4 4 0 0 1-2.046-.544 4.27 4.27 0 0 1-1.518-1.485 4 4 0 0 1-.56-2.095q0-.48.131-1.04A4.4 4.4 0 0 1 2.04 10.71a4.07 4.07 0 0 1 .017-3.4 4.2 4.2 0 0 1 1.056-1.418 3.8 3.8 0 0 1 1.6-.842 3.9 3.9 0 0 1 .76-1.683q.593-.759 1.451-1.188a4.04 4.04 0 0 1 1.832-.429q.825 0 1.567.313.742.314 1.32.875a4 4 0 0 1 1.304-.215q1.106 0 2.046.545a4.14 4.14 0 0 1 1.501 1.485q.578.941.578 2.095 0 .48-.132 1.04.66.61 1.023 1.419.363.792.363 1.666 0 .892-.38 1.717a4.3 4.3 0 0 1-1.072 1.435 3.8 3.8 0 0 1-1.584.825 3.8 3.8 0 0 1-.775 1.683 4.06 4.06 0 0 1-1.436 1.188 4.04 4.04 0 0 1-1.832.429m-4.076-2.062q.825 0 1.435-.347l3.103-1.782a.36.36 0 0 0 .164-.313v-1.42L7.881 14.62a.67.67 0 0 1-.726 0l-3.118-1.798a.5.5 0 0 1-.017.115v.198q0 .841.396 1.551.413.693 1.139 1.089a3.2 3.2 0 0 0 1.617.412m.165-2.69a.4.4 0 0 0 .181.05q.083 0 .165-.05l1.238-.71-3.977-2.31a.7.7 0 0 1-.363-.643v-3.58q-.825.362-1.32 1.122a2.9 2.9 0 0 0-.495 1.65q0 .809.413 1.55.412.743 1.072 1.123zm3.91 3.663q.875 0 1.585-.396a2.96 2.96 0 0 0 1.534-2.64v-3.564a.32.32 0 0 0-.165-.297l-1.254-.726v4.604a.7.7 0 0 1-.363.643l-3.119 1.799a3 3 0 0 0 1.783.577m.627-6.039V8.878L10.01 7.822 8.129 8.878v2.244l1.881 1.056zM7.057 5.859a.7.7 0 0 1 .363-.644l3.119-1.798a3 3 0 0 0-1.782-.578q-.874 0-1.584.396A2.96 2.96 0 0 0 6.05 4.324a3.07 3.07 0 0 0-.396 1.551v3.547q0 .199.165.314l1.237.726zm8.383 7.887q.825-.364 1.303-1.123.495-.758.495-1.65a3.15 3.15 0 0 0-.412-1.55q-.413-.743-1.073-1.123l-3.086-1.782q-.099-.065-.181-.049a.3.3 0 0 0-.165.05l-1.238.692 3.993 2.327a.6.6 0 0 1 .264.264.64.64 0 0 1 .1.363zm-3.317-8.382a.63.63 0 0 1 .726 0l3.135 1.831v-.297q0-.792-.396-1.501a2.86 2.86 0 0 0-1.105-1.155q-.71-.43-1.65-.43-.825 0-1.436.347L8.294 5.941a.36.36 0 0 0-.165.314v1.418z" },
+  opencode: { bg:"#ffffff", fg:"#111827", vb:"0 0 24 24", border:true,
+    d:"M22 24H2V0h20zM17 4.8H7v14.4h10z" },
+  /* qoder 为全彩圆角方块图标（官网 favicon 压缩版），整幅铺满 .aicon，不走底色+白字形 */
+  qoder: { raw:"<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" fill=\"none\" version=\"1.1\" width=\"180\" height=\"180\" viewBox=\"0 0 180 180\"><defs><clipPath id=\"master_svg0_381_5952\"><rect x=\"0\" y=\"0\" width=\"180\" height=\"180\" rx=\"40\"/></clipPath><clipPath id=\"master_svg1_381_5952/255_01913\"><rect x=\"18\" y=\"18\" width=\"144\" height=\"144\" rx=\"0\"/></clipPath></defs><g clip-path=\"url(#master_svg0_381_5952)\"><rect x=\"0\" y=\"0\" width=\"180\" height=\"180\" rx=\"40\" fill=\"#111113\" fill-opacity=\"1\"/><g clip-path=\"url(#master_svg1_381_5952/255_01913)\"><g><path d=\"M147.6,101.4L147.6,81.4C147.6,70.1,142.7,60.9,134.1,56.4L89.6,33.0L89.4,33.4L89.2,33.8C97.5,38.2,102.2,47.0,102.2,58.0L102.2,78.0C102.2,78.6,102.2,79.2,102.2,79.9C102.2,80.0,102.1,80.1,102.1,80.2L102.1,80.5C102.1,80.9,102.1,81.3,102.0,81.7C102.0,81.9,102.0,82.1,102.0,82.2L101.9,82.6C101.9,82.9,101.8,83.3,101.8,83.6C101.8,83.8,101.7,84.0,101.7,84.1L101.7,84.4C101.6,84.8,101.6,85.1,101.5,85.5C101.4,86.0,101.3,86.5,101.2,87.0L101.1,87.1C101.0,87.6,100.9,88.1,100.8,88.6L100.7,89.0C100.5,89.5,100.4,90.0,100.2,90.4L100.1,90.9C99.9,91.4,99.7,91.9,99.5,92.5C99.5,92.6,99.4,92.7,99.4,92.9L99.3,93.1C99.1,93.5,99.0,93.9,98.8,94.3C98.7,94.6,98.6,94.8,98.5,95.0L98.5,95.1C98.3,95.4,98.2,95.7,98.1,96.0C97.9,96.3,97.8,96.6,97.7,96.9C97.5,97.2,97.4,97.5,97.3,97.8C97.1,98.0,97.0,98.3,96.8,98.6C96.7,98.8,96.5,99.1,96.4,99.4C96.2,99.7,96.1,99.9,95.9,100.2C95.8,100.5,95.6,100.7,95.5,101.0C95.3,101.3,95.1,101.5,95.0,101.8C94.8,102.1,94.6,102.3,94.5,102.6C94.3,102.8,94.1,103.1,93.9,103.4C93.8,103.6,93.6,103.9,93.4,104.1C93.3,104.4,93.1,104.6,92.9,104.9C92.7,105.1,92.5,105.4,92.3,105.6C92.1,105.9,91.9,106.1,91.7,106.4C91.5,106.6,91.4,106.9,91.2,107.1C91.0,107.3,90.8,107.5,90.6,107.7L90.6,107.8C90.4,108.1,90.1,108.3,89.9,108.6C89.7,108.8,89.5,109.0,89.3,109.2C89.1,109.5,88.8,109.8,88.6,110.0C88.4,110.2,88.2,110.4,88.0,110.6C87.7,111.0,87.3,111.3,87.0,111.6L86.8,111.7C86.7,111.9,86.6,112.0,86.5,112.1C86.1,112.5,85.6,112.9,85.2,113.3L85.1,113.4C85.0,113.4,85.0,113.4,84.9,113.5L84.7,113.7C84.4,114.0,84.0,114.3,83.6,114.5C83.5,114.6,83.4,114.7,83.3,114.8L83.2,114.9C82.9,115.1,82.6,115.4,82.2,115.6C82.1,115.7,82.0,115.8,81.8,115.9C81.5,116.2,81.1,116.4,80.7,116.7L80.5,116.9C80.0,117.2,79.5,117.5,79.0,117.8L78.7,118.0C78.3,118.2,77.9,118.4,77.5,118.6C77.4,118.7,77.3,118.7,77.2,118.8L77.0,118.9C76.7,119.1,76.4,119.2,76.0,119.4C75.9,119.5,75.7,119.6,75.5,119.7L75.5,119.7C75.1,119.9,74.8,120.0,74.5,120.1C74.3,120.2,74.1,120.3,73.9,120.4C73.6,120.5,73.3,120.7,72.9,120.8L72.8,120.9C72.6,120.9,72.5,121.0,72.3,121.0C72.0,121.2,71.6,121.3,71.3,121.4L71.1,121.5C71.0,121.5,70.9,121.5,70.8,121.6C70.2,121.8,69.7,121.9,69.2,122.1L66.1,122.9C65.6,123.0,65.2,123.2,64.7,123.3C64.6,123.3,64.5,123.3,64.4,123.3L64.1,123.4C63.8,123.4,63.6,123.5,63.3,123.5C63.2,123.6,63.1,123.6,63.0,123.6L62.6,123.7C62.4,123.7,62.2,123.7,62.0,123.8C61.9,123.8,61.8,123.8,61.6,123.8L61.2,123.9C61.0,123.9,60.8,123.9,60.7,123.9C60.6,123.9,60.5,123.9,60.4,123.9L60.3,124.0C60.0,124.0,59.7,124.0,59.4,124.0C59.3,124.0,59.2,124.0,59.0,124.0L58.9,124.0C58.6,124.0,58.4,124.1,58.1,124.1C58.0,124.1,57.9,124.1,57.8,124.1L57.6,124.1C57.4,124.1,57.1,124.1,56.9,124.0C56.7,124.0,56.6,124.0,56.5,124.0L56.4,124.0C56.1,124.0,55.9,124.0,55.6,124.0L55.3,123.9C55.0,123.9,54.7,123.9,54.4,123.8L54.2,123.8C53.8,123.8,53.5,123.7,53.1,123.6L52.8,123.6C52.6,123.5,52.4,123.5,52.2,123.4C51.8,123.4,51.5,123.3,51.1,123.2L51.0,123.1C50.9,123.1,50.8,123.1,50.8,123.1C50.3,123.0,49.9,122.8,49.5,122.7L49.1,122.6C48.8,122.4,48.5,122.3,48.2,122.2C48.1,122.1,48.0,122.1,47.9,122.0L47.8,122.0C47.5,121.9,47.3,121.8,47.0,121.6L46.9,121.6Q46.8,121.6,46.8,121.6L43.5,119.8L45.9,122.2L46.0,122.2L90.3,145.6C90.5,145.7,90.6,145.7,90.8,145.8C90.8,145.8,90.9,145.9,90.9,145.9L91.0,145.9C91.3,146.1,91.6,146.2,91.8,146.3L91.9,146.4C92.0,146.4,92.2,146.5,92.3,146.5C92.6,146.6,92.9,146.8,93.2,146.9L93.3,146.9C93.4,146.9,93.5,147.0,93.5,147.0L93.6,147.0C94.0,147.2,94.5,147.3,94.9,147.4C95.0,147.5,95.1,147.5,95.2,147.5L95.3,147.5C95.6,147.6,96.0,147.7,96.4,147.8L96.5,147.8C96.5,147.8,96.5,147.8,96.6,147.9C96.7,147.9,96.8,147.9,96.9,147.9L97.4,148.0C97.7,148.1,98.1,148.1,98.5,148.2L98.7,148.2C99.0,148.2,99.3,148.3,99.6,148.3L100.2,148.4C100.3,148.4,100.4,148.4,100.5,148.4L100.8,148.4C100.9,148.4,101.1,148.4,101.3,148.4C101.5,148.4,101.7,148.4,102.0,148.4L102.2,148.4C102.2,148.4,102.3,148.4,102.4,148.4C102.5,148.4,102.5,148.4,102.6,148.4C102.8,148.4,103.0,148.4,103.3,148.4L103.5,148.4C103.6,148.4,103.7,148.4,103.9,148.4C104.2,148.4,104.5,148.3,104.8,148.3L104.9,148.3C105.0,148.3,105.1,148.3,105.2,148.3C105.4,148.3,105.6,148.2,105.7,148.2L106.1,148.2C106.3,148.2,106.4,148.1,106.5,148.1C106.7,148.1,107.0,148.1,107.2,148.0L107.6,148.0C107.7,147.9,107.8,147.9,107.9,147.9C108.2,147.8,108.5,147.8,108.7,147.7L109.0,147.7C109.1,147.6,109.2,147.6,109.3,147.6C109.8,147.5,110.3,147.4,110.7,147.2L113.8,146.4C114.4,146.3,114.9,146.1,115.5,145.9C115.6,145.9,115.7,145.8,115.8,145.8L116.0,145.7C116.4,145.6,116.7,145.5,117.1,145.3C117.3,145.3,117.4,145.2,117.6,145.2L117.7,145.1C118.0,145.0,118.4,144.8,118.7,144.7C118.9,144.6,119.1,144.5,119.3,144.4C119.6,144.3,120.0,144.1,120.3,144.0L120.4,143.9C120.6,143.8,120.7,143.8,120.9,143.7C121.2,143.5,121.5,143.3,121.9,143.2L122.1,143.1C122.2,143.0,122.3,142.9,122.4,142.9C122.8,142.7,123.2,142.4,123.6,142.2L123.7,142.1C123.8,142.1,123.9,142.0,123.9,142.0C124.4,141.7,124.9,141.4,125.3,141.1L125.6,140.9L135.4,145.4C141.1,147.9,147.6,143.8,147.6,137.5L147.6,101.4Q147.6,101.4,147.6,101.4L147.6,101.4Z\" fill=\"#2ADB5C\" fill-opacity=\"1\"/></g><g><path d=\"M89.7,33.0C89.5,32.9,89.3,32.8,89.2,32.8C89.1,32.7,89.0,32.7,88.9,32.6C88.7,32.5,88.4,32.4,88.1,32.3C88.0,32.2,87.8,32.1,87.7,32.1C87.4,31.9,87.1,31.8,86.7,31.7C86.6,31.7,86.6,31.6,86.5,31.6C86.4,31.6,86.4,31.6,86.4,31.6C86.0,31.4,85.5,31.3,85.0,31.1C84.9,31.1,84.8,31.1,84.7,31.1C84.3,31.0,84.0,30.9,83.6,30.8C83.5,30.8,83.5,30.8,83.4,30.7C83.2,30.7,83.1,30.7,82.9,30.6C82.8,30.6,82.7,30.6,82.6,30.6C82.3,30.5,81.9,30.5,81.5,30.4C81.5,30.4,81.4,30.4,81.3,30.4C81.0,30.3,80.7,30.3,80.4,30.3C80.3,30.3,80.2,30.3,80.1,30.3C80.0,30.2,79.9,30.2,79.8,30.2C79.6,30.2,79.4,30.2,79.3,30.2C79.1,30.2,78.9,30.2,78.7,30.2C78.5,30.2,78.3,30.2,78.0,30.2C77.8,30.2,77.6,30.2,77.5,30.2C77.2,30.2,76.9,30.2,76.7,30.2C76.5,30.2,76.3,30.2,76.2,30.2C75.9,30.2,75.6,30.2,75.3,30.3C75.1,30.3,75.0,30.3,74.9,30.3C74.9,30.3,74.8,30.3,74.8,30.3C74.6,30.3,74.3,30.4,74.1,30.4C73.9,30.4,73.7,30.4,73.5,30.5C73.2,30.5,72.9,30.5,72.7,30.6C72.5,30.6,72.3,30.7,72.1,30.7C71.8,30.7,71.5,30.8,71.2,30.9C71.0,30.9,70.9,30.9,70.7,31.0C70.2,31.1,69.8,31.2,69.3,31.3L66.2,32.2C65.7,32.3,65.1,32.5,64.6,32.7C64.4,32.7,64.2,32.8,64.0,32.9C63.7,33.0,63.3,33.1,63.0,33.2C62.7,33.3,62.5,33.4,62.3,33.5C62.0,33.6,61.7,33.7,61.4,33.9C61.1,34.0,60.9,34.1,60.7,34.2C60.4,34.3,60.1,34.5,59.8,34.6C59.6,34.7,59.4,34.8,59.2,34.9C58.8,35.1,58.5,35.2,58.2,35.4C58.0,35.5,57.8,35.6,57.6,35.7C57.2,35.9,56.8,36.2,56.4,36.4C56.3,36.5,56.2,36.5,56.1,36.6C55.6,36.9,55.2,37.2,54.7,37.5C54.7,37.5,54.7,37.5,54.6,37.5C54.5,37.6,54.4,37.7,54.3,37.7C54.0,38.0,53.6,38.2,53.2,38.5C53.1,38.6,52.9,38.7,52.8,38.8C52.5,39.1,52.1,39.3,51.8,39.5C51.7,39.6,51.5,39.8,51.4,39.9C51.0,40.2,50.6,40.5,50.3,40.8C50.2,40.8,50.1,40.9,50.1,41.0C50.0,41.0,50.0,41.0,50.0,41.0C49.9,41.1,49.9,41.1,49.8,41.2C49.3,41.6,48.9,42.0,48.5,42.4C48.3,42.5,48.1,42.7,47.9,42.9C47.6,43.2,47.3,43.5,46.9,43.9C46.8,44.0,46.7,44.1,46.7,44.1C46.5,44.3,46.5,44.4,46.3,44.5C46.1,44.7,45.8,45.0,45.6,45.3C45.4,45.5,45.2,45.7,45.0,45.9C44.7,46.2,44.5,46.5,44.3,46.8C44.1,46.9,44.0,47.1,43.9,47.2C43.8,47.3,43.8,47.4,43.7,47.5C43.5,47.7,43.3,48.0,43.1,48.2C42.9,48.5,42.7,48.7,42.5,49.0C42.3,49.2,42.1,49.5,41.9,49.8C41.8,49.9,41.7,50.1,41.6,50.3C41.5,50.4,41.4,50.4,41.4,50.5C41.2,50.8,41.0,51.0,40.8,51.3C40.7,51.6,40.5,51.8,40.3,52.1C40.1,52.4,40.0,52.6,39.8,52.9C39.7,53.1,39.6,53.2,39.5,53.4C39.4,53.5,39.4,53.6,39.3,53.7C39.1,54.0,39.0,54.3,38.8,54.5C38.7,54.8,38.5,55.1,38.3,55.4C38.2,55.6,38.0,55.9,37.9,56.2C37.8,56.4,37.7,56.5,37.6,56.7C37.6,56.8,37.5,56.9,37.5,57.0C37.3,57.3,37.2,57.7,37.0,58.0C36.9,58.2,36.7,58.5,36.6,58.8C36.5,59.1,36.3,59.4,36.2,59.7C36.1,59.9,36.0,60.1,36.0,60.3C35.9,60.4,35.9,60.5,35.9,60.6C35.7,61.0,35.5,61.4,35.4,61.8C35.3,62.0,35.2,62.2,35.1,62.5C34.9,63.0,34.7,63.5,34.6,64.1C34.5,64.2,34.5,64.3,34.5,64.4C34.5,64.4,34.5,64.4,34.4,64.4C34.4,64.4,34.4,64.5,34.4,64.5C34.2,65.0,34.1,65.5,34.0,66.0C33.9,66.2,33.9,66.3,33.8,66.5C33.7,66.9,33.6,67.4,33.5,67.9C33.5,68.0,33.5,68.0,33.4,68.1C33.3,68.5,33.3,69.0,33.2,69.4C33.1,69.5,33.1,69.6,33.1,69.6C33.1,70.0,33.0,70.4,32.9,70.7C32.9,71.0,32.8,71.3,32.8,71.5C32.7,71.9,32.7,72.3,32.7,72.7C32.6,73.0,32.6,73.2,32.6,73.5C32.5,73.9,32.5,74.3,32.5,74.7C32.5,75.0,32.4,75.2,32.4,75.4C32.4,76.0,32.4,76.6,32.4,77.3L32.4,97.3C32.4,104.6,34.5,110.8,38.0,115.5C38.4,115.9,38.7,116.4,39.1,116.8C39.7,117.5,40.3,118.1,40.9,118.7C42.4,120.1,44.1,121.2,45.9,122.2L90.3,145.6C82.1,141.3,76.8,132.4,76.8,120.7L76.8,100.7C76.8,100.1,76.8,99.4,76.9,98.8C76.9,98.6,76.9,98.4,76.9,98.2C77.0,97.7,77.0,97.3,77.0,96.9C77.0,96.6,77.1,96.4,77.1,96.1C77.1,95.7,77.2,95.3,77.2,95.0C77.3,94.7,77.3,94.4,77.4,94.1C77.4,93.8,77.5,93.4,77.6,93.0C77.7,92.5,77.8,92.0,77.9,91.5C77.9,91.5,77.9,91.4,77.9,91.3C78.0,90.9,78.2,90.4,78.3,89.9C78.3,89.7,78.4,89.6,78.4,89.4C78.5,88.9,78.7,88.4,78.8,87.9C78.9,87.9,78.9,87.9,78.9,87.8C78.9,87.7,79.0,87.6,79.0,87.5C79.2,87.0,79.4,86.4,79.5,85.9C79.6,85.7,79.7,85.4,79.8,85.2C80.0,84.8,80.1,84.4,80.3,84.0C80.4,83.7,80.5,83.4,80.6,83.2C80.8,82.8,80.9,82.5,81.1,82.2C81.2,81.9,81.3,81.7,81.4,81.4C81.6,81.1,81.7,80.8,81.9,80.5C82.0,80.2,82.2,79.9,82.3,79.6C82.5,79.3,82.6,79.1,82.8,78.8C82.9,78.5,83.1,78.2,83.3,78.0C83.4,77.7,83.6,77.4,83.7,77.1C83.9,76.9,84.1,76.6,84.2,76.3C84.4,76.1,84.6,75.8,84.7,75.5C84.9,75.3,85.1,75.0,85.3,74.7C85.5,74.5,85.6,74.2,85.8,74.0C86.0,73.7,86.2,73.4,86.4,73.2C86.6,72.9,86.7,72.7,86.9,72.4C87.1,72.2,87.3,71.9,87.5,71.7C87.7,71.4,87.9,71.2,88.1,70.9C88.3,70.7,88.5,70.4,88.7,70.2C89.0,69.9,89.2,69.6,89.4,69.4C89.6,69.2,89.8,68.9,90.0,68.7C90.3,68.4,90.5,68.2,90.8,67.9C91.0,67.7,91.2,67.5,91.4,67.3C91.7,67.0,92.0,66.6,92.4,66.3C92.6,66.1,92.7,66.0,92.9,65.8C93.3,65.4,93.8,65.0,94.2,64.6C94.3,64.5,94.4,64.5,94.5,64.4C94.6,64.3,94.6,64.3,94.7,64.2C95.1,63.9,95.4,63.6,95.8,63.3C96.0,63.2,96.1,63.1,96.3,63.0C96.6,62.7,96.9,62.5,97.2,62.2C97.4,62.1,97.5,62.0,97.7,61.9C98.0,61.6,98.4,61.4,98.8,61.1C98.9,61.1,99.0,61.0,99.1,60.9C99.6,60.6,100.1,60.3,100.6,60.0C100.7,59.9,100.8,59.9,100.9,59.8C101.3,59.6,101.7,59.4,102.1,59.1C102.2,59.0,102.4,58.9,102.6,58.9C102.9,58.7,103.3,58.5,103.6,58.3C103.8,58.2,104.0,58.1,104.2,58.0C104.5,57.9,104.8,57.7,105.2,57.6C105.4,57.5,105.6,57.4,105.8,57.3C106.1,57.2,106.4,57.0,106.8,56.9C107.0,56.8,107.2,56.8,107.4,56.7C107.7,56.5,108.1,56.4,108.5,56.3C108.7,56.2,108.8,56.2,109.0,56.1C109.5,55.9,110.1,55.8,110.6,55.6L113.7,54.8C114.2,54.6,114.7,54.5,115.1,54.4C115.3,54.4,115.5,54.3,115.6,54.3C115.9,54.2,116.2,54.2,116.5,54.1C116.7,54.1,116.9,54.1,117.1,54.0C117.4,54.0,117.7,53.9,117.9,53.9C118.1,53.9,118.3,53.8,118.5,53.8C118.8,53.8,119.0,53.8,119.3,53.7C119.4,53.7,119.6,53.7,119.7,53.7C120.0,53.7,120.3,53.6,120.6,53.6C120.8,53.6,120.9,53.6,121.1,53.6C121.4,53.6,121.6,53.6,121.9,53.6C122.1,53.6,122.3,53.6,122.4,53.6C122.7,53.6,122.9,53.6,123.2,53.6C123.4,53.6,123.5,53.6,123.7,53.6C124.0,53.6,124.2,53.7,124.5,53.7C124.6,53.7,124.7,53.7,124.8,53.7C125.1,53.7,125.4,53.8,125.8,53.8C125.8,53.8,125.9,53.8,126.0,53.8C126.3,53.9,126.7,54.0,127.1,54.0C127.2,54.0,127.3,54.1,127.4,54.1C127.6,54.1,127.8,54.2,128.0,54.2C128.4,54.3,128.8,54.4,129.1,54.5C129.2,54.5,129.4,54.5,129.5,54.6C129.9,54.7,130.4,54.8,130.8,55.0C130.9,55.0,131.1,55.1,131.2,55.1C131.5,55.2,131.8,55.4,132.1,55.5C132.3,55.6,132.4,55.6,132.6,55.7C132.8,55.8,133.1,55.9,133.4,56.1C133.6,56.2,133.8,56.3,134.1,56.4L89.7,33.0Z\" fill=\"#FFFFFF\" fill-opacity=\"1\" style=\"mix-blend-mode:passthrough\"/></g></g></g></svg>" },
+  zcode: { img:"data:image/png;base64,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" },
+  reasonix: { img:"data:image/png;base64,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" },
+  codepilot: { img:"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAELklEQVR42u2XS2xUZRTHf/femTvPjozQQptSsVTbik3LQ0B5CCLREBO3mGhIZGGILjAsNJq4MjEudGNiosaQGCUhNuCDBcSE2AYDWLEtlVIbkbbT57Tzfs99HBdgQkihd0oTXfDfnXz3nO//nXO+7/4P3Md/DOVOCyKiA9uADiCwyPg54DJwTlGUkmMvEdkqIudl6XBRRLY53XyziMRk6ZFckISIeEXkV6cRbdMU2zQqIdErIr479oCI7AbOOslUZuQq8bNfIzbUPHcA/+pHnVb4eUVRzvxrqLctbnAapfvop1w89SPpwR5mu09W0pgdtxq3E/DP62JbpPq7if7ciVXMAWBpHpLpIlbZQHN5bmSwlGeuu5NUXxdimXcioN9quG5vg/k8rp7uZPbUZ4SDOtm/rxBs341MD7NxfTMen05hfIh4/zn++P443ugVqkJBjGKOFVv3zdtqdyMwL2LTU/QORWhvWM6Fnq9If34UsJgJBdjUtgYpZDnzzmsM9F2naU01G7a0YKbjjuqhOvmoccsuNH+ImakYY9EUg+MxRhMFpqNJpJBHsYREOkfCMMlm8qj+IKGWTY4IOMrAiqYWbLeXeC5FY301mzeG8bgUxqaSRGYyrHtsOTt3dNDa3IBpmmi+AN7ah+89A7ZpMPTTd3xz5CCRyCQTqTyT2RKRuQxe3cXa+gcZjWW51H8NRRWqa0LUVlehFbJMHPuAZO/ZuzXjwhmYHOzjl4/fxY2Flc0wZ4GrDPG8ga4Kba0NPLurhmQ0wVw0gQZk0zmyyTHWFvIkh3txPVBDsPHxxRGwDYNkvoSORa5QRPf7sLEZmEyjiIkNrG9dje5WUETD4/MyEpljdHAUNGhqW4t9LxlY1drOtlcP03/qW5ZlLVrqwwTcGjX+WbL5IqViGcswyMSzeH1eglUBWtqa0HUPobo6ave+TKChefE9oPsDbD3wBq98+QPhunqyJQM0lfqQG78miNy40iMTs1z67SqTMzF0j4vmJ9p55qPjrNyzH83ju/dbkJieZGJiiqBmscznZixZJGWrrHS7KJZNbFXD7dMxTBO7VATDxszEcPmDS/MODJw+gZ2JMzGboqt/hOFoBo+uo6oqRtkmVOWntibM8MA1ZsajKGaBRF/X0j1EiseHz6XgskqkNB9ut5tcoUjRtDBMG8UoUzRMZksqf10bx7RMVN2zqIdoXom246WDWJbFVGScfYfeZPzPQU68/xapeBw77Keu6REa9x9mb10jQ51fsGpdKyuefKFiGYiIHHGqLE6+97p8sqNezh/aLtePfViJKHn7biXoc/pTb97zIsHVTegrHyLcsasSPdC3kCS75PQohXRCSplkJae/LCL+hXThUzcF5FIjLSI7nSrj7SLSs4Sb/y4iT1c6mHiBnUA74GFxKN8cTLoURSncnwP/l/gHgPQcyb+Qlr8AAAAASUVORK5CYII=" },
+  pi: { padded:"<svg width=\"24\" height=\"24\" style=\"width:24px;height:24px\" xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 800 800\">\n  <path fill=\"#09090b\" fill-rule=\"evenodd\" d=\"\n    M165.29 165.29\n    H517.36\n    V400\n    H400\n    V517.36\n    H282.65\n    V634.72\n    H165.29\n    Z\n    M282.65 282.65\n    V400\n    H400\n    V282.65\n    Z\n  \"/>\n  <path fill=\"#09090b\" d=\"M517.36 400 H634.72 V634.72 H517.36 Z\"/>\n</svg>", bg:"#ffffff", border:true },
+  dsh: { padded:"<svg width=\"24\" height=\"24\" style=\"width:24px;height:24px\" xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 50 50\" fill=\"none\">\n\n<path d=\"M48.8354 10.0479C48.3232 9.79199 48.1025 10.2798 47.8032 10.5278C47.7007 10.6079 47.6143 10.7119 47.5273 10.8076C46.7793 11.624 45.9048 12.1597 44.7622 12.0957C43.0923 12 41.666 12.5356 40.4058 13.8398C40.1377 12.2319 39.2476 11.272 37.8926 10.6558C37.1836 10.3359 36.4668 10.0156 35.9702 9.31982C35.6235 8.82373 35.5293 8.27197 35.356 7.72754C35.2456 7.3999 35.1353 7.06396 34.7651 7.00781C34.3633 6.94385 34.2056 7.2876 34.0479 7.57568C33.418 8.75195 33.1733 10.0479 33.1973 11.3599C33.2524 14.312 34.4736 16.6641 36.8999 18.3359C37.1758 18.5278 37.2466 18.7197 37.1597 19C36.9946 19.5757 36.7974 20.1357 36.624 20.7119C36.5137 21.0801 36.3486 21.1597 35.9624 21C34.6309 20.4321 33.481 19.5918 32.4644 18.5757C30.7393 16.8721 29.1792 14.9917 27.2334 13.52C26.7764 13.1758 26.3193 12.856 25.8467 12.5518C23.8618 10.584 26.1069 8.96777 26.627 8.77588C27.1704 8.57568 26.8159 7.8877 25.0591 7.896C23.3022 7.90381 21.6953 8.50391 19.647 9.30371C19.3477 9.42383 19.0322 9.51172 18.7095 9.58398C16.8501 9.22363 14.9199 9.14355 12.9033 9.37598C9.10596 9.80762 6.07275 11.6396 3.84326 14.7681C1.16455 18.5278 0.53418 22.7998 1.30664 27.2559C2.11768 31.9521 4.46582 35.8398 8.07373 38.8799C11.8159 42.0322 16.1255 43.5762 21.041 43.2803C24.0269 43.104 27.3516 42.6963 31.1016 39.4561C32.0469 39.936 33.0396 40.1279 34.686 40.272C35.9546 40.3921 37.1758 40.208 38.1211 40.0078C39.6021 39.688 39.4995 38.2881 38.9639 38.0322C34.623 35.9678 35.5762 36.8081 34.71 36.1279C36.9155 33.4639 40.2402 30.6958 41.54 21.728C41.6426 21.0161 41.5557 20.5679 41.54 19.9917C41.5322 19.6396 41.6108 19.5039 42.0049 19.4639C43.0923 19.3359 44.1479 19.0317 45.1167 18.4878C47.9292 16.9199 49.064 14.3438 49.3315 11.2559C49.3711 10.7837 49.3237 10.2959 48.8354 10.0479ZM24.3262 37.8398C20.1196 34.4639 18.0791 33.3521 17.2358 33.3999C16.4482 33.4482 16.5898 34.3682 16.7632 34.9678C16.9443 35.5601 17.1812 35.9683 17.5117 36.4878C17.7402 36.832 17.8979 37.3442 17.2832 37.728C15.9282 38.584 13.5728 37.4399 13.4624 37.3838C10.7207 35.7358 8.42822 33.5601 6.81348 30.584C5.25342 27.7197 4.34766 24.6479 4.19775 21.3677C4.1582 20.5757 4.38672 20.2959 5.15869 20.1519C6.17529 19.96 7.22314 19.9199 8.23926 20.0718C12.5327 20.7119 16.1885 22.6719 19.2529 25.7759C21.002 27.5439 22.3252 29.6558 23.6885 31.7202C25.1377 33.9121 26.6978 36 28.6831 37.7119C29.3843 38.312 29.9434 38.7681 30.479 39.104C28.8643 39.2881 26.1699 39.3281 24.3262 37.8398ZM26.3433 24.6001C26.3433 24.248 26.6191 23.9678 26.9658 23.9678C27.0444 23.9678 27.1152 23.9839 27.1782 24.0078C27.2651 24.04 27.3438 24.0879 27.4067 24.1602C27.5171 24.272 27.5801 24.4321 27.5801 24.6001C27.5801 24.9521 27.3042 25.2319 26.9575 25.2319C26.6108 25.2319 26.3433 24.9521 26.3433 24.6001ZM32.6064 27.8799C32.2046 28.0479 31.8027 28.1919 31.4165 28.208C30.8179 28.2397 30.1641 27.9922 29.8096 27.688C29.2583 27.2158 28.8643 26.9521 28.6987 26.1279C28.6279 25.7759 28.6675 25.2319 28.7305 24.9199C28.8721 24.248 28.7144 23.8159 28.2495 23.4238C27.8716 23.104 27.3911 23.0161 26.8633 23.0161C26.666 23.0161 26.4849 22.9277 26.3511 22.856C26.1304 22.7441 25.9492 22.4639 26.1226 22.1201C26.1777 22.0078 26.4458 21.7358 26.5088 21.688C27.2256 21.272 28.0527 21.4077 28.8169 21.7197C29.5259 22.0161 30.0615 22.5601 30.834 23.3281C31.6216 24.2559 31.7632 24.5117 32.2124 25.208C32.5669 25.752 32.8901 26.312 33.1104 26.9521C33.2446 27.3521 33.0713 27.6802 32.6064 27.8799Z\" fill=\"#000000\"/>\n</svg>", bg:"#ffffff", border:true },
+};
+function logoSvg(L){
+  return '<svg viewBox="'+L.vb+'" width="20" height="20" fill="currentColor"><path d="'+L.d+'"/></svg>';
+}
+
+/* 样例数据：真实适配器清单（internal/agentx），detected/hooked/skills 为虚构状态 */
+const AGENTS = [
+  { id:"kimi",      name:"Kimi Code",   kind:"hook",   color:"#2563eb", abbr:"Ki",
+    detected:true,  hooked:true,  skills:true,
+    version:"kimi-cli 0.9.3", target:"~/.kimi-code/hooks/*.yaml",
+    desc:"会话注入、强制检查、沉淀提议全链路接入。",
+    descEn:"Full-chain integration: session injection, enforce checks, capture proposals." },
+  { id:"claude",    name:"Claude Code", kind:"hook",   color:"#b45309", abbr:"Cl",
+    detected:true,  hooked:false, skills:false,
+    version:"claude 2.1.177", target:"~/.claude/settings.json",
+    desc:"为 Claude Code 及 CodePilot 等兼容宿主接入 hooks 注入。",
+    descEn:"Hooks injection for Claude Code and compatible hosts such as CodePilot." },
+  { id:"codepilot", name:"CodePilot",    kind:"hook",   color:"#0ea5e9", abbr:"Cp",
+    detected:true,  hooked:false, skills:false,
+    version:"codepilot 已安装", versionEn:"codepilot installed",
+    target:"~/.claude/settings.json（claude 兼容面）", targetEn:"~/.claude/settings.json (claude-compatible)",
+    desc:"Claude 兼容宿主，hooks 复用 claude 适配面。",
+    descEn:"Claude-compatible host; hooks reuse the claude adapter surface." },
+  { id:"codex",     name:"Codex",       kind:"hook",   color:"#111827", abbr:"Cx",
+    detected:true,  hooked:true,  skills:true,
+    version:"codex-cli 0.118.0", target:"~/.codex/config.toml",
+    desc:"hooks 注入 + 会话后增量捕获。",
+    descEn:"Hooks injection + post-session incremental capture." },
+  { id:"qoder",     name:"Qoder CN CLI", kind:"hook",  color:"#0d9488", abbr:"Qo",
+    detected:true,  hooked:false, skills:false,
+    version:"qoder-cli 已安装", versionEn:"qoder-cli installed", target:"~/.qoder/hooks.yaml",
+    desc:"Qoder 命令行 hooks 接入。",
+    descEn:"Hooks integration for the Qoder command line." },
+  { id:"qoder-ide", name:"Qoder CN IDE", kind:"hook",  color:"#0f766e", abbr:"QI",
+    detected:false, hooked:false, skills:false,
+    version:"", target:"IDE 插件 hooks", targetEn:"IDE plugin hooks",
+    desc:"灵码内核 IDE 的 hooks 接入。",
+    descEn:"Hooks integration for the Lingma-kernel IDE." },
+  { id:"opencode",  name:"opencode",    kind:"plugin", color:"#7c3aed", abbr:"oc",
+    detected:true,  hooked:false, skills:false,
+    version:"opencode 1.2.27", target:"~/.config/opencode/plugins/ok.ts",
+    desc:"TS 插件：仓库上下文 + 会话同步。",
+    descEn:"TS plugin: repo context + session sync." },
+  { id:"pi",        name:"Pi",          kind:"plugin", color:"#db2777", abbr:"Pi",
+    detected:true,  hooked:false, skills:false,
+    version:"pi 已安装", versionEn:"pi installed",
+    target:"Pi 扩展目录", targetEn:"Pi extensions dir",
+    desc:"Pi 扩展方式接入。",
+    descEn:"Integrated as a Pi extension." },
+  { id:"zcode",     name:"ZCode",       kind:"hook",   color:"#ea580c", abbr:"Zc",
+    detected:true,  hooked:false, skills:false,
+    version:"zcode 已安装", versionEn:"zcode installed",
+    target:"~/.zcode/hooks + 独立技能目录", targetEn:"~/.zcode/hooks + separate skills dir",
+    desc:"hooks 注入（claude 协议），技能目录独立。",
+    descEn:"Hooks injection (claude protocol) with its own skills dir." },
+  { id:"reasonix",  name:"Reasonix",    kind:"hook",   color:"#4f46e5", abbr:"Rx",
+    detected:true,  hooked:true,  skills:true,
+    version:"reasonix 已安装", versionEn:"reasonix installed",
+    target:"sidecar 扩展注册", targetEn:"sidecar extension registry",
+    desc:"sidecar 扩展接入，强制检查走拦截器。",
+    descEn:"Sidecar extension; enforce checks run through the interceptor." },
+  { id:"dsh",       name:"DeepSeek Harness", kind:"plugin", color:"#0284c7", abbr:"DS",
+    detected:true,  hooked:false, skills:false,
+    version:"dsh 已安装", versionEn:"dsh installed",
+    target:"DSH 本地插件目录", targetEn:"DSH local plugins dir",
+    desc:"file-URL 挂载的本地 JS 插件。",
+    descEn:"Local JS plugin mounted via file:// URL." },
+];
+const setupState = Object.fromEntries(AGENTS.map(a=>[a.id,{hooked:a.hooked, skills:a.skills, busy:false, open:false}]));
+
+function renderSetup(){
+  const d = el("div","setup");
+  const list = AGENTS.filter(a=>a.detected);   // 未检测到的不显示
+  const head = el("div","setup-head");
+  const stat = el("div","stat");
+  stat.innerHTML = t("stDetected")+" <b>"+list.length+"</b> "+t("stAgentUnit")
+    +' · <span class="ok">'+t("stHooked")+" <b>"+list.filter(a=>setupState[a.id].hooked).length+"</b> "+t("stHookedUnit")+"</span>";
+  head.appendChild(stat);
+  head.appendChild(Object.assign(el("div","sub"),{textContent:t("setupSub")}));
+  const rd = el("button","btn");
+  rd.textContent = setupState._detecting ? t("detecting") : t("redetect");
+  rd.disabled = !!setupState._detecting;
+  rd.onclick = ()=>{ setupState._detecting=true; render();
+    setTimeout(()=>{ setupState._detecting=false; render(); }, 600); };
+  head.appendChild(rd);
+  d.appendChild(head);
+
+  if(!list.length){
+    d.appendChild(Object.assign(el("div","placeholder"),{textContent:t("noneDetected")}));
+    return d;
+  }
+  const cards = el("div","acards");
+  list.forEach(a=>{
+    const s = setupState[a.id];
+    const card = el("div","acard");
+    const icon = el("div","aicon");
+    const L = LOGOS[a.id];
+    if(L && (L.raw || L.img)){
+      icon.innerHTML = L.raw || '<img src="'+L.img+'" alt="">';   // 全彩图标，铺满磁贴
+    } else if(L && L.padded){
+      icon.style.background = L.bg||"#fff";
+      if(L.border) icon.style.boxShadow = "inset 0 0 0 1px var(--border)";
+      icon.innerHTML = L.padded;                    // 浅色底字形：白磁贴 24px 居中
+    } else if(L){
+      icon.style.background = L.bg; icon.style.color = L.fg;
+      if(L.border) icon.style.boxShadow = "inset 0 0 0 1px var(--border)";
+      icon.innerHTML = logoSvg(L);
+    } else {
+      icon.style.background = a.color; icon.textContent = a.abbr;
+    }
+    card.appendChild(icon);
+
+    const main = el("div","amain");
+    const r1 = el("div","arow1");
+    r1.appendChild(Object.assign(el("span","aname"),{textContent:a.name}));
+    const kind = el("span","akind "+(a.kind==="hook"?"k-hook":"k-plugin"));
+    kind.textContent = a.kind==="hook" ? t("kindHook") : t("kindPlugin");
+    r1.appendChild(kind);
+    main.appendChild(r1);
+    main.appendChild(Object.assign(el("div","adesc"),{textContent:state.lang==="en"?(a.descEn||a.desc):a.desc}));
+    const det = el("div","adetect");
+    det.innerHTML = '<span class="yes">✓</span><span>'+esc(state.lang==="en"?(a.versionEn||a.version):a.version)+'</span>'
+                  + '<span class="path" title="target">'+esc(state.lang==="en"?(a.targetEn||a.target):a.target)+'</span>';
+    main.appendChild(det);
+    const tog = el("button","detail-toggle");
+    tog.textContent = s.open ? t("detailClose") : t("detailQ");
+    tog.onclick = ()=>{ s.open=!s.open; render(); };
+    main.appendChild(tog);
+    const dl = el("div","adetail"+(s.open?" open":""));
+    dl.innerHTML = t("detailInstall")+"<code>"+esc(a.target)+"</code>"+t("detailJoin")+t("detailRemove");
+    main.appendChild(dl);
+    const fb = el("div","fb"+(s.fb?" show":""));
+    fb.textContent = s.fb||"";
+    main.appendChild(fb);
+    card.appendChild(main);
+
+    const aside = el("div","aside2");
+    const ch1 = el("span","chip "+(s.hooked?"on":"off"));
+    ch1.textContent = s.hooked ? t("hookOn") : t("hookOff");
+    aside.appendChild(ch1);
+    const ch2 = el("span","chip "+(s.skills?"on":"off"));
+    ch2.textContent = s.skills ? t("skillOn") : t("skillOff");
+    aside.appendChild(ch2);
+    const act = el("button","btn "+(s.hooked?"btn-danger":"btn-primary"));
+    act.disabled = s.busy;
+    act.textContent = s.busy ? (s.hooked?t("uninstalling"):t("installing")) : (s.hooked?t("uninstall"):t("install"));
+    act.onclick = ()=>toggleAgent(a);
+    aside.appendChild(act);
+    card.appendChild(aside);
+    cards.appendChild(card);
+  });
+  d.appendChild(cards);
+  return d;
+}
+
+/* 模拟安装/卸载：800ms 假耗时 → 状态翻转 + 可见反馈（真实现=cli.Setup/RemoveHooks） */
+function toggleAgent(a){
+  const s = setupState[a.id];
+  s.busy = true; s.fb = ""; render();
+  setTimeout(()=>{
+    s.busy = false;
+    s.hooked = !s.hooked;
+    s.skills = s.hooked;
+    s.fb = s.hooked ? t("fbInstall") : t("fbUninstall");
+    render();
+  }, 800);
+}
+
+/* ================= 设置页（字段全部对应 config.toml 真实小节） ================= */
+/* 内置模型清单（照抄 internal/embed/manifest.go 的 BuiltinModels.Label） */
+const BUILTIN_MODELS = [
+  { id:"qwen3-emb-0.6b-q8", label:"Qwen3-Embedding-0.6B · Q8_0（推荐 · 639MB · 1024 维 · 中文+代码强）", downloaded:true },
+  { id:"bge-m3-q4_k_m",    label:"BAAI/bge-m3 · Q4_K_M（下载最小 418MB · 1024 维 · 中英双语）" },
+  { id:"bge-m3-q8_0",      label:"BAAI/bge-m3 · Q8_0（605MB · 1024 维 · bge 质量档）" },
+  { id:"nomic-embed-q8",   label:"nomic-embed-text v1.5 · Q8_0（139MB · 768 维 · 英文为主）" },
+];
+function builtinLabel(id){
+  const m = BUILTIN_MODELS.find(x=>x.id===id);
+  return m ? m.label : id;
+}
+const PREFS_DEF = {
+  hooksOn:true,                                          // 全局开关（registry 级，ok on/off）
+  embActive:"qwen3-local", embTimeout:30,                // [embedding]
+  embDir:"D:\\develop\\OpenKnowledge\\dist\\models",
+  embProfiles:[
+    { name:"qwen3-local", type:"builtin", model:"qwen3-emb-0.6b-q8", mirror:"hf-mirror" },
+    { name:"deepseek-emb", type:"openai", base:"https://api.deepseek.com", model:"text-embedding" },
+    { name:"本机 ollama", type:"ollama", base:"http://127.0.0.1:11434", model:"bge-m3" },
+  ],
+  llmActive:"deepseek-chat", llmTimeout:120,             // [llm]
+  llmProfiles:[
+    { name:"deepseek-chat", kind:"openai", base:"https://api.deepseek.com", model:"deepseek-chat" },
+    { name:"claude-main", kind:"anthropic", base:"https://api.anthropic.com", model:"claude-sonnet-4-5" },
+  ],
+  hookTimeout:10,                                        // [hooks] timeout_sec
+  gateOn:true, gateExtra:["再想想","怎么优化"],            // [retrieve.gate]
+  dedupTurns:3,                                          // [retrieve] dedup_turns
+  rules:[                                                // [[enforce.rules]]
+    { type:"changelog", globs:"**/*.go", cl:"docs/changelogs/*.md", msg:"改代码必须写变更日志" },
+  ],
+  capMode:"propose", capInterval:5,                      // [capture]
+};
+let prefs = JSON.parse(JSON.stringify(PREFS_DEF));
+const prefsDirty = {}, prefsSaved = {};
+const GATE_BUILTIN = ["继续","可以","好的","是的","OK","go ahead"];  // 内置 21 条示意
+let gateModal = false;
+let gateDraft = [];
+let embModal = false, embDraft = null, embEdit = -1, embForm = null;
+let llmModal = false, llmDraft = null, llmEdit = -1, llmForm = null;
+
+/* 摘要行：标签紧贴内容（不吃 .prow .k 的 140px 固定宽），动作按钮靠右 */
+function sumRow(label, content, btn){
+  const r = el("div","prow");
+  const k = Object.assign(el("span","k"),{textContent:label});
+  k.style.width = "auto"; k.style.marginRight = "6px";
+  r.appendChild(k); r.appendChild(content);
+  if(btn){ btn.style.marginLeft = "auto"; r.appendChild(btn); }
+  return r;
+}
+
+function pDirty(k){ prefsDirty[k]=true; render(); }
+// 实时脏态：不重渲，直接同步该卡保存按钮的禁用态（数字输入边打边响应，且改回原值即变回灰）
+function pDirtyLive(k, dirty){
+  prefsDirty[k]=dirty;
+  document.querySelectorAll('[data-save="'+k+'"]').forEach(b=>{ b.disabled = !dirty; });
+}
+function pSave(k){
+  prefsDirty[k]=false; prefsSaved[k]=true; render();
+  setTimeout(()=>{ prefsSaved[k]=false; render(); }, 1500);
+}
+// 数字输入（设置卡用）：oninput 实时上报，由调用方 apply + 计算脏态；不重渲，避免丢焦点
+function pnumLive(val, min, max, onVal){
+  const i = el("input","pinput"); i.type="number"; i.min=min; i.max=max; i.value=val;
+  i.style.width="90px";
+  i.oninput = ()=>onVal(+i.value);
+  return i;
+}
+function pcard(key, title, desc, body, inlineRow){
+  const c = el("div","pcard");
+  const h = el("h3"); h.textContent = title; c.appendChild(h);
+  if(desc){ c.appendChild(Object.assign(el("div","pdesc"),{textContent:desc})); }
+  c.appendChild(body);
+  const sv = el("button","btn btn-primary");
+  sv.textContent = t("save"); sv.disabled = !prefsDirty[key];
+  sv.dataset.save = key;
+  sv.onclick = ()=>pSave(key);
+  if(inlineRow){
+    // 简单输入卡：保存按钮进控件行右端，不独占页脚
+    const wrap = el("span");
+    wrap.style.cssText = "margin-left:auto;display:flex;align-items:center;gap:10px;flex:none";
+    if(prefsSaved[key]) wrap.appendChild(Object.assign(el("span","fb2"),{textContent:t("saved")}));
+    wrap.appendChild(sv);
+    inlineRow.appendChild(wrap);
+  } else {
+    const f = el("div","pfoot");
+    f.appendChild(sv);
+    if(prefsSaved[key]) f.appendChild(Object.assign(el("span","fb2"),{textContent:t("saved")}));
+    c.appendChild(f);
+  }
+  return c;
+}
+function prow(k, input){
+  const r = el("div","prow");
+  r.appendChild(Object.assign(el("span","k"),{textContent:k}));
+  r.appendChild(input);
+  return r;
+}
+function pswitch(on, flip){
+  const s = el("button","switch"+(on?" on":""));
+  s.setAttribute("role","switch"); s.onclick = flip;
+  return s;
+}
+function pnum(val, min, max, commit){
+  const i = el("input","pinput"); i.type="number"; i.min=min; i.max=max; i.value=val;
+  i.style.width="90px"; i.onchange = ()=>commit(+i.value);
+  return i;
+}
+function ptext(val, commit, width){
+  const i = el("input","pinput"); i.value=val; if(width) i.style.width=width;
+  i.onchange = ()=>commit(i.value);   // onchange 提交，避免每键重渲丢焦点
+  return i;
+}
+
+function renderPrefs(){
+  const d = el("div","prefs");
+
+  // 1. 全局开关：总闸即开即存；版式=标题在上、详情在下，开关放详情行右端
+  {
+    const c = el("div","pcard");
+    const h = el("h3"); h.textContent = t("gTitle"); c.appendChild(h);
+    const r = el("div","prow");
+    r.style.margin = "0";
+    const dsc = Object.assign(el("span","pdesc"),{textContent:t("gDesc")});
+    dsc.style.margin = "0";
+    r.appendChild(dsc);
+    const right = el("span");
+    right.style.cssText = "margin-left:auto;display:flex;align-items:center;gap:10px;flex:none";
+    if(prefs._gFb) right.appendChild(Object.assign(el("span","fb2"),{textContent:prefs.hooksOn?t("gOnFb"):t("gOffFb")}));
+    right.appendChild(pswitch(prefs.hooksOn, ()=>{
+      prefs.hooksOn = !prefs.hooksOn; prefs._gFb = true; render();
+      setTimeout(()=>{ prefs._gFb = false; render(); }, 1500);
+    }));
+    r.appendChild(right);
+    c.appendChild(r);
+    d.appendChild(c);
+  }
+  // 2. 语义检索（embedding）：摘要行 + 管理配置弹窗；超时/目录/增删改全在弹窗内，确定即生效（无保存按钮）
+  {
+    const c = el("div","pcard");
+    const h = el("h3"); h.textContent = t("eTitle"); c.appendChild(h);
+    c.appendChild(Object.assign(el("div","pdesc"),{textContent:t("eDesc")}));
+    const cur = prefs.embProfiles.find(p=>p.name===prefs.embActive);
+    const sumBody = el("span");
+    if(cur){
+      const detail = cur.type==="builtin" ? builtinLabel(cur.model)
+                   : (cur.model||"")+(cur.base?" @ "+cur.base:"");
+      sumBody.innerHTML = '<span class="badge-type t-'+(cur.type==="builtin"?"reference":cur.type==="ollama"?"note":"rule")+'">'
+        + esc(cur.type==="builtin"?t("tagBuiltin"):cur.type==="ollama"?t("tagOllama"):t("tagCustom")) + '</span>'
+        + ' <b>'+esc(cur.name)+'</b> <span class="mono">'+esc(detail)+'</span>';
+    } else {
+      sumBody.innerHTML = '<span class="muted">'+t("eNone")+'</span>';
+    }
+    const mg = el("button","btn"); mg.textContent = t("eManage");
+    mg.onclick = ()=>{
+      embDraft = { active:prefs.embActive, timeout:prefs.embTimeout, dir:prefs.embDir,
+                   profiles:JSON.parse(JSON.stringify(prefs.embProfiles)) };
+      embEdit = -1; embForm = null; embModal = true; render();
+    };
+    c.appendChild(sumRow(t("eActive"), sumBody, mg));
+    if(prefs._eFb) c.appendChild(Object.assign(el("span","fb2"),{textContent:t("saved")}));
+    d.appendChild(c);
+  }
+  // 3. 模型配置（LLM）：与 embedding 同构——摘要行 + 管理配置弹窗，确定即生效
+  {
+    const c = el("div","pcard");
+    const h = el("h3"); h.textContent = t("lTitle"); c.appendChild(h);
+    c.appendChild(Object.assign(el("div","pdesc"),{textContent:t("lDesc")}));
+    const cur = prefs.llmProfiles.find(p=>p.name===prefs.llmActive);
+    const sumBody = el("span");
+    if(cur){
+      sumBody.innerHTML = '<span class="badge-type t-'+(cur.kind==="anthropic"?"pitfall":"rule")+'">'
+        + esc(cur.kind==="anthropic"?t("tagAnthropic"):t("tagOpenai")) + '</span>'
+        + ' <b>'+esc(cur.name)+'</b> <span class="mono">'+esc(cur.model+(cur.base?" @ "+cur.base:""))+'</span>';
+    } else {
+      sumBody.innerHTML = '<span class="muted">'+t("eNone")+'</span>';
+    }
+    const mg = el("button","btn"); mg.textContent = t("eManage");
+    mg.onclick = ()=>{
+      llmDraft = { active:prefs.llmActive, timeout:prefs.llmTimeout,
+                   profiles:JSON.parse(JSON.stringify(prefs.llmProfiles)) };
+      llmEdit = -1; llmForm = null; llmModal = true; render();
+    };
+    c.appendChild(sumRow(t("eActive"), sumBody, mg));
+    if(prefs._lFb) c.appendChild(Object.assign(el("span","fb2"),{textContent:t("saved")}));
+    d.appendChild(c);
+  }
+  // 4. Hook 超时
+  {
+    const b = el("div");
+    const orig = prefs.hookTimeout;
+    const row = prow(t("hSec"), pnumLive(prefs.hookTimeout,1,120,v=>{
+      prefs.hookTimeout=v; pDirtyLive("h", v!==orig);
+    }));
+    b.appendChild(row);
+    d.appendChild(pcard("h", t("hTitle"), t("hDesc"), b, row));
+  }
+  // 5. 跨轮注入冷却
+  {
+    const b = el("div");
+    const orig = prefs.dedupTurns;
+    const row = prow(t("cTurns"), pnumLive(prefs.dedupTurns,0,99,v=>{
+      prefs.dedupTurns=v; pDirtyLive("c", v!==orig);
+    }));
+    b.appendChild(row);
+    d.appendChild(pcard("c", t("cTitle"), t("cDesc"), b, row));
+  }
+  // 6. 经验沉淀：保存按钮收进「轮次间隔」行右端；模式+间隔合并判脏，改回原值即变回灰
+  {
+    const b = el("div");
+    const orig = { mode:prefs.capMode, interval:prefs.capInterval };
+    const chk = ()=>pDirtyLive("cap", prefs.capMode!==orig.mode || prefs.capInterval!==orig.interval);
+    const modeRow = el("div","prow");
+    modeRow.appendChild(Object.assign(el("span","k"),{textContent:t("capMode")}));
+    [["propose",t("capPropose")],["auto",t("capAuto")]].forEach(([v,label])=>{
+      const lab = el("label","prow"); lab.style.margin="0";
+      const rd = el("input"); rd.type="radio"; rd.name="capmode"; rd.className="radio";
+      rd.checked = prefs.capMode===v;
+      rd.onchange = ()=>{ prefs.capMode=v; chk(); };
+      lab.appendChild(rd); lab.appendChild(document.createTextNode(label));
+      modeRow.appendChild(lab);
+    });
+    b.appendChild(modeRow);
+    const iRow = prow(t("capInterval"), pnumLive(prefs.capInterval,1,99,v=>{
+      prefs.capInterval=v; chk();
+    }));
+    b.appendChild(iRow);
+    d.appendChild(pcard("cap", t("capTitle"), t("capDesc"), b, iRow));
+  }
+  // 7. 泛化门控：单行布局（开关即开即存，短语表弹窗内编辑、确定即生效），无保存按钮
+  {
+    const c = el("div","pcard");
+    const h = el("h3"); h.textContent = t("gtTitle"); c.appendChild(h);
+    c.appendChild(Object.assign(el("div","pdesc"),{textContent:t("gtDesc")}));
+    const r = el("div","prow");
+    r.style.margin = "0";
+    r.appendChild(Object.assign(el("span","k"),{textContent:t("gtOn")}));
+    r.appendChild(pswitch(prefs.gateOn, ()=>{
+      prefs.gateOn = !prefs.gateOn; prefs._gtFb = true; render();
+      setTimeout(()=>{ prefs._gtFb = false; render(); }, 1500);
+    }));
+    r.appendChild(Object.assign(el("span","muted"),{textContent:t("gtStatus").replace("{n}",prefs.gateExtra.length)}));
+    const right = el("span");
+    right.style.cssText = "margin-left:auto;display:flex;align-items:center;gap:10px;flex:none";
+    if(prefs._gtFb) right.appendChild(Object.assign(el("span","fb2"),{textContent:t("saved")}));
+    const mg = el("button","btn"); mg.textContent = t("gtManage");
+    mg.onclick = ()=>{ gateDraft = prefs.gateExtra.slice(); gateModal = true; render(); };
+    right.appendChild(mg);
+    r.appendChild(right);
+    c.appendChild(r);
+    d.appendChild(c);
+  }
+  // 8. 规则配置：保存按钮收进「添加规则」行右端
+  {
+    const b = el("div");
+    const tb = el("table","rules");
+    tb.innerHTML = "<thead><tr><th style='width:110px'>"+t("rType")+"</th><th>"+t("rGlobs")+"</th><th>"+t("rCl")+"</th><th>"+t("rMsg")+"</th><th style='width:40px'></th></tr></thead>";
+    const tbBody = el("tbody");
+    prefs.rules.forEach((r,idx)=>{
+      const tr = el("tr");
+      const td0 = el("td");
+      const sel = el("select","pselect");
+      ["changelog"].forEach(o=>{ const op=el("option"); op.value=o; op.textContent=o; sel.appendChild(op); });
+      sel.value = r.type;
+      sel.onchange = ()=>{ r.type=sel.value; pDirty("r"); };
+      td0.appendChild(sel); tr.appendChild(td0);
+      [["globs"],["cl"],["msg"]].forEach(([f])=>{
+        const td = el("td");
+        td.appendChild(ptext(r[f], v=>{ r[f]=v; pDirty("r"); }));
+        tr.appendChild(td);
+      });
+      const tdX = el("td");
+      const del = el("button","btn"); del.textContent = "×"; del.style.padding="2px 10px";
+      del.onclick = ()=>{ prefs.rules.splice(idx,1); pDirty("r"); };
+      tdX.appendChild(del); tr.appendChild(tdX);
+      tbBody.appendChild(tr);
+    });
+    tb.appendChild(tbBody);
+    b.appendChild(tb);
+    const addRow = el("div");
+    addRow.style.cssText = "display:flex;align-items:center;margin-top:8px";
+    const add = el("button","btn"); add.textContent = t("rAdd");
+    add.onclick = ()=>{ prefs.rules.push({type:"changelog",globs:"",cl:"",msg:""}); pDirty("r"); };
+    addRow.appendChild(add);
+    b.appendChild(addRow);
+    d.appendChild(pcard("r", t("rTitle"), t("rDesc"), b, addRow));
+  }
+
+  if(gateModal) d.appendChild(renderGateModal());
+  if(embModal) d.appendChild(renderEmbModal());
+  if(llmModal) d.appendChild(renderLlmModal());
+  return d;
+}
+
+function renderGateModal(){
+  const mask = el("div","mask");
+  const m = el("div","modal");
+  m.appendChild(Object.assign(el("h3"),{textContent:t("gtManage")}));
+  // 内置短语：只读列表（与 embedding/LLM 弹窗同款的 .prof 行样式）
+  m.appendChild(Object.assign(el("div","sec-label"),{textContent:t("gtBuiltin")}));
+  GATE_BUILTIN.forEach(p=>{
+    const row = el("div","prof");
+    row.style.cursor = "default";
+    row.appendChild(Object.assign(el("span","info"),{textContent:p}));
+    m.appendChild(row);
+  });
+  const more = el("div","prof");
+  more.style.cursor = "default";
+  more.appendChild(Object.assign(el("span","info muted"),{textContent:"… +15"}));
+  m.appendChild(more);
+  // 自定义短语：列表（可删）+ 文本框与添加按钮
+  m.appendChild(Object.assign(el("div","sec-label"),{textContent:t("gtCustom")}));
+  gateDraft.forEach((p,idx)=>{
+    const row = el("div","prof");
+    row.style.cursor = "default";
+    row.appendChild(Object.assign(el("span","info"),{textContent:p}));
+    const del = el("button","btn btn-danger"); del.textContent = t("eDel");
+    del.style.cssText = "margin-left:auto;padding:2px 10px;flex:none";
+    del.onclick = ()=>{ gateDraft.splice(idx,1); render(); };
+    row.appendChild(del);
+    m.appendChild(row);
+  });
+  const addRow = el("div","ph-row");
+  const inp = ptext("", ()=>{});
+  inp.placeholder = t("gtPh");
+  const add = el("button","btn"); add.textContent=t("gtAdd"); add.style.flex="none";
+  const doAdd = ()=>{ const v = inp.value.trim(); if(v){ gateDraft.push(v); render(); } };
+  add.onclick = doAdd;
+  inp.onkeydown = e=>{ if(e.key==="Enter") doAdd(); };
+  addRow.appendChild(inp); addRow.appendChild(add);
+  m.appendChild(addRow);
+  const foot = el("div","mfoot");
+  const cancel = el("button","btn"); cancel.textContent = t("fCancel");
+  cancel.onclick = ()=>{ gateModal=false; render(); };
+  const ok = el("button","btn btn-primary"); ok.textContent = t("fOk");
+  ok.onclick = ()=>{ prefs.gateExtra = gateDraft.filter(s=>s.trim()); gateModal=false;
+    prefs._gtFb = true; render();
+    setTimeout(()=>{ prefs._gtFb = false; render(); }, 1500); };
+  foot.appendChild(cancel); foot.appendChild(ok);
+  m.appendChild(foot);
+  mask.appendChild(m);
+  mask.onclick = e=>{ if(e.target===mask){ gateModal=false; render(); } };
+  return mask;
+}
+
+/* embedding 服务管理弹窗：列表（设为使用中/编辑/删除）+ 按类型切换的内联表单
+  （字段结构照抄现有 GUI：builtin=模型下拉+下载源，ollama=地址+模型，openai=base_url+模型+key；
+   类型保存后锁定，仅新增可改）；超时与模型目录收在弹窗「全局」段。确定即生效。 */
+function renderEmbModal(){
+  const mask = el("div","mask");
+  const m = el("div","modal");
+  m.appendChild(Object.assign(el("h3"),{textContent:t("eTitle")+" · "+t("eProfiles")}));
+
+  embDraft.profiles.forEach((p,idx)=>{
+    const row = el("div","prof"+(embDraft.active===p.name?" sel":""));
+    row.style.cursor = "default";
+    const info = el("span","info");
+    const detail = p.type==="builtin" ? builtinLabel(p.model) : (p.model||"")+(p.base?" @ "+p.base:"");
+    info.innerHTML = '<span class="badge-type t-'+(p.type==="builtin"?"reference":p.type==="ollama"?"note":"rule")+'">'
+      + esc(p.type==="builtin"?t("tagBuiltin"):p.type==="ollama"?t("tagOllama"):t("tagCustom")) + '</span>'
+      + ' <b>'+esc(p.name)+'</b> <span class="mono">'+esc(detail)+'</span>';
+    row.appendChild(info);
+    const acts = el("span");
+    acts.style.cssText = "margin-left:auto;display:flex;gap:6px;flex:none";
+    if(embDraft.active===p.name){
+      acts.appendChild(Object.assign(el("span","chip on"),{textContent:t("eActive")}));
+    } else {
+      const sa = el("button","btn"); sa.textContent = t("eSetActive"); sa.style.padding="2px 10px";
+      sa.onclick = ()=>{ embDraft.active = p.name; render(); };
+      acts.appendChild(sa);
+    }
+    const ed = el("button","btn"); ed.textContent = t("eEdit"); ed.style.padding="2px 10px";
+    ed.onclick = ()=>{ embEdit = idx; embForm = JSON.parse(JSON.stringify(p)); render(); };
+    acts.appendChild(ed);
+    const del = el("button","btn btn-danger"); del.textContent = t("eDel"); del.style.padding="2px 10px";
+    del.onclick = ()=>{
+      if(embDraft.active===p.name) embDraft.active = "";
+      embDraft.profiles.splice(idx,1);
+      if(embEdit===idx){ embEdit=-1; embForm=null; }
+      render();
+    };
+    acts.appendChild(del);
+    row.appendChild(acts);
+    m.appendChild(row);
+  });
+
+  if(embForm){
+    m.appendChild(Object.assign(el("div","sec-label"),
+      {textContent:embEdit===-2?t("eAddTitle"):t("eEditTitle")}));
+    m.appendChild(prow(t("fName"), ptext(embForm.name||"", v=>{ embForm.name=v; }, "300px")));
+    // 类型：保存后锁定，仅新增可改（沿用现有 GUI 语义）
+    const typeRow = el("div","prow");
+    typeRow.appendChild(Object.assign(el("span","k"),{textContent:t("fType")}));
+    const sel = el("select","pselect");
+    [["builtin",t("typeBuiltin")],["ollama",t("typeOllama")],["openai",t("typeOpenai")]].forEach(([v,label])=>{
+      const op=el("option"); op.value=v; op.textContent=label; sel.appendChild(op);
+    });
+    sel.value = embForm.type||"openai";
+    sel.disabled = embEdit >= 0;
+    sel.onchange = ()=>{ embForm.type = sel.value; render(); };
+    typeRow.appendChild(sel);
+    m.appendChild(typeRow);
+    // 按类型切换字段组
+    const ty = embForm.type||"openai";
+    if(ty==="builtin"){
+      const mRow = el("div","prow");
+      mRow.appendChild(Object.assign(el("span","k"),{textContent:t("fModel")}));
+      const mSel = el("select","pselect"); mSel.style.maxWidth="420px";
+      BUILTIN_MODELS.forEach(bm=>{
+        const op=el("option"); op.value=bm.id;
+        op.textContent = bm.label + (bm.downloaded?t("downloaded"):"");
+        mSel.appendChild(op);
+      });
+      mSel.value = embForm.model||BUILTIN_MODELS[0].id;
+      mSel.onchange = ()=>{ embForm.model = mSel.value; };
+      mRow.appendChild(mSel);
+      m.appendChild(mRow);
+      const miRow = el("div","prow");
+      miRow.appendChild(Object.assign(el("span","k"),{textContent:t("fMirror")}));
+      const miSel = el("select","pselect");
+      [["hf-mirror",t("mirrorHf")],["huggingface",t("mirrorOfficial")]].forEach(([v,label])=>{
+        const op=el("option"); op.value=v; op.textContent=label; miSel.appendChild(op);
+      });
+      miSel.value = embForm.mirror||"hf-mirror";
+      miSel.onchange = ()=>{ embForm.mirror = miSel.value; };
+      miRow.appendChild(miSel);
+      m.appendChild(miRow);
+    } else if(ty==="ollama"){
+      m.appendChild(prow(t("fOlUrl"), ptext(embForm.base||"http://localhost:11434", v=>{ embForm.base=v; }, "300px")));
+      m.appendChild(prow(t("fModel"), ptext(embForm.model||"", v=>{ embForm.model=v; }, "300px")));
+    } else {
+      m.appendChild(prow(t("fBase"), ptext(embForm.base||"", v=>{ embForm.base=v; }, "300px")));
+      m.appendChild(prow(t("fModel"), ptext(embForm.model||"", v=>{ embForm.model=v; }, "300px")));
+      const keyIn = ptext(embForm.key||"", v=>{ embForm.key=v; }, "300px");
+      keyIn.placeholder = embEdit>=0 ? t("keySaved") : "api_key";
+      m.appendChild(prow(t("fKey"), keyIn));
+    }
+    const frow = el("div","prow");
+    frow.appendChild(el("span","k"));
+    const ok = el("button","btn btn-primary"); ok.textContent = t("fOk");
+    ok.onclick = ()=>{
+      if(!(embForm.name||"").trim()) return;
+      if(embEdit===-2) embDraft.profiles.push(JSON.parse(JSON.stringify(embForm)));
+      else embDraft.profiles[embEdit] = JSON.parse(JSON.stringify(embForm));
+      embEdit=-1; embForm=null; render();
+    };
+    const cancel = el("button","btn"); cancel.textContent = t("fCancel");
+    cancel.onclick = ()=>{ embEdit=-1; embForm=null; render(); };
+    frow.appendChild(ok); frow.appendChild(cancel);
+    m.appendChild(frow);
+  } else {
+    const add = el("button","btn"); add.textContent = t("eAdd"); add.style.marginTop="8px";
+    add.onclick = ()=>{ embEdit=-2; embForm={type:"builtin"}; render(); };
+    m.appendChild(add);
+  }
+
+  // 全局段：调用超时 + 内置模型目录（属于 [embedding] 全局，不属于单个 profile）
+  m.appendChild(Object.assign(el("div","sec-label"),{textContent:t("eGlobal")}));
+  m.appendChild(prow(t("eTimeout"), pnum(embDraft.timeout,1,300,v=>{embDraft.timeout=v;})));
+  m.appendChild(prow(t("eDir"), ptext(embDraft.dir,v=>{embDraft.dir=v;},"360px")));
+
+  const foot = el("div","mfoot");
+  const cancel = el("button","btn"); cancel.textContent = t("fCancel");
+  cancel.onclick = ()=>{ embModal=false; embDraft=null; render(); };
+  const ok = el("button","btn btn-primary"); ok.textContent = t("fOk");
+  ok.onclick = ()=>{
+    prefs.embProfiles = embDraft.profiles;
+    prefs.embActive = embDraft.active;
+    prefs.embTimeout = embDraft.timeout;
+    prefs.embDir = embDraft.dir;
+    embModal=false; embDraft=null;
+    prefs._eFb=true; render();
+    setTimeout(()=>{ prefs._eFb=false; render(); }, 1500);
+  };
+  foot.appendChild(cancel); foot.appendChild(ok);
+  m.appendChild(foot);
+  mask.appendChild(m);
+  mask.onclick = e=>{ if(e.target===mask){ embModal=false; embDraft=null; render(); } };
+  return mask;
+}
+
+/* LLM 服务管理弹窗：与 embedding 弹窗同构。kind 两档（OpenAI/Anthropic 兼容），
+   temperature/max_tokens 为高级参数（留空/0 = 不传）；编辑表单内带「测试连接」；
+   「全局」段放生成超时。确定即生效。 */
+function renderLlmModal(){
+  const mask = el("div","mask");
+  const m = el("div","modal");
+  m.appendChild(Object.assign(el("h3"),{textContent:t("lTitle")+" · "+t("eProfiles")}));
+
+  llmDraft.profiles.forEach((p,idx)=>{
+    const row = el("div","prof"+(llmDraft.active===p.name?" sel":""));
+    row.style.cursor = "default";
+    const info = el("span","info");
+    info.innerHTML = '<span class="badge-type t-'+(p.kind==="anthropic"?"pitfall":"rule")+'">'
+      + esc(p.kind==="anthropic"?t("tagAnthropic"):t("tagOpenai")) + '</span>'
+      + ' <b>'+esc(p.name)+'</b> <span class="mono">'+esc(p.model||"")+ (p.base?" @ "+esc(p.base):"") +'</span>';
+    row.appendChild(info);
+    const acts = el("span");
+    acts.style.cssText = "margin-left:auto;display:flex;gap:6px;flex:none";
+    if(llmDraft.active===p.name){
+      acts.appendChild(Object.assign(el("span","chip on"),{textContent:t("eActive")}));
+    } else {
+      const sa = el("button","btn"); sa.textContent = t("eSetActive"); sa.style.padding="2px 10px";
+      sa.onclick = ()=>{ llmDraft.active = p.name; render(); };
+      acts.appendChild(sa);
+    }
+    const ed = el("button","btn"); ed.textContent = t("eEdit"); ed.style.padding="2px 10px";
+    ed.onclick = ()=>{ llmEdit = idx; llmForm = JSON.parse(JSON.stringify(p)); llmDraft._testOk=false; render(); };
+    acts.appendChild(ed);
+    const del = el("button","btn btn-danger"); del.textContent = t("eDel"); del.style.padding="2px 10px";
+    del.onclick = ()=>{
+      if(llmDraft.active===p.name) llmDraft.active = "";
+      llmDraft.profiles.splice(idx,1);
+      if(llmEdit===idx){ llmEdit=-1; llmForm=null; }
+      render();
+    };
+    acts.appendChild(del);
+    row.appendChild(acts);
+    m.appendChild(row);
+  });
+
+  if(llmForm){
+    m.appendChild(Object.assign(el("div","sec-label"),
+      {textContent:llmEdit===-2?t("eAddTitle"):t("eEditTitle")}));
+    m.appendChild(prow(t("fName"), ptext(llmForm.name||"", v=>{ llmForm.name=v; }, "300px")));
+    const kindRow = el("div","prow");
+    kindRow.appendChild(Object.assign(el("span","k"),{textContent:t("fType")}));
+    const sel = el("select","pselect");
+    [["openai",t("kindOpenai")],["anthropic",t("kindAnthropic")]].forEach(([v,label])=>{
+      const op=el("option"); op.value=v; op.textContent=label; sel.appendChild(op);
+    });
+    sel.value = llmForm.kind||"openai";
+    sel.onchange = ()=>{ llmForm.kind = sel.value; };
+    kindRow.appendChild(sel);
+    m.appendChild(kindRow);
+    m.appendChild(prow(t("fBase"), ptext(llmForm.base||"", v=>{ llmForm.base=v; }, "300px")));
+    m.appendChild(prow(t("fModel"), ptext(llmForm.model||"", v=>{ llmForm.model=v; }, "300px")));
+    const keyIn = ptext(llmForm.key||"", v=>{ llmForm.key=v; }, "300px");
+    keyIn.placeholder = llmEdit>=0 ? t("keySaved") : "api_key";
+    m.appendChild(prow(t("fKey"), keyIn));
+    m.appendChild(prow(t("fTemp"), ptext(llmForm.temperature||"", v=>{ llmForm.temperature=v; }, "120px")));
+    m.appendChild(prow(t("fMaxTokens"), pnum(llmForm.maxTokens||0,0,128000,v=>{ llmForm.maxTokens=v; })));
+    const frow = el("div","prow");
+    frow.appendChild(el("span","k"));
+    const test = el("button","btn");
+    test.textContent = llmDraft._testing ? t("lTesting") : t("lTest");
+    test.disabled = !!llmDraft._testing;
+    test.onclick = ()=>{ llmDraft._testing=true; render();
+      setTimeout(()=>{ llmDraft._testing=false; llmDraft._testOk=true; render(); }, 700); };
+    frow.appendChild(test);
+    if(llmDraft._testOk) frow.appendChild(Object.assign(el("span","fb2"),{textContent:t("lTestOk")}));
+    const ok = el("button","btn btn-primary"); ok.textContent = t("fOk");
+    ok.onclick = ()=>{
+      if(!(llmForm.name||"").trim()) return;
+      if(llmEdit===-2) llmDraft.profiles.push(JSON.parse(JSON.stringify(llmForm)));
+      else llmDraft.profiles[llmEdit] = JSON.parse(JSON.stringify(llmForm));
+      llmEdit=-1; llmForm=null; render();
+    };
+    const cancel = el("button","btn"); cancel.textContent = t("fCancel");
+    cancel.onclick = ()=>{ llmEdit=-1; llmForm=null; render(); };
+    frow.appendChild(ok); frow.appendChild(cancel);
+    m.appendChild(frow);
+  } else {
+    const add = el("button","btn"); add.textContent = t("eAdd"); add.style.marginTop="8px";
+    add.onclick = ()=>{ llmEdit=-2; llmForm={kind:"openai"}; llmDraft._testOk=false; render(); };
+    m.appendChild(add);
+  }
+
+  m.appendChild(Object.assign(el("div","sec-label"),{textContent:t("eGlobal")}));
+  m.appendChild(prow(t("lTimeout"), pnum(llmDraft.timeout,1,600,v=>{ llmDraft.timeout=v; })));
+
+  const foot = el("div","mfoot");
+  const cancel = el("button","btn"); cancel.textContent = t("fCancel");
+  cancel.onclick = ()=>{ llmModal=false; llmDraft=null; render(); };
+  const ok = el("button","btn btn-primary"); ok.textContent = t("fOk");
+  ok.onclick = ()=>{
+    prefs.llmProfiles = llmDraft.profiles;
+    prefs.llmActive = llmDraft.active;
+    prefs.llmTimeout = llmDraft.timeout;
+    llmModal=false; llmDraft=null;
+    prefs._lFb=true; render();
+    setTimeout(()=>{ prefs._lFb=false; render(); }, 1500);
+  };
+  foot.appendChild(cancel); foot.appendChild(ok);
+  m.appendChild(foot);
+  mask.appendChild(m);
+  mask.onclick = e=>{ if(e.target===mask){ llmModal=false; llmDraft=null; render(); } };
+  return mask;
+}
+
+/* ================= 状态 ================= */
+const state = { menu:"manage", lang:"zh", theme:"light", collapsed:false,
+                open:{ "OpenKnowledge":true }, sel:null, q:"",
+                logSrc:{ ok:true, daemon:true, sidecar:true }, logSem:false, logQ:"",
+                logAuto:true, logStick:true,
+                miscDoc:null, delTarget:null, miscFb:"" };
+const t = k => I18N[state.lang][k];
+
+/* ================= 极简 markdown 渲染 ================= */
+function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function inline(s){
+  return esc(s).replace(/`([^`]+)`/g,"<code>$1</code>").replace(/\*\*([^*]+)\*\*/g,"<b>$1</b>");
+}
+function renderMd(src){
+  const lines = src.split("\n"); let html="", i=0;
+  while(i<lines.length){
+    const l = lines[i];
+    if(l.startsWith("```")){
+      const buf=[]; i++;
+      while(i<lines.length && !lines[i].startsWith("```")) buf.push(lines[i++]);
+      i++; html += "<pre><code>"+esc(buf.join("\n"))+"</code></pre>"; continue;
+    }
+    const h = l.match(/^(#{1,3})\s+(.*)/);
+    if(h){ html += "<h"+h[1].length+">"+inline(h[2])+"</h"+h[1].length+">"; i++; continue; }
+    if(/^\s*[-*]\s+/.test(l)){
+      const items=[];
+      while(i<lines.length && /^\s*[-*]\s+/.test(lines[i])) items.push(lines[i++].replace(/^\s*[-*]\s+/,""));
+      html += "<ul>"+items.map(x=>"<li>"+inline(x)+"</li>").join("")+"</ul>"; continue;
+    }
+    if(l.trim()===""){ i++; continue; }
+    html += "<p>"+inline(l)+"</p>"; i++;
+  }
+  return html;
+}
+
+/* ================= 渲染 ================= */
+function el(tag, cls){ const n=document.createElement(tag); if(cls) n.className=cls; return n; }
+function projOf(entry){ return PROJECTS.find(p=>p.entries.includes(entry)); }
+
+function badges(e){
+  return '<span class="badge-born" title="born">'+ICON.branch+esc(e.born)+'</span>'
+       + '<span class="badge-type t-'+e.type+'" title="'+e.type+'">'+TYPE_LABEL[e.type]+'</span>';
+}
+function detailAttrs(e){
+  let s = e.tags.map(x=>'<span class="tag">'+esc(x)+'</span>').join("");
+  s += e.mandatory ? '<span class="badge-mand">'+t("mandatory")+'</span>'
+                   : '<span class="tag" style="opacity:.6">'+t("optional")+'</span>';
+  if(e.draft) s += '<span class="badge-draft">'+t("draft")+'</span>';
+  if(e.archived) s += '<span class="badge-arch">'+t("archived")+'</span>';
+  return s;
+}
+
+function render(){
+  document.documentElement.dataset.theme = state.theme;
+  const app = document.getElementById("app");
+  // 整页重渲不丢滚动：重渲前记住各滚动容器位置，重渲后同步恢复
+  const keep = {};
+  app.querySelectorAll(".prefs,.setup,.detail,.tree-scroll,.misc").forEach(n=>{
+    keep[n.className.split(" ")[0]] = n.scrollTop;
+  });
+  renderBody(app);
+  Object.entries(keep).forEach(([cls,top])=>{
+    const n = app.querySelector("."+cls);
+    if(n) n.scrollTop = top;
+  });
+}
+
+function renderBody(app){
+  app.innerHTML = "";
+
+  // 顶栏：品牌在前，折叠按钮紧随其后（用户指定位置）
+  const bar = el("div","topbar");
+  const brand = el("div","brand");
+  brand.innerHTML = '<span class="logo">ok</span>OkManager';
+  bar.appendChild(brand);
+  const collapse = el("button","collapse-btn");
+  collapse.innerHTML = ICON.panel; collapse.title = t("collapseTip");
+  collapse.onclick = ()=>{ state.collapsed=!state.collapsed; render(); };
+  bar.appendChild(collapse);
+  const lang = el("div","lang-seg");
+  [["zh","中"],["en","EN"]].forEach(([k,label])=>{
+    const b = el("button", state.lang===k?"on":"");
+    b.textContent = label;
+    b.onclick = ()=>{ state.lang=k; render(); };
+    lang.appendChild(b);
+  });
+  bar.appendChild(lang);
+  const theme = el("button","theme-btn");
+  theme.innerHTML = state.theme==="light" ? ICON.moon : ICON.sun;
+  theme.onclick = ()=>{ state.theme = state.theme==="light"?"dark":"light"; render(); };
+  bar.appendChild(theme);
+  app.appendChild(bar);
+
+  // 主体
+  const main = el("div","main");
+  app.appendChild(main);
+
+  // 侧栏（同一 DOM，collapsed class 切两态）
+  const side = el("aside","side"+(state.collapsed?" collapsed":""));
+  MENUS.forEach(m=>{
+    const b = el("button","mi"+(state.menu===m.key?" active":""));
+    b.innerHTML = '<span class="ico">'+m.ico+'</span><span class="txt">'+t(m.key)+'</span>'
+                + '<span class="tip">'+t(m.key)+'</span>';
+    b.onclick = ()=>{ state.menu=m.key; location.hash=m.key; render(); };
+    side.appendChild(b);
+  });
+  main.appendChild(side);
+
+  if(state.menu==="setup"){
+    main.appendChild(renderSetup());
+    return;
+  }
+  if(state.menu==="prefs"){
+    main.appendChild(renderPrefs());
+    return;
+  }
+  if(state.menu==="logs"){
+    main.appendChild(renderLogs());
+    return;
+  }
+  if(state.menu==="misc"){
+    main.appendChild(renderMisc());
+    return;
+  }
+  if(state.menu!=="manage"){
+    const ph = el("div","placeholder");
+    ph.textContent = "「"+t(state.menu)+"」"+t("notImpl");
+    main.appendChild(ph);
+    return;
+  }
+
+  // 树
+  main.appendChild(renderTree());
+  // 详情
+  main.appendChild(renderDetail());
+}
+
+function renderTree(){
+  const tree = el("div","tree");
+  const head = el("div","tree-head");
+  head.appendChild(Object.assign(el("span","caption"),{textContent:t("treeCaption")}));
+  tree.appendChild(head);
+  const search = el("input","search");
+  search.placeholder = t("filter"); search.value = state.q;
+  search.oninput = ()=>{ state.q = search.value; fillTree(scroll); };
+  tree.appendChild(search);
+  const scroll = el("div","tree-scroll");
+  tree.appendChild(scroll);
+  fillTree(scroll);
+  return tree;
+}
+function fillTree(scroll){
+  scroll.innerHTML = "";
+  const q = state.q.trim().toLowerCase();
+  PROJECTS.forEach(p=>{
+    const list = p.entries.filter(e=>!q || e.title.toLowerCase().includes(q));
+    if(!list.length) return;
+    const open = q ? true : !!state.open[p.name];
+    const pj = el("button","tn-proj"+(open?" open":""));
+    pj.innerHTML = '<span class="caret">▶</span><span class="folder">'+ICON.folder+'</span>'+esc(p.name)+'<span class="cnt">'+list.length+'</span>';
+    pj.title = p.root;
+    pj.onclick = ()=>{ state.open[p.name]=!state.open[p.name]; render(); };
+    scroll.appendChild(pj);
+    if(open){
+      const kids = el("div","tn-kids");
+      list.forEach(e=>{
+        const leaf = el("button","leaf"+(state.sel===e?" sel":"")+(e.archived?" archived":""));
+        leaf.innerHTML = '<span class="l1">'+badges(e)
+          +(e.mandatory?'<span class="badge-mand">★</span>':"")
+          +(e.draft?'<span class="badge-draft">'+t("draft")+'</span>':"")+'</span>'
+          +'<span class="t2">'+esc(e.title)+'</span>';
+        leaf.onclick = ()=>{ state.sel=e; render(); };
+        kids.appendChild(leaf);
+      });
+      scroll.appendChild(kids);
+    }
+  });
+}
+
+function renderDetail(){
+  const d = el("div","detail");
+  const e = state.sel;
+  if(!e){
+    d.appendChild(Object.assign(el("div","placeholder"),{textContent:t("pickEntry")}));
+    return d;
+  }
+  d.appendChild(Object.assign(el("div","d-path"),
+    {textContent:projOf(e).root+"\\"+e.file.replace(/\//g,"\\")}));
+  const fm = el("div","d-filemeta");
+  fm.innerHTML = "<b>"+esc(e.file.split("/").pop())+"</b> · "+e.size+" · "+t("modified")+" "+e.mtime;
+  d.appendChild(fm);
+  d.appendChild(Object.assign(el("h1","d-title"),{textContent:e.title}));
+  const at = el("div","d-attrs"); at.innerHTML = detailAttrs(e); d.appendChild(at);
+  const sm = el("div","d-summary"); sm.textContent = e.summary; d.appendChild(sm);
+  const bd = el("div","d-body md"); bd.innerHTML = renderMd(e.body); d.appendChild(bd);
+  return d;
+}
+
+/* ================= 日志页 ================= */
+/* 三来源（ok=CLI/hook 客户端、daemon=守护进程、sidecar=embed 边车）实时日志查看器。
+   生产语义：2s 轮询 /api/logs?tail=400&sig=…（签名不变回 unchanged 跳过重绘），只读。
+   原型用本地样例行 + 2s 定时追加模拟轮询；工具行交互即时生效，不重渲整页。 */
+const LOG_TEMPLATES = [
+  { src:"ok",      sem:true,  text:'hook UserPromptSubmit · retrieve "{Q}" → 注入 {N} 条（{A} 坑 {B} 注）' },
+  { src:"ok",      sem:false, text:"hook PostToolUse · changelog 校验通过" },
+  { src:"ok",      sem:true,  text:"capture propose · 沉淀草稿 1 条待批准" },
+  { src:"daemon",  sem:false, text:"HTTP 127.0.0.1:8585 · GET /api/logs · 200 · {MS}ms" },
+  { src:"daemon",  sem:false, text:"config reload · config.toml mtime 变化，已生效" },
+  { src:"daemon",  sem:false, text:"gc · 过期草稿清理 0 条" },
+  { src:"sidecar", sem:false, text:"embed qwen3-local · {TOK} tokens · {MS}ms" },
+  { src:"sidecar", sem:false, text:"model warm · Qwen3-Embedding-0.6B Q8_0" },
+];
+const LOG_QUERIES = ["配置中心 原型","daemon 单写者","跨项目 记忆交叉","hook 超时","embedding 下载源"];
+const LOG_LINES = [];
+let logClock = 11*3600 + 18*60;   // 当日秒数，逐行推进
+function genLogLine(){
+  const tp = LOG_TEMPLATES[Math.floor(Math.random()*LOG_TEMPLATES.length)];
+  logClock += 2 + Math.floor(Math.random()*20);
+  const hh = String(Math.floor(logClock/3600)%24).padStart(2,"0");
+  const mm = String(Math.floor(logClock/60)%60).padStart(2,"0");
+  const ss = String(logClock%60).padStart(2,"0");
+  const text = tp.text
+    .replace("{Q}", LOG_QUERIES[Math.floor(Math.random()*LOG_QUERIES.length)])
+    .replace("{N}", 1+Math.floor(Math.random()*4))
+    .replace("{A}", Math.floor(Math.random()*3)).replace("{B}", Math.floor(Math.random()*2))
+    .replace(/\{MS\}/g, 2+Math.floor(Math.random()*40))
+    .replace("{TOK}", 80+Math.floor(Math.random()*400));
+  return { src:tp.src, sem:tp.sem, text:"2026-08-21 "+hh+":"+mm+":"+ss+" "+text };
+}
+for(let i=0;i<26;i++) LOG_LINES.push(genLogLine());
+
+let logBodyEl = null, logMetaEl = null;
+function paintLogs(){
+  if(!logBodyEl) return;
+  const q = state.logQ.trim().toLowerCase();
+  let count = 0, html = "";
+  LOG_LINES.forEach(l=>{
+    if(!state.logSrc[l.src]) return;
+    if(state.logSem && !l.sem) return;
+    if(q && l.text.toLowerCase().indexOf(q)<0) return;
+    count++;
+    html += '<span class="ls ls-'+l.src+'">'+l.src+'</span>'
+          + '<span class="sem'+(l.sem?"":" off")+'">'+(l.sem?"◆":"◇")+'</span> '
+          + esc(l.text)+"\n";
+  });
+  logBodyEl.innerHTML = count ? html : '<span class="empty">'+t("lgEmpty")+'</span>';
+  if(state.logStick) logBodyEl.scrollTop = logBodyEl.scrollHeight;
+  if(logMetaEl) logMetaEl.textContent =
+    t("lgMeta").replace("{n}",LOG_LINES.length).replace("{m}",count);
+}
+
+function renderLogs(){
+  const d = el("div","logs");
+  const bar = el("div","logbar");
+  [["ok","on-ok"],["daemon","on-daemon"],["sidecar","on-sidecar"]].forEach(([src,cls])=>{
+    const c = el("span","logchip"+(state.logSrc[src]?" "+cls:""));
+    c.textContent = src;
+    c.onclick = ()=>{ state.logSrc[src]=!state.logSrc[src]; c.classList.toggle(cls, state.logSrc[src]); paintLogs(); };
+    bar.appendChild(c);
+  });
+  const sem = el("span","logchip"+(state.logSem?" on-sem":""));
+  sem.textContent = t("lgSemantic");
+  sem.onclick = ()=>{ state.logSem=!state.logSem; sem.classList.toggle("on-sem", state.logSem); paintLogs(); };
+  bar.appendChild(sem);
+  const f = el("input","logfilter");
+  f.placeholder = t("lgFilter"); f.value = state.logQ;
+  f.oninput = ()=>{ state.logQ = f.value; paintLogs(); };
+  bar.appendChild(f);
+  const meta = el("span","logmeta");
+  logMetaEl = el("span");
+  meta.appendChild(logMetaEl);
+  meta.appendChild(Object.assign(el("span"),{textContent:t("lgAuto")}));
+  const sw = pswitch(state.logAuto, ()=>{
+    state.logAuto = !state.logAuto; sw.classList.toggle("on", state.logAuto);
+  });
+  meta.appendChild(sw);
+  bar.appendChild(meta);
+  d.appendChild(bar);
+  logBodyEl = el("div","logbody");
+  logBodyEl.addEventListener("scroll", ()=>{
+    state.logStick = logBodyEl.scrollHeight - logBodyEl.scrollTop - logBodyEl.clientHeight < 40;
+  });
+  d.appendChild(logBodyEl);
+  paintLogs();
+  return d;
+}
+
+/* 模拟 2s 轮询：仅日志页可见且自动刷新开启时追加样例行（上限 400，对齐生产 tail） */
+setInterval(()=>{
+  if(state.menu!=="logs" || !state.logAuto) return;
+  LOG_LINES.push(genLogLine());
+  if(LOG_LINES.length>400) LOG_LINES.shift();
+  paintLogs();
+}, 2000);
+
+/* ================= 其他页 ================= */
+/* 六个功能卡照抄现有 GUI「其他」页：数据导出/导入（zip 备份，索引导入时重建）、
+   更新日志、使用帮助（两者复用同一个 markdown 文档弹窗）、删除项目知识库（危险卡+确认弹窗）、关于。 */
+const MISC_CHANGELOG_MD =
+  "## v2.18.2 · 2026-08-19（样例）\n\n- 管理页新增归档入口\n- 日志页按文件签名跳过重绘，大文件不再每 2s 全量渲染\n\n" +
+  "## v2.17.0 · 2026-08-10\n\n- 泛化门控卡片：内置/自定义短语管理\n- Hook 超时默认提升至 10s（Windows 高负载 5s 曾丢整会话）\n\n" +
+  "## v2.9.0 · 2026-07-02\n\n- 新增「删除项目知识库」（备份 + 双重确认）";
+const MISC_HELP_MD =
+  "## 快速上手（样例节选）\n\n1. `ok init` 注册项目知识库\n2. `ok setup` 接入 agent hooks\n3. 正常写代码，检索注入与沉淀自动发生\n\n" +
+  "## 备份 / 迁移\n\n- 「数据导出」存 zip → 另一台机器「数据导入」，索引自动重建\n\n" +
+  "## 常见问题\n\n- 各版本更新内容见「更新日志」卡";
+
+function miscFbSpan(txt){
+  return Object.assign(el("span","fb2"),{textContent:txt});
+}
+function flashMiscFb(key, txt){
+  state.miscFb = key; render();
+  setTimeout(()=>{ if(state.miscFb===key){ state.miscFb=""; render(); } }, 1500);
+}
+
+function renderMisc(){
+  const d = el("div","misc");
+  const rightWrap = ()=>{
+    const w = el("span");
+    w.style.cssText = "margin-left:auto;display:flex;align-items:center;gap:10px;flex:none";
+    return w;
+  };
+
+  // 1. 数据导出：项目下拉（含全部）+ 导出
+  {
+    const c = el("div","pcard");
+    c.appendChild(Object.assign(el("h3"),{textContent:t("xExport")}));
+    c.appendChild(Object.assign(el("div","pdesc"),{textContent:t("xExportDesc")}));
+    const r = el("div","prow"); r.style.margin = "0";
+    r.appendChild(Object.assign(el("span","k"),{textContent:t("xProject")}));
+    const sel = el("select","pselect");
+    [t("xAllProjects")].concat(PROJECTS.map(p=>p.name)).forEach(n=>{
+      const op = el("option"); op.value=n; op.textContent=n; sel.appendChild(op);
+    });
+    r.appendChild(sel);
+    const right = rightWrap();
+    if(state.miscFb==="export") right.appendChild(miscFbSpan(t("xExported")));
+    const btn = el("button","btn"); btn.textContent = t("xDoExport");
+    btn.onclick = ()=>flashMiscFb("export");
+    right.appendChild(btn); r.appendChild(right); c.appendChild(r);
+    d.appendChild(c);
+  }
+  // 2. 数据导入：选 zip 文件 + 导入（未选文件时禁用）
+  {
+    const c = el("div","pcard");
+    c.appendChild(Object.assign(el("h3"),{textContent:t("xImport")}));
+    c.appendChild(Object.assign(el("div","pdesc"),{textContent:t("xImportDesc")}));
+    const r = el("div","prow"); r.style.margin = "0";
+    r.appendChild(Object.assign(el("span","k"),{textContent:t("xFile")}));
+    const fi = el("input"); fi.type = "file"; fi.accept = ".zip";
+    fi.style.cssText = "font-size:12px;color:var(--muted)";
+    r.appendChild(fi);
+    const right = rightWrap();
+    if(state.miscFb==="import") right.appendChild(miscFbSpan(t("xImported")));
+    const btn = el("button","btn"); btn.textContent = t("xDoImport"); btn.disabled = true;
+    fi.onchange = ()=>{ btn.disabled = !fi.files.length; };
+    btn.onclick = ()=>flashMiscFb("import");
+    right.appendChild(btn); r.appendChild(right); c.appendChild(r);
+    d.appendChild(c);
+  }
+  // 3/4. 更新日志 / 使用帮助：详情行右端「查看」→ markdown 文档弹窗
+  [["xChlog","xChlogDesc",MISC_CHANGELOG_MD],["xHelp","xHelpDesc",MISC_HELP_MD]].forEach(([tk,dk,md])=>{
+    const c = el("div","pcard");
+    c.appendChild(Object.assign(el("h3"),{textContent:t(tk)}));
+    const r = el("div","prow"); r.style.margin = "0";
+    const dsc = Object.assign(el("span","pdesc"),{textContent:t(dk)});
+    dsc.style.margin = "0";
+    r.appendChild(dsc);
+    const right = rightWrap();
+    const btn = el("button","btn"); btn.textContent = t("xView");
+    btn.onclick = ()=>{ state.miscDoc = { title:t(tk), md:md }; render(); };
+    right.appendChild(btn); r.appendChild(right); c.appendChild(r);
+    d.appendChild(c);
+  });
+  // 5. 删除项目知识库（危险卡）：项目下拉 + 删除… → 确认弹窗
+  {
+    const c = el("div","pcard danger");
+    c.appendChild(Object.assign(el("h3"),{textContent:t("xDel")}));
+    c.appendChild(Object.assign(el("div","pdesc"),{textContent:t("xDelDesc")}));
+    const r = el("div","prow"); r.style.margin = "0";
+    r.appendChild(Object.assign(el("span","k"),{textContent:t("xProject")}));
+    const sel = el("select","pselect");
+    PROJECTS.forEach(p=>{
+      const op = el("option"); op.value=p.name; op.textContent=p.name; sel.appendChild(op);
+    });
+    r.appendChild(sel);
+    const right = rightWrap();
+    if(state.miscFb.startsWith("del:"))
+      right.appendChild(miscFbSpan(t("xDeleted").replace("{p}", state.miscFb.slice(4))));
+    const btn = el("button","btn btn-danger"); btn.textContent = t("xDelBtn");
+    btn.disabled = !PROJECTS.length;
+    btn.onclick = ()=>{ state.delTarget = sel.value; render(); };
+    right.appendChild(btn); r.appendChild(right); c.appendChild(r);
+    d.appendChild(c);
+  }
+  // 6. 关于
+  {
+    const c = el("div","pcard");
+    c.appendChild(Object.assign(el("h3"),{textContent:t("xAbout")}));
+    const v = el("div","about-line"); v.textContent = t("xVer")+"：OkManager v2.18.2（prototype）";
+    const h = el("div","about-line");
+    h.appendChild(document.createTextNode(t("xHome")+"："));
+    h.appendChild(Object.assign(el("span","mono"),{textContent:"C:\\Users\\Administrator\\.ok"}));
+    const n = el("div","about-line"); n.textContent = t("xProjCount")+"："+PROJECTS.length+t("xProjUnit");
+    c.appendChild(v); c.appendChild(h); c.appendChild(n);
+    d.appendChild(c);
+  }
+
+  if(state.miscDoc) d.appendChild(renderDocModal());
+  if(state.delTarget) d.appendChild(renderDelModal());
+  return d;
+}
+
+/* 更新日志 / 使用帮助共用的 markdown 文档弹窗（对应现有 GUI 的 changelog-modal 复用 help.md） */
+function renderDocModal(){
+  const mask = el("div","mask");
+  const m = el("div","modal");
+  m.appendChild(Object.assign(el("h3"),{textContent:state.miscDoc.title}));
+  const body = el("div","md");
+  body.innerHTML = renderMd(state.miscDoc.md);
+  m.appendChild(body);
+  const foot = el("div","mfoot");
+  const ok = el("button","btn btn-primary"); ok.textContent = t("xGotIt");
+  ok.onclick = ()=>{ state.miscDoc = null; render(); };
+  foot.appendChild(ok);
+  m.appendChild(foot);
+  mask.appendChild(m);
+  mask.onclick = e=>{ if(e.target===mask){ state.miscDoc = null; render(); } };
+  return mask;
+}
+
+/* 删除项目知识库确认弹窗：备份勾选 + 后果确认勾选 + 输入完整项目名，三者齐备才解锁「永久删除」 */
+function renderDelModal(){
+  const p = PROJECTS.find(x=>x.name===state.delTarget);
+  if(!p){ state.delTarget = null; return el("div"); }
+  const mask = el("div","mask");
+  const m = el("div","modal");
+  m.appendChild(Object.assign(el("h3"),{textContent:t("xDel")}));
+  const impact = el("div","pdesc");
+  impact.textContent = t("xDelImpact").replace("{p}",p.name).replace("{n}",p.entries.length);
+  m.appendChild(impact);
+  const backup = el("input"); backup.type = "checkbox"; backup.checked = true; backup.className = "radio";
+  const lb = el("label","prow"); lb.style.margin = "6px 0";
+  lb.appendChild(backup); lb.appendChild(document.createTextNode(t("xDelBackup")));
+  m.appendChild(lb);
+  const ack = el("input"); ack.type = "checkbox"; ack.className = "radio";
+  const la = el("label","prow"); la.style.margin = "6px 0";
+  la.appendChild(ack); la.appendChild(document.createTextNode(t("xDelAck")));
+  m.appendChild(la);
+  const nameRow = el("div","prow");
+  nameRow.appendChild(Object.assign(el("span","k"),{textContent:t("xDelHint")}));
+  const nameIn = ptext("", ()=>{}, "220px");
+  nameIn.placeholder = p.name;
+  nameRow.appendChild(nameIn);
+  m.appendChild(nameRow);
+  const foot = el("div","mfoot");
+  const cancel = el("button","btn"); cancel.textContent = t("fCancel");
+  cancel.onclick = ()=>{ state.delTarget = null; render(); };
+  const confirm = el("button","btn btn-danger"); confirm.textContent = t("xDelConfirm");
+  confirm.disabled = true;
+  const upd = ()=>{ confirm.disabled = !(ack.checked && nameIn.value.trim()===p.name); };
+  ack.onchange = upd; nameIn.oninput = upd;
+  confirm.onclick = ()=>{
+    const idx = PROJECTS.indexOf(p);
+    if(idx>=0) PROJECTS.splice(idx,1);
+    delete state.open[p.name];
+    if(state.sel && p.entries.indexOf(state.sel)>=0) state.sel = null;
+    state.delTarget = null;
+    flashMiscFb("del:"+p.name);
+  };
+  foot.appendChild(cancel); foot.appendChild(confirm);
+  m.appendChild(foot);
+  mask.appendChild(m);
+  mask.onclick = e=>{ if(e.target===mask){ state.delTarget = null; render(); } };
+  return mask;
+}
+
+/* 刷新恢复选中菜单：菜单点击时写入 location.hash，启动时读回（非法值回退 manage） */
+(function(){
+  const h = location.hash.replace(/^#/,"");
+  if(MENUS.some(m=>m.key===h)) state.menu = h;
+})();
+
+render();
+</script>
+</body>
+</html>
