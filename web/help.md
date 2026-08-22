@@ -23,12 +23,13 @@ OpenKnowledge 是 AI 编码助手的**本地知识库**：把项目经验、规�
 
 - **生效时机**：kimi / pi / zcode 的 hook 配置在**新开会话**时加载；reasonix 以插件形式安装，新会话生效（会话中 `/reload` 可重载）
 
-### GUI（`ok gui` 或托盘双击）
+### GUI（`ok gui` 或托盘双击 / OkManager）
 
-- **管理**：条目增删改查、草稿"采纳"、按项目/类型/分支过滤、搜索
-- **引导**：安装/重装各 agent 集成、hook 超时、enforce 三档（reasonix）、embedding 语义检索
-- **其他**：数据导出/导入（zip 备份）、更新日志、本帮助
+- **管理**：项目→条目两级树（类型/草稿/归档/mandatory 徽标 + 标题过滤）、markdown 详情、条目增删改、草稿"批准"、归档/取消归档、✨ 优化（需配 LLM）
+- **引导**：各 agent 检测/安装/卸载、技能安装状态、enforce 三档（reasonix 检测到时显示）
+- **设置**：全局开关、语义检索（embedding，含内置模型下载）、模型配置（LLM）、Hook 超时、跨轮注入冷却、经验沉淀、泛化门控、规则配置
 - **日志**：ok / 守护 / embedding 三来源实时日志（2 秒轮询）；来源 chips 多选 +「仅语义」开关 + 文本过滤；「仅语义」可观察 `prompt semantic` 诊断行（语义通道整体拒绝时的样本/max/median/relGap）
+- **其他**：数据导出/导入（zip 备份）、更新日志（升级后首次打开自动弹出）、本帮助、删除项目知识库、关于
 
 ### CLI 速查
 
@@ -42,7 +43,7 @@ OpenKnowledge 是 AI 编码助手的**本地知识库**：把项目经验、规�
 - `ok wiki status / mark / base / diff`——wiki 状态 / 记游标 / 基准分支 / 分支结构差异
 - `ok doctor`——体检：逐 agent 的 hooks 安装状态
 - `ok on` / `ok off`——全局开关（off 后所有注入与检查暂停）
-- `ok gui`——打开管理界面
+- `ok gui`——打开配置中心（OkManager 五页界面）
 
 ### daemon 与托盘
 
@@ -52,20 +53,20 @@ daemon 常驻后台、按需自动拉起，无需手动管理；托盘图标右�
 
 ### 全局配置 `~/.openknowledge/config.toml`
 
-- `[hooks] timeout_sec`（默认 10）——hook 超时秒数，过短在高负载下会被宿主静默杀死。改法：GUI 引导页"hook 超时"卡（保存后自动重写所有 agent），或手改后重跑 `ok setup`
+- `[hooks] timeout_sec`（默认 10）——hook 超时秒数，过短在高负载下会被宿主静默杀死。改法：GUI 设置页"Hook 超时"卡（只写配置、不重装 hooks，下次安装/自愈时生效），或手改后重跑 `ok setup`
 - `[embedding]`（语义检索，可选；不配则纯关键词检索，照样可用）——三套服务配置（profile）存一处、`active` 指定"使用中"，三种形态任选：
   - **自定义（openai）**：任何 OpenAI 兼容服务（线上或自建）。填 `base_url` / `model` / `api_key`（key 可留空适配无鉴权本地服务，也可用 `api_key_env` 指向环境变量）
-  - **Ollama**：先安装 Ollama 并 `ollama pull bge-m3`（或其他 embedding 模型），然后填 `base_url`（默认 `http://127.0.0.1:11434`，也可是局域网地址）与模型名，免 key；GUI/CLI 会自动探测已拉取的模型列表
+  - **Ollama**：先安装 Ollama 并 `ollama pull bge-m3`（或其他 embedding 模型），然后填 `base_url`（默认 `http://127.0.0.1:11434`，也可是局域网地址）与模型名（手输；仅 CLI `ok setup` 会自动探测已拉取的模型列表），免 key
   - **内置（builtin，仅安装版）**：ok 托管的 llama.cpp 本地模型，**完全离线、知识不出本机**。选模型（4 档，默认 Qwen3-Embedding-0.6B 约 639MB，各档体积约 146MB–639MB）→ 选镜像（默认 hf-mirror 国内镜像）→ 下载 → 设为使用中。首次拉起需数秒到一分钟，期间自动降级为关键词检索、就绪后自动恢复语义检索；**切换模型后跑一次 `ok index` 重建向量**（会提示）。模型目录默认 `<安装目录>/models`，弹窗"模型目录"行可改（`[embedding] models_dir`；已有模型文件不随迁，状态按新目录判定）并可直接"打开文件夹"
-  - 改法：GUI 引导页 embedding 卡"配置…"弹窗（左列表右表单，显式"设为使用中"），或 `ok setup` 交互向导（三选一，带下载进度与连通性验证）；`timeout_sec` 默认 5 秒
-- `[reasonix] enforce_mode`（默认 mixed）——reasonix 强制检查表达：soft 全软提示 / hard 全硬阻断 / mixed 软+硬。改法：GUI 引导页三档卡（仅选中 reasonix 时显示），**即时生效**
+  - 改法：GUI 设置页"语义检索"卡"配置…"弹窗（左列表右表单，显式"设为使用中"），或 `ok setup` 交互向导（三选一，带下载进度与连通性验证）；`timeout_sec` 默认 5 秒
+- `[reasonix] enforce_mode`（默认 mixed）——reasonix 强制检查表达：soft 全软提示 / hard 全硬阻断 / mixed 软+硬。改法：GUI 引导页 reasonix 卡三档（检测到 reasonix 才显示），**即时生效**
 
 ### 项目配置（知识库根目录 `config.toml`）
 
-- `[capture] mode`（默认 propose）——沉淀模式：propose=AI 自主判断 / auto=到间隔自动提醒。改法：GUI 管理页"经验沉淀"卡，或 `ok capture`
+- `[capture] mode`（默认 propose）——沉淀模式：propose=AI 自主判断 / auto=到间隔自动提醒。改法：GUI 设置页"经验沉淀"卡（写全局配置），或 `ok capture`（写项目配置）
 - `[capture] turn_interval`（默认 5）——auto 模式的提醒间隔（回合数）。改法：同上
-- `[provenance] auto_born`（默认 true）——新建条目自动记录出生分支（born 标签）。改法：GUI 管理页"经验沉淀"卡 checkbox，或手改文件
-- `[enforce]`（默认空）——强制检查规则（如 changelog_required：改了代码必须更新 CHANGELOG，否则阻断）。改法：手改文件
+- `[provenance] auto_born`（默认 true）——新建条目自动记录出生分支（born 标签）。改法：手改文件
+- `[enforce]`（默认空）——强制检查规则（如 changelog_required：改了代码必须更新 CHANGELOG，否则阻断）。改法：GUI 设置页"规则配置"卡（写全局配置），或手改文件
 - `[wiki] stale_commits`（默认 20）——wiki 落后多少 commit 开始提醒；0 = 关闭提醒。改法：手改文件
 - `[retrieve] top_n`（默认 2）——每次注入最多检索命中条数。改法：手改文件
 - `[retrieve] min_score`（默认 0.5，≤0 关闭）——注入的最低置信阈值（关键词/语义通道独立判定，宁缺毋滥不凑 top_n；随库规模缩放）

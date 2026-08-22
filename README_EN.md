@@ -52,12 +52,13 @@ When done you land on the Manage tab, where day-to-day entry maintenance is all 
   <sub>Manage tab: project / entry list, search preview and the global switch</sub>
 </p>
 
-| Tab | What it offers |
-|-----|----------------|
-| **Manage** | Create/edit/delete projects and entries, search preview, global switch; drafts carry a badge and can be promoted with one click |
-| **Guide** | Hooks, skills and embedding in one place (the graphical equivalent of `ok setup`), plus an uninstall card |
-| **Misc** | Data export/import (zip backup & restore), changelogs, delete a project's knowledge base (triple confirmation) |
+| Menu | What it offers |
+|------|----------------|
+| **Manage** | Project→entry tree (type/draft/archive badges + title filter), markdown detail, entry CRUD; one-click draft approval, ✨ polish (requires LLM) |
+| **Guide** | Per-agent detect/install/uninstall and skills status (the graphical equivalent of `ok setup`); reasonix enforce-mode tiers |
+| **Settings** | Global switch, embedding, LLM, hook timeout, injection cooldown, capture, gate, enforce rules |
 | **Logs** | Live tails of ok / daemon / embedding logs with multi-select filters |
+| **Misc** | Data export/import (zip backup & restore), changelogs, delete a project's knowledge base (triple confirmation) |
 
 The GUI is hosted by a single system-wide resident daemon — closing the page doesn't stop it; `ok daemon stop` does. Prefer the terminal? `ok setup` is the CLI equivalent of the Guide tab (idempotent, safe to re-run), and `ok doctor` health-checks config and hooks.
 
@@ -134,7 +135,7 @@ Body (free-form Markdown)
 | Command | Purpose |
 |---------|---------|
 | `ok setup` | First-run wizard: hooks + skills + embedding configuration |
-| `ok gui` | Launch the web admin UI (same as double-clicking the exe) |
+| `ok gui` | Open the config center (same as double-clicking the exe; OkManager.exe is the same entry) |
 | `ok init [name]` | Register the current project; also idempotently writes/updates hook configuration |
 | `ok add` / `ok list` | Create an entry / list projects and entries |
 | `ok propose` / `ok approve <file>` | AI proposes a draft / promote it |

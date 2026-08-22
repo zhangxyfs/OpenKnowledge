@@ -4,8 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/BurntSushi/toml"
+
+	"openknowledge/internal/fsx"
 )
 
 // EmbeddingProfile 是一套 embedding 服务配置。Type：openai（OpenAI 兼容线上/自建）、
@@ -336,4 +340,81 @@ func LoadMerged(projectPath, globalPath string) (Config, error) {
 	}
 	cfg.Embedding.migrateLegacy()
 	return cfg, nil
+}
+
+// SetEnforceRules 行级重写 config.toml 的 [[enforce]] 数组：定位全部 [[enforce]]
+// 块（0 个或多个连续表数组块）整体删除，在首个块原位按 rules 重写；无区块时在
+// 文件末尾追加；空数组 = 删除全部 [[enforce]] 块。其余内容（含注释）原样保留。
+// 算法与 SetGate/SetCapture 同款（行级小节写入），差别仅在多块定位与重写。
+func SetEnforceRules(path string, rules []EnforceRule) error {
+	var sb strings.Builder
+	for _, r := range rules {
+		sb.WriteString("[[enforce]]\ntype = ")
+		sb.WriteString(strconv.Quote(r.Type))
+		sb.WriteString("\ncode_globs = [")
+		for i, g := range r.CodeGlobs {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			sb.WriteString(strconv.Quote(g))
+		}
+		sb.WriteString("]\nchangelog_glob = ")
+		sb.WriteString(strconv.Quote(r.ChangelogGlob))
+		sb.WriteString("\nmessage = ")
+		sb.WriteString(strconv.Quote(r.Message))
+		sb.WriteString("\n")
+	}
+	block := sb.String()
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return fsx.WriteFile(path, []byte(block), 0o644)
+	}
+	if err != nil {
+		return err
+	}
+	lines := strings.Split(string(data), "\n")
+	// 收集全部 [[enforce]] 块的行区间 [start, end)（end 为下一个 [ 开头行或文件尾）
+	type span struct{ start, end int }
+	var spans []span
+	for i := 0; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) != "[[enforce]]" {
+			continue
+		}
+		end := len(lines)
+		for j := i + 1; j < len(lines); j++ {
+			if strings.HasPrefix(strings.TrimSpace(lines[j]), "[") {
+				end = j
+				break
+			}
+		}
+		spans = append(spans, span{i, end})
+		i = end - 1
+	}
+	var out []string
+	if len(spans) == 0 {
+		out = append(out, lines...)
+		if block != "" {
+			// 与上文保持空行分隔
+			if n := len(out); n > 0 && strings.TrimSpace(out[n-1]) != "" {
+				out = append(out, "")
+			}
+			out = append(out, strings.TrimSuffix(block, "\n"))
+		}
+	} else {
+		removed := make([]bool, len(lines))
+		for _, s := range spans {
+			for k := s.start; k < s.end; k++ {
+				removed[k] = true
+			}
+		}
+		for i, l := range lines {
+			if i == spans[0].start && block != "" {
+				out = append(out, strings.TrimSuffix(block, "\n"))
+			}
+			if !removed[i] {
+				out = append(out, l)
+			}
+		}
+	}
+	return fsx.WriteFile(path, []byte(strings.Join(out, "\n")), 0o644)
 }

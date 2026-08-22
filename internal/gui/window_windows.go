@@ -31,7 +31,7 @@ var (
 const swMaximize = 3
 
 // browserExes 允许最大化的窗口所属进程（小写 exe 名）。
-// 仅靠标题匹配会误中资源管理器（打开安装目录时标题含 "OpenKnowledge"）、
+// 仅靠标题匹配会误中资源管理器（打开的目录名含匹配子串时标题即目录名）、
 // 终端（cwd 在项目目录）等窗口，EnumWindows 按 Z 序先命中谁就最大化谁。
 var browserExes = map[string]bool{
 	"msedge.exe":   true,

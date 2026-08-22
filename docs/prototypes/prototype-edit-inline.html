@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>PROTOTYPE · 条目编辑内联化（详情区三态）</title>
+<!--
+  一次性原型（throwaway）：管理页条目「编辑弹窗 → 详情区内联编辑」改版稿。
+  背景：v2 管理页的条目编辑沿用 640px 弹窗（见 web/app.js editModal_open），正文只有 10 行 textarea，太小。
+  本稿：点「编辑」后右侧详情区直接进入编辑模式，三态切换——
+    只读态（read）：照抄 prototype-manager-v2.html 的 renderDetail 文档流（d-path/d-filemeta/d-title/d-attrs/d-summary/d-body），
+                    d-attrs 行右端放「编辑」按钮；
+    编辑态（edit）：顶部操作行 = 取消 / 保存 / ✨优化（保存成功后三按钮随编辑态一起消失，回到只读详情）；
+                    字段排布 = 标题整行 → 类型/tags/mandatory 收进一行 → 摘要整行 → 正文 textarea 撑满剩余高度（主要诉求）；
+    优化对照态（cmp）：✨优化后进入——小字段（标题/tags/摘要）在上做 old→new 紧凑对照（可逐字段回填），
+                    正文区左右分栏对照（原内容 | 优化后），顶部「全部接受并回填 / 放弃」；
+                    接受/放弃都回到编辑态（回填只改表单，点「保存」才落盘——沿用生产语义 web/app.js openCmpModal）。
+  DOM 结构/类名照抄 prototype-manager-v2.html 管理页（topbar/side/tree/detail/badge/md/btn/pinput），
+  cmp-* 配色照抄 web/style.css 对照预览弹窗；树为简化静态假数据。
+  右下角「演示控制」条为原型专用（非产品 UI），直接切三态；也支持 #edit / #cmp 锚点。
+-->
+<style>
+  :root {
+    --bg:#f5f6f8; --fg:#1f2329; --muted:#6b7280; --border:#d9dce1;
+    --card:#ffffff; --primary:#2563eb; --sel-bg:#eff6ff; --sel-fg:#1d4ed8;
+    --hover:#f3f4f6; --menu-bg:#ffffff; --code-bg:#f1f5f9; --pre-bg:#14171f; --pre-fg:#d6dae4;
+    --born-bg:#4E5D73; --born-fg:#fff;
+    --pitfall-bg:#fee2e2; --pitfall-fg:#b91c1c;
+    --note-bg:#dbeafe; --note-fg:#1d4ed8;
+    --rule-bg:#ede9fe; --rule-fg:#6d28d9;
+    --ref-bg:#e0e7ff; --ref-fg:#3730a3;
+    --mand-bg:#fef3c7; --mand-fg:#92400e;
+    --draft-fg:#6b7280; --draft-bd:#d1d5db;
+    --tag-bg:#eef2f7; --tag-fg:#475569;
+    --ok:#16a34a; --ok-bg:#dcfce7;
+  }
+  [data-theme="dark"] {
+    --bg:#14171f; --fg:#d6dae4; --muted:#8a8f9c; --border:#262c38;
+    --card:#1a1f2a; --primary:#79b8ff; --sel-bg:#24304a; --sel-fg:#79b8ff;
+    --hover:#1f2430; --menu-bg:#0f1218; --code-bg:#0f1218; --pre-bg:#0f1218; --pre-fg:#d6dae4;
+    --born-bg:#4E5D73; --born-fg:#fff;
+    --pitfall-bg:#3f1d1d; --pitfall-fg:#f87171;
+    --note-bg:#1e2a45; --note-fg:#79b8ff;
+    --rule-bg:#2a2340; --rule-fg:#c4b5fd;
+    --ref-bg:#232a45; --ref-fg:#a5b4fc;
+    --mand-bg:#3a2f14; --mand-fg:#fbbf24;
+    --draft-fg:#8a8f9c; --draft-bd:#3a4150;
+    --tag-bg:#232a38; --tag-fg:#aab2c0;
+    --ok:#4ade80; --ok-bg:#14301e;
+  }
+  * { box-sizing:border-box; }
+  html,body { height:100%; }
+  body { margin:0; font:14px/1.6 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+         background:var(--bg); color:var(--fg); transition:background .15s,color .15s; }
+  button { font:inherit; color:inherit; }
+
+  .proto-banner { position:fixed; top:10px; right:230px; z-index:99; background:#fff7ed; border:1px solid #fdba74; color:#9a3412; padding:3px 10px; border-radius:6px; font-size:12px; }
+  [data-theme="dark"] .proto-banner { background:#3a2a14; }
+  /* 演示控制条：原型专用，直接切详情区三态（非产品 UI） */
+  .demo-bar { position:fixed; right:18px; bottom:16px; z-index:99; background:#fff7ed; border:1px solid #fdba74;
+              color:#9a3412; border-radius:8px; padding:6px 10px; display:flex; align-items:center; gap:6px; font-size:12px; }
+  [data-theme="dark"] .demo-bar { background:#3a2a14; }
+  .demo-bar button { border:1px solid #fdba74; background:none; color:inherit; border-radius:5px; padding:2px 10px; cursor:pointer; font-size:12px; }
+  .demo-bar button.on { background:#9a3412; color:#fff7ed; }
+
+  /* ---------- 顶栏（照抄 v2） ---------- */
+  .topbar { display:flex; align-items:center; gap:10px; height:52px; padding:0 14px;
+            background:var(--card); border-bottom:1px solid var(--border); }
+  .collapse-btn { width:32px; height:32px; border:none; background:none; border-radius:6px;
+                  cursor:pointer; color:var(--muted); display:flex; align-items:center; justify-content:center; }
+  .collapse-btn:hover { background:var(--hover); color:var(--fg); }
+  .brand { font-weight:700; font-size:15px; display:flex; align-items:center; gap:8px; }
+  .brand .logo { width:22px; height:22px; border-radius:6px; background:var(--primary); color:#fff;
+                 display:flex; align-items:center; justify-content:center; font-size:12px; }
+  .lang-seg { display:flex; border:1px solid var(--border); border-radius:999px; overflow:hidden; margin-left:auto; }
+  .lang-seg button { border:none; background:none; padding:4px 12px; cursor:pointer; font-size:12px; color:var(--muted); }
+  .lang-seg button.on { background:var(--fg); color:var(--bg); font-weight:600; }
+  .theme-btn { width:32px; height:32px; border:none; background:none; border-radius:999px;
+               cursor:pointer; color:var(--muted); display:flex; align-items:center; justify-content:center; }
+  .theme-btn:hover { background:var(--hover); color:var(--fg); }
+
+  /* ---------- 主体 / 侧栏（照抄 v2） ---------- */
+  .main { display:flex; height:calc(100vh - 52px); }
+  .side { width:180px; background:var(--menu-bg); border-right:1px solid var(--border);
+          padding:10px 8px; display:flex; flex-direction:column; gap:2px;
+          transition:width .15s; overflow:hidden; flex:none; }
+  .side.collapsed { width:52px; padding:10px 4px; }
+  .mi { display:flex; align-items:center; gap:10px; padding:9px 12px; border:none; background:none;
+        border-radius:6px; color:var(--muted); cursor:pointer; text-align:left; width:100%; white-space:nowrap; }
+  .mi:hover { background:var(--hover); color:var(--fg); }
+  .mi.active { background:var(--sel-bg); color:var(--sel-fg); font-weight:600; }
+  .mi .ico { width:18px; flex:none; display:flex; align-items:center; justify-content:center; }
+  .mi .tip { display:none; }
+  .side.collapsed .mi { padding:9px 0; justify-content:center; position:relative; }
+  .side.collapsed .mi .txt { display:none; }
+  .side.collapsed .mi .tip { position:fixed; margin-left:46px; margin-top:-30px; background:#111827; color:#fff;
+                             font-size:12px; padding:3px 10px; border-radius:4px; white-space:nowrap; z-index:50; }
+  .side.collapsed .mi:hover .tip { display:block; }
+
+  /* 树（照抄 v2：过滤框 + 紧凑叶节点） */
+  .tree { width:272px; background:var(--card); border-right:1px solid var(--border);
+          display:flex; flex-direction:column; flex:none; }
+  .tree-head { padding:10px 10px 6px; display:flex; gap:6px; align-items:center; }
+  .tree-head .caption { font-size:12px; font-weight:600; color:var(--muted); margin-right:auto; }
+  .search { margin:0 10px 8px; padding:5px 10px; border:1px solid var(--border); border-radius:6px;
+            width:calc(100% - 20px); background:var(--bg); color:var(--fg); font-size:12.5px; }
+  .search::placeholder { color:var(--muted); }
+  .tree-scroll { overflow-y:auto; flex:1; padding:0 6px 10px; }
+  .tn-proj { display:flex; align-items:center; gap:5px; width:100%; border:none; background:none;
+             padding:5px 8px; border-radius:6px; cursor:pointer; font-weight:600; text-align:left; font-size:13px; }
+  .tn-proj:hover { background:var(--hover); }
+  .tn-proj .caret { width:12px; color:var(--muted); transition:transform .12s; flex:none; font-size:10px; }
+  .tn-proj.open .caret { transform:rotate(90deg); }
+  .tn-proj .folder { color:var(--muted); display:flex; flex:none; }
+  .tn-proj .cnt { margin-left:auto; color:var(--muted); font-size:11px; font-weight:400; }
+  .tn-kids { margin-left:15px; border-left:1px solid var(--border); padding-left:4px; }
+  .leaf { display:block; width:100%; border:none; background:none; text-align:left;
+          padding:4px 7px; border-radius:6px; cursor:pointer; }
+  .leaf:hover { background:var(--hover); }
+  .leaf.sel { background:var(--sel-bg); box-shadow:inset 2px 0 0 var(--primary); }
+  .leaf .l1 { display:flex; gap:4px; align-items:center; }
+  .leaf .t2 { display:block; font-size:12.5px; line-height:1.45; color:var(--fg); overflow:hidden; text-overflow:ellipsis;
+              white-space:nowrap; }
+  .leaf.sel .t2 { color:var(--sel-fg); }
+
+  /* 详情（照抄 v2 文档流） */
+  .detail { flex:1; overflow-y:auto; padding:20px 28px 60px; }
+  .d-path { font:12px/1.5 "Cascadia Code",Consolas,monospace; color:var(--muted); word-break:break-all; }
+  .d-filemeta { color:var(--muted); font-size:13px; margin-top:2px; }
+  .d-filemeta b { color:var(--fg); font-weight:600; }
+  .d-title { font-size:20px; margin:10px 0 6px; }
+  .d-attrs { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-bottom:10px; }
+  .d-summary { background:var(--card); border:1px solid var(--border); border-left:3px solid var(--primary);
+               border-radius:6px; padding:10px 14px; margin-bottom:16px; }
+  .d-body { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:18px 22px; }
+
+  /* 徽标（照抄 v2） */
+  .badge-born { background:var(--born-bg); color:var(--born-fg); border-radius:3px; padding:0 4px;
+                font-size:10px; line-height:16px; white-space:nowrap; display:inline-flex; align-items:center; gap:2px; }
+  .badge-type { border-radius:3px; padding:0 4px; display:inline-flex; align-items:center; justify-content:center;
+                font-size:10px; line-height:16px; white-space:nowrap; flex:none; }
+  .leaf .badge-type { width:16px; height:16px; padding:0; }
+  .t-pitfall   { background:var(--pitfall-bg); color:var(--pitfall-fg); }
+  .t-note      { background:var(--note-bg); color:var(--note-fg); }
+  .t-rule      { background:var(--rule-bg); color:var(--rule-fg); }
+  .t-reference { background:var(--ref-bg); color:var(--ref-fg); }
+  .badge-mand  { background:var(--mand-bg); color:var(--mand-fg); border-radius:3px; padding:0 4px; font-size:10px; line-height:16px; }
+  .badge-draft { background:none; color:var(--draft-fg); border:1px dashed var(--draft-bd); border-radius:3px; padding:0 4px; font-size:10px; line-height:14px; }
+  .tag { background:var(--tag-bg); color:var(--tag-fg); border-radius:4px; padding:0 6px; font-size:12px; }
+  .d-attrs .badge-type, .d-attrs .badge-born, .d-attrs .badge-mand, .d-attrs .badge-draft { font-size:12px; line-height:20px; }
+  .d-attrs .badge-type { width:auto; height:auto; padding:0 6px; }
+
+  /* markdown 正文（照抄 v2） */
+  .md h1 { font-size:18px; margin:18px 0 8px; }
+  .md h2 { font-size:16px; margin:16px 0 6px; }
+  .md h3 { font-size:14px; margin:14px 0 6px; }
+  .md p { margin:8px 0; }
+  .md code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font:13px "Cascadia Code",Consolas,monospace; }
+  .md pre { background:var(--pre-bg); color:var(--pre-fg); border-radius:8px; padding:12px 14px; overflow-x:auto; }
+  .md pre code { background:none; color:inherit; padding:0; }
+  .md ul,.md ol { margin:8px 0; padding-left:24px; }
+
+  .placeholder { flex:1; display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:15px; }
+
+  /* 按钮 / 输入控件（照抄 v2） */
+  .btn { padding:6px 14px; border:1px solid var(--border); border-radius:6px; background:var(--card);
+         font-size:13px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
+  .btn:hover:not(:disabled) { border-color:var(--primary); color:var(--primary); }
+  .btn:disabled { opacity:.5; cursor:not-allowed; border-color:var(--border); color:var(--muted); }
+  .btn-primary:disabled { background:var(--hover); border-color:var(--border); color:var(--muted); opacity:1; filter:none; }
+  .btn-primary { background:var(--primary); border-color:var(--primary); color:#fff; }
+  .btn-primary:hover:not(:disabled) { color:#fff; filter:brightness(1.08); }
+  .pinput, .pselect { padding:5px 10px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--fg); font-size:13px; }
+  .pinput:focus, .pselect:focus { outline:none; border-color:var(--primary); }
+  .radio { accent-color:var(--primary); }
+  .fb2 { font-size:12px; color:var(--ok); }
+
+  /* ================================================================
+     编辑态（本稿新增）：详情区变等高 flex 列——顶部操作行 + 字段组 + 正文撑满
+     ================================================================ */
+  .detail.editing { display:flex; flex-direction:column; overflow:hidden; padding-bottom:20px; }
+  .editbar { display:flex; align-items:center; gap:8px; margin:8px 0 14px; flex:none; }
+  .editbar .eb-title { font-size:14px; font-weight:600; display:flex; align-items:center; gap:8px; }
+  .editbar .eb-sub { color:var(--muted); font-size:12px; font-weight:400; }
+  .editbar .eb-acts { margin-left:auto; display:flex; align-items:center; gap:8px; }
+  /* 字段组：小标签在上、控件在下；标签不吃固定宽，纵向排布给正文让位 */
+  .ef { margin-bottom:10px; flex:none; }
+  .ef-label { font-size:12px; color:var(--muted); font-weight:600; margin-bottom:4px; }
+  .ef .pinput { width:100%; }
+  /* 元信息行：类型/tags/mandatory 三个小控件收进一行，tags 弹性占满 */
+  .ef-meta { display:flex; gap:14px; align-items:flex-end; flex-wrap:wrap; }
+  .ef-meta .ef { margin-bottom:0; }
+  .ef-meta .ef-tags { flex:1; min-width:220px; }
+  .ef-mand { display:flex; align-items:center; gap:6px; padding-bottom:6px; font-size:13px; cursor:pointer; }
+  /* 正文：分组占满剩余高度（主要诉求），textarea 不允许拖拽变形 */
+  .ef-grow { flex:1; display:flex; flex-direction:column; min-height:0; margin-bottom:0; }
+  .ef-grow .ef-label { display:flex; align-items:center; gap:8px; }
+  .ef-grow .ef-label .hint { font-weight:400; }
+  textarea.ef-body { flex:1; min-height:0; resize:none; font:13px/1.7 Consolas,"Cascadia Code",monospace; }
+
+  /* ================================================================
+     优化对照态（本稿新增）：小字段紧凑 old→new 对照 + 正文左右分栏。
+     cmp-* 配色照抄 web/style.css 对照预览弹窗（old=灰底 / new=绿底）。
+     ================================================================ */
+  .detail.compare { display:flex; flex-direction:column; overflow:hidden; padding-bottom:20px; }
+  .cmp-basis { font-size:12px; font-weight:400; color:var(--muted); }
+  .cmp-note { font-size:12px; color:var(--muted); }
+  .cmp-fill { font-size:12px; padding:1px 10px; }
+  .cmp-tag { display:inline-block; font-size:11px; border-radius:4px; padding:0 6px; }
+  .cmp-tag.old { background:var(--border); color:var(--muted); }
+  .cmp-tag.new { background:var(--ok); color:#fff; }
+  /* 小字段对照：一行一个，old（删除线灰）→ new（绿），右端单字段回填 */
+  .cmp-meta { flex:none; border:1px solid var(--border); border-radius:8px; background:var(--card);
+              padding:8px 14px; margin-bottom:12px; }
+  .cmp-mrow { display:flex; align-items:baseline; gap:10px; padding:4px 0; font-size:12.5px; }
+  .cmp-mrow + .cmp-mrow { border-top:1px dashed var(--border); }
+  .cmp-mrow .k { color:var(--muted); flex:none; font-weight:600; font-size:12px; white-space:nowrap; }
+  .cmp-mrow .old { color:var(--muted); text-decoration:line-through; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:34%; }
+  .cmp-mrow .arrow { color:var(--muted); flex:none; }
+  .cmp-mrow .new { color:var(--fg); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; min-width:0; }
+  .cmp-mrow .cmp-fill { margin-left:auto; flex:none; }
+  /* 正文分栏：两栏等高、各自滚动 */
+  .cmp-split { flex:1; display:flex; gap:12px; min-height:0; }
+  .cmp-pane { flex:1; display:flex; flex-direction:column; min-width:0; background:var(--card);
+              border:1px solid var(--border); border-radius:8px; overflow:hidden; }
+  .cmp-pane.new { border-color:var(--ok); }
+  .cmp-pane-head { padding:6px 12px; border-bottom:1px solid var(--border); font-size:12px; font-weight:600;
+                   display:flex; align-items:center; gap:8px; flex:none; }
+  .cmp-pane-head .cmp-fill { margin-left:auto; }
+  .cmp-pane-body { flex:1; overflow-y:auto; padding:12px 16px; font:13px/1.7 Consolas,"Cascadia Code",monospace;
+                   white-space:pre-wrap; word-break:break-word; }
+  .cmp-pane.old .cmp-pane-body { color:var(--muted); background:var(--hover); }
+</style>
+</head>
+<body>
+
+<div class="proto-banner">PROTOTYPE — 条目编辑内联化（详情区三态），不进生产；数据为样例</div>
+<div id="app"></div>
+
+<script>
+"use strict";
+/* ================= 样例数据（OpenKnowledge 真实条目节选，树简化） ================= */
+const PROJECTS = [
+  { name:"OpenKnowledge", root:"D:\\develop\\OpenKnowledge", entries:[
+    { file:"knowledge/Web-GUI.md", title:"Web GUI", type:"reference", born:"master",
+      tags:["wiki","gui"], mandatory:false, draft:false,
+      size:"4.6 KB", mtime:"2026-08-17 21:34",
+      summary:"四标签 SPA：管理/引导/其他/日志；v2.18.2 管理页归档入口；v2.9.0 删除项目知识库",
+      body:"单页 SPA（`web/index.html` + `web/app.js` + `web/style.css`），四个标签页：管理、引导、其他、日志。" },
+    { file:"knowledge/SQLite-读写并发致整轮注入静默跳过：开-WAL-+-NORMAL.md", title:"SQLite 读写并发致整轮注入静默跳过：开 WAL + NORMAL", type:"pitfall", born:"master",
+      tags:["sqlite","WAL","并发","注入"], mandatory:true, draft:false,
+      size:"1.8 KB", mtime:"2026-08-02 10:12",
+      summary:"kb.db 读写并发下 hook 注入整轮静默跳过；开 WAL + synchronous=NORMAL 后消失",
+      body:"hook 注入偶发整轮静默跳过，无报错。定位为 kb.db 读写并发：`index` 写事务与 `retrieve` 读相互阻塞，busy 超时后直接返回空。\n\n修复：\n\n```\nPRAGMA journal_mode=WAL;\nPRAGMA synchronous=NORMAL;\nPRAGMA busy_timeout=3000;\n```\n\n**教训**：SQLite 多进程读写必须开 WAL，默认 rollback journal 下读写互斥。" },
+    { file:"knowledge/GUI-开关类设置用勾选+保存按钮两段式，不用-change-即存.md", title:"GUI 开关类设置用勾选+保存按钮两段式，不用 change 即存", type:"note", born:"master",
+      tags:["gui","交互约定"], mandatory:false, draft:false,
+      size:"0.9 KB", mtime:"2026-07-30 15:02",
+      summary:"引导页开关统一勾选+保存按钮两段式（首例泛化门控），即存模式误触无反悔",
+      body:"引导页的开关类设置统一为**勾选 + 保存按钮**两段式，不用 change 即存。首例：泛化门控。" },
+    { file:"knowledge/daemon-进程模型.md", title:"daemon 进程模型", type:"reference", born:"master",
+      tags:["daemon","架构"], mandatory:false, draft:false,
+      size:"2.3 KB", mtime:"2026-08-10 18:20",
+      summary:"单实例端口即锁；daemon.json 凭证 + fingerprint 版本自检；hook 优先转发 daemon",
+      body:"`ok daemon` 以单实例运行：默认端口 17888 即锁，第二实例发现健康 daemon 即退出 0。" },
+    { file:"knowledge/混合检索准入必须按通道独立判定.md", title:"混合检索准入必须按通道独立判定", type:"pitfall", born:"master",
+      tags:["检索","混合检索","阈值"], mandatory:false, draft:true,
+      size:"1.2 KB", mtime:"2026-08-15 11:08",
+      summary:"同域语料余弦基线会顶穿总分阈值；关键词与向量通道必须各自过准入",
+      body:"混合检索中，同域语料的向量余弦基线天然偏高，会把总分顶穿阈值，导致弱相关条目注入。\n\n准入必须**按通道独立判定**，再融合排序。" },
+  ]},
+  { name:"Reasonix", root:"D:\\develop\\Reasonix", entries:[
+    { file:"knowledge/Reasonix-扩展-SDK：拦截器-err-非-nil-会吞掉-Continue.md", title:"Reasonix 扩展 SDK：拦截器 err 非 nil 会吞掉 Continue", type:"pitfall", born:"master",
+      tags:["reasonix","sidecar","fail-open"], mandatory:true, draft:false,
+      size:"1.3 KB", mtime:"2026-08-09 16:47",
+      summary:"sidecar 拦截器返回 err 非 nil 时宿主吞掉 Continue 决策，必须 fail-open",
+      body:"Reasonix sidecar 协议里，拦截器返回 `err != nil` 时宿主会吞掉 `Continue` 决策——放行语义丢失。\n\n扩展必须 **fail-open**：任何内部错误都映射为 Continue。" },
+  ]},
+];
+
+/* ✨优化的假返回（对照态演示用；字段语义照抄生产 /api/entry/optimize：title/tags/summary/body + usage） */
+const OPTIMIZED = {
+  title:"SQLite 读写并发致 hook 注入整轮静默跳过：开 WAL + synchronous=NORMAL",
+  tags:["sqlite","WAL","并发","注入","hook"],
+  summary:"kb.db 读写并发下 index 写事务与 retrieve 读互斥，busy 超时致整轮注入静默跳过；开 WAL + synchronous=NORMAL + busy_timeout=3000 后消失",
+  body:"## 现象\n\nhook 注入偶发**整轮静默跳过**，无报错、无日志。\n\n## 定位\n\nkb.db 读写并发：`index` 写事务与 `retrieve` 读相互阻塞，busy 超时后直接返回空——表现为注入静默丢失。\n\n## 修复\n\n```\nPRAGMA journal_mode=WAL;\nPRAGMA synchronous=NORMAL;\nPRAGMA busy_timeout=3000;\n```\n\n## 教训\n\nSQLite 多进程读写必须开 WAL：默认 rollback journal 下读写互斥，写事务会阻塞所有读。",
+  usage:{ prompt:1820, completion:436 },
+};
+
+const TYPE_LABEL = { pitfall:"坑", note:"注", rule:"规", reference:"参" };
+
+/* ================= i18n（仅界面 chrome，条目数据不翻译） ================= */
+const I18N = {
+  zh: {
+    manage:"管理", setup:"引导", prefs:"设置", logs:"日志", misc:"其他",
+    treeCaption:"知识条目", filter:"过滤条目…", pickEntry:"← 从树中选择一条知识条目",
+    notImpl:"页原型未实现 —— 本稿只演示管理页详情区", modified:"修改于",
+    mandatory:"★ mandatory", optional:"非 mandatory", draft:"草稿",
+    collapseTip:"收起/展开侧栏",
+    save:"保存", saved:"✓ 已保存", fCancel:"取消",
+    editBtn:"编辑", editing:"编辑条目", editingSub:"（详情区内联编辑 · 保存前不落盘）",
+    fTitle:"标题", fType:"类型", fTags:"tags（逗号分隔）", fMand:"mandatory（每会话必注入）",
+    fSummary:"摘要", fBody:"正文（markdown）", fBodyHint:"编辑区撑满剩余高度",
+    typeRule:"规则（rule）", typePitfall:"坑（pitfall）", typeNote:"注记（note）", typeReference:"参考（reference）",
+    optBtn:"✨ 优化", optBusy:"优化中…",
+    optTip:"结合项目真实代码与相关条目据实润色标题/标签/摘要/正文（类型与 mandatory 不动）",
+    cmpTitle:"✨ 优化对照", cmpBasis:"依据：条目引用的真实代码 + 相关条目 + INDEX 摘录",
+    cmpOld:"原内容", cmpNew:"优化后", cmpFill:"回填", cmpFilled:"✓ 已回填",
+    cmpApply:"全部接受并回填", cmpDiscard:"放弃",
+    cmpNote:"回填只改表单，点「保存」才写入 .md",
+    cmpUsage:"tokens {t}（{p}+{c}）",
+    demoCtl:"演示控制（非产品 UI）", vRead:"只读态", vEdit:"编辑态", vCmp:"优化对照态",
+  },
+  en: {
+    manage:"Manage", setup:"Setup", prefs:"Settings", logs:"Logs", misc:"Misc",
+    treeCaption:"Entries", filter:"Filter entries…", pickEntry:"← Select an entry from the tree",
+    notImpl:"is not part of this prototype", modified:"Modified",
+    mandatory:"★ mandatory", optional:"optional", draft:"Draft",
+    collapseTip:"Collapse/expand sidebar",
+    save:"Save", saved:"✓ Saved", fCancel:"Cancel",
+    editBtn:"Edit", editing:"Edit entry", editingSub:"(inline in detail pane · not written until Save)",
+    fTitle:"Title", fType:"Type", fTags:"tags (comma-separated)", fMand:"mandatory (injected every session)",
+    fSummary:"Summary", fBody:"Body (markdown)", fBodyHint:"editor fills remaining height",
+    typeRule:"Rule", typePitfall:"Pitfall", typeNote:"Note", typeReference:"Reference",
+    optBtn:"✨ Polish", optBusy:"Polishing…",
+    optTip:"Polishes title/tags/summary/body against real code and related entries (type and mandatory untouched)",
+    cmpTitle:"✨ Polish comparison", cmpBasis:"Basis: real code referenced by the entry + related entries + INDEX excerpt",
+    cmpOld:"Original", cmpNew:"Polished", cmpFill:"Fill", cmpFilled:"✓ Filled",
+    cmpApply:"Accept all & fill back", cmpDiscard:"Discard",
+    cmpNote:"Fill-back only touches the form — nothing is written until Save",
+    cmpUsage:"tokens {t} ({p}+{c})",
+    demoCtl:"Demo controls (not product UI)", vRead:"Read-only", vEdit:"Editing", vCmp:"Compare",
+  },
+};
+
+/* 线性 SVG 图标（照抄 v2） */
+function svg(inner, size){
+  size = size||16;
+  return '<svg viewBox="0 0 24 24" width="'+size+'" height="'+size+'" fill="none" stroke="currentColor"'
+       + ' stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+inner+'</svg>';
+}
+const ICON = {
+  manage: svg('<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>'),
+  setup:  svg('<circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/>'),
+  prefs:  svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a1.65 1.65 0 0 0-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1-1.51 1.65 1.65 0 0 0 1.82-.33l.06.06a2 2 0 1 1 2.83 2.83l.06.06a1.65 1.65 0 0 0-1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1 2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>'),
+  logs:   svg('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>'),
+  misc:   svg('<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>'),
+  folder: svg('<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>', 14),
+  branch: svg('<line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>', 10),
+  panel:  svg('<rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/>'),
+  moon:   svg('<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>'),
+  sun:    svg('<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="4.22" x2="19.78" y2="5.64"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>'),
+  pencil: svg('<path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>', 14),
+};
+const MENUS = [
+  { key:"manage", ico:ICON.manage }, { key:"setup", ico:ICON.setup }, { key:"prefs", ico:ICON.prefs },
+  { key:"logs", ico:ICON.logs }, { key:"misc", ico:ICON.misc },
+];
+
+/* ================= 状态 =================
+   view: "read" 只读态 | "edit" 编辑态 | "cmp" 优化对照态（详情区三态） */
+const state = { menu:"manage", lang:"zh", theme:"light", collapsed:false,
+                open:{ "OpenKnowledge":true, "Reasonix":true }, sel:PROJECTS[0].entries[1], q:"",
+                view:"read", savedFb:false, optBusy:false };
+let DRAFT = null;   // 编辑态草稿（表单值直读 DOM；取消丢弃，保存才写回条目）
+const t = k => I18N[state.lang][k];
+
+/* ================= 极简 markdown 渲染（照抄 v2） ================= */
+function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function inline(s){
+  return esc(s).replace(/`([^`]+)`/g,"<code>$1</code>").replace(/\*\*([^*]+)\*\*/g,"<b>$1</b>");
+}
+function renderMd(src){
+  const lines = src.split("\n"); let html="", i=0;
+  while(i<lines.length){
+    const l = lines[i];
+    if(l.startsWith("```")){
+      const buf=[]; i++;
+      while(i<lines.length && !lines[i].startsWith("```")) buf.push(lines[i++]);
+      i++; html += "<pre><code>"+esc(buf.join("\n"))+"</code></pre>"; continue;
+    }
+    const h = l.match(/^(#{1,3})\s+(.*)/);
+    if(h){ html += "<h"+h[1].length+">"+inline(h[2])+"</h"+h[1].length+">"; i++; continue; }
+    if(/^\s*[-*]\s+/.test(l)){
+      const items=[];
+      while(i<lines.length && /^\s*[-*]\s+/.test(lines[i])) items.push(lines[i++].replace(/^\s*[-*]\s+/,""));
+      html += "<ul>"+items.map(x=>"<li>"+inline(x)+"</li>").join("")+"</ul>"; continue;
+    }
+    if(l.trim()===""){ i++; continue; }
+    html += "<p>"+inline(l)+"</p>"; i++;
+  }
+  return html;
+}
+
+/* ================= 渲染 ================= */
+function el(tag, cls){ const n=document.createElement(tag); if(cls) n.className=cls; return n; }
+function projOf(entry){ return PROJECTS.find(p=>p.entries.includes(entry)); }
+
+function badges(e){
+  return '<span class="badge-born" title="born">'+ICON.branch+esc(e.born)+'</span>'
+       + '<span class="badge-type t-'+e.type+'" title="'+e.type+'">'+TYPE_LABEL[e.type]+'</span>';
+}
+function detailAttrs(e){
+  let s = e.tags.map(x=>'<span class="tag">'+esc(x)+'</span>').join("");
+  s += e.mandatory ? '<span class="badge-mand">'+t("mandatory")+'</span>'
+                   : '<span class="tag" style="opacity:.6">'+t("optional")+'</span>';
+  if(e.draft) s += '<span class="badge-draft">'+t("draft")+'</span>';
+  return s;
+}
+
+function render(){
+  document.documentElement.dataset.theme = state.theme;
+  const app = document.getElementById("app");
+  const keep = {};
+  app.querySelectorAll(".detail,.tree-scroll").forEach(n=>{ keep["dt"] = n.scrollTop; });
+  renderBody(app);
+  renderDemoBar(app);
+}
+
+function renderBody(app){
+  app.innerHTML = "";
+
+  // 顶栏（照抄 v2）
+  const bar = el("div","topbar");
+  const brand = el("div","brand");
+  brand.innerHTML = '<span class="logo">ok</span>OkManager';
+  bar.appendChild(brand);
+  const collapse = el("button","collapse-btn");
+  collapse.innerHTML = ICON.panel; collapse.title = t("collapseTip");
+  collapse.onclick = ()=>{ state.collapsed=!state.collapsed; render(); };
+  bar.appendChild(collapse);
+  const lang = el("div","lang-seg");
+  [["zh","中"],["en","EN"]].forEach(([k,label])=>{
+    const b = el("button", state.lang===k?"on":"");
+    b.textContent = label;
+    b.onclick = ()=>{ state.lang=k; render(); };
+    lang.appendChild(b);
+  });
+  bar.appendChild(lang);
+  const theme = el("button","theme-btn");
+  theme.innerHTML = state.theme==="light" ? ICON.moon : ICON.sun;
+  theme.onclick = ()=>{ state.theme = state.theme==="light"?"dark":"light"; render(); };
+  bar.appendChild(theme);
+  app.appendChild(bar);
+
+  const main = el("div","main");
+  app.appendChild(main);
+
+  // 侧栏（本稿只实现管理页，其余菜单为占位）
+  const side = el("aside","side"+(state.collapsed?" collapsed":""));
+  MENUS.forEach(m=>{
+    const b = el("button","mi"+(state.menu===m.key?" active":""));
+    b.innerHTML = '<span class="ico">'+m.ico+'</span><span class="txt">'+t(m.key)+'</span>'
+                + '<span class="tip">'+t(m.key)+'</span>';
+    b.onclick = ()=>{ state.menu=m.key; state.view="read"; render(); };
+    side.appendChild(b);
+  });
+  main.appendChild(side);
+
+  if(state.menu!=="manage"){
+    const ph = el("div","placeholder");
+    ph.textContent = "「"+t(state.menu)+"」"+t("notImpl");
+    main.appendChild(ph);
+    return;
+  }
+
+  main.appendChild(renderTree());
+  main.appendChild(renderDetail());
+}
+
+/* 演示控制条（原型专用，非产品 UI）：直接切三态 */
+function renderDemoBar(app){
+  const bar = el("div","demo-bar");
+  bar.appendChild(Object.assign(el("span"),{textContent:t("demoCtl")+"："}));
+  [["read","vRead"],["edit","vEdit"],["cmp","vCmp"]].forEach(([v,k])=>{
+    const b = el("button", state.view===v?"on":"");
+    b.textContent = t(k);
+    b.onclick = ()=>{ setView(v); };
+    bar.appendChild(b);
+  });
+  app.appendChild(bar);
+}
+
+function setView(v){
+  if(!state.sel) v = "read";
+  if(v==="edit" && !DRAFT) DRAFT = draftOf(state.sel);
+  if(v==="cmp" && !DRAFT) DRAFT = draftOf(state.sel);
+  state.view = v; state.savedFb = false; render();
+}
+
+function draftOf(e){
+  return { title:e.title, type:e.type, tags:e.tags.join(", "),
+           mandatory:e.mandatory, summary:e.summary, body:e.body };
+}
+
+/* ---------- 树（照抄 v2 renderTree/fillTree；数据简化） ---------- */
+function renderTree(){
+  const tree = el("div","tree");
+  const head = el("div","tree-head");
+  head.appendChild(Object.assign(el("span","caption"),{textContent:t("treeCaption")}));
+  tree.appendChild(head);
+  const search = el("input","search");
+  search.placeholder = t("filter"); search.value = state.q;
+  search.oninput = ()=>{ state.q = search.value; fillTree(scroll); };
+  tree.appendChild(search);
+  const scroll = el("div","tree-scroll");
+  tree.appendChild(scroll);
+  fillTree(scroll);
+  return tree;
+}
+function fillTree(scroll){
+  scroll.innerHTML = "";
+  const q = state.q.trim().toLowerCase();
+  PROJECTS.forEach(p=>{
+    const list = p.entries.filter(e=>!q || e.title.toLowerCase().includes(q));
+    if(!list.length) return;
+    const open = q ? true : !!state.open[p.name];
+    const pj = el("button","tn-proj"+(open?" open":""));
+    pj.innerHTML = '<span class="caret">▶</span><span class="folder">'+ICON.folder+'</span>'+esc(p.name)+'<span class="cnt">'+list.length+'</span>';
+    pj.title = p.root;
+    pj.onclick = ()=>{ state.open[p.name]=!state.open[p.name]; render(); };
+    scroll.appendChild(pj);
+    if(open){
+      const kids = el("div","tn-kids");
+      list.forEach(e=>{
+        const leaf = el("button","leaf"+(state.sel===e?" sel":""));
+        leaf.innerHTML = '<span class="l1">'+badges(e)
+          +(e.mandatory?'<span class="badge-mand">★</span>':"")
+          +(e.draft?'<span class="badge-draft">'+t("draft")+'</span>':"")+'</span>'
+          +'<span class="t2">'+esc(e.title)+'</span>';
+        leaf.onclick = ()=>{ state.sel=e; DRAFT=null; state.view="read"; render(); };
+        kids.appendChild(leaf);
+      });
+      scroll.appendChild(kids);
+    }
+  });
+}
+
+/* ---------- 详情区：按 state.view 分派三态 ---------- */
+function renderDetail(){
+  if(state.view==="edit" && state.sel) return renderEdit();
+  if(state.view==="cmp"  && state.sel) return renderCmp();
+  return renderRead();
+}
+
+/* 只读态：照抄 v2 renderDetail，d-attrs 行右端加「编辑」按钮 */
+function renderRead(){
+  const d = el("div","detail");
+  const e = state.sel;
+  if(!e){
+    d.appendChild(Object.assign(el("div","placeholder"),{textContent:t("pickEntry")}));
+    return d;
+  }
+  d.appendChild(Object.assign(el("div","d-path"),
+    {textContent:projOf(e).root+"\\"+e.file.replace(/\//g,"\\")}));
+  const fm = el("div","d-filemeta");
+  fm.innerHTML = "<b>"+esc(e.file.split("/").pop())+"</b> · "+e.size+" · "+t("modified")+" "+e.mtime;
+  d.appendChild(fm);
+  d.appendChild(Object.assign(el("h1","d-title"),{textContent:e.title}));
+  const at = el("div","d-attrs"); at.innerHTML = detailAttrs(e);
+  if(state.savedFb) at.appendChild(Object.assign(el("span","fb2"),{textContent:t("saved")}));
+  const editBtn = el("button","btn");
+  editBtn.innerHTML = ICON.pencil+" "+t("editBtn");
+  editBtn.style.marginLeft = "auto";
+  editBtn.onclick = ()=>setView("edit");
+  at.appendChild(editBtn);
+  d.appendChild(at);
+  const sm = el("div","d-summary"); sm.textContent = e.summary; d.appendChild(sm);
+  const bd = el("div","d-body md"); bd.innerHTML = renderMd(e.body); d.appendChild(bd);
+  return d;
+}
+
+/* 编辑态：顶部操作行（取消/保存/✨优化）+ 标题整行 + 类型/tags/mandatory 一行 + 摘要整行 + 正文撑满 */
+function renderEdit(){
+  const e = state.sel;
+  const d = el("div","detail editing");
+  d.appendChild(Object.assign(el("div","d-path"),
+    {textContent:projOf(e).root+"\\"+e.file.replace(/\//g,"\\")}));
+  const fm = el("div","d-filemeta");
+  fm.innerHTML = "<b>"+esc(e.file.split("/").pop())+"</b> · "+e.size+" · "+t("modified")+" "+e.mtime;
+  d.appendChild(fm);
+
+  // 顶部操作行
+  const bar = el("div","editbar");
+  const bt = el("span","eb-title");
+  bt.textContent = t("editing");
+  bt.appendChild(Object.assign(el("span","eb-sub"),{textContent:t("editingSub")}));
+  bar.appendChild(bt);
+  const acts = el("span","eb-acts");
+  const cancel = el("button","btn"); cancel.textContent = t("fCancel");
+  cancel.onclick = ()=>{ DRAFT=null; setView("read"); };
+  const save = el("button","btn btn-primary"); save.textContent = t("save");
+  const opt = el("button","btn"); opt.textContent = t("optBtn"); opt.title = t("optTip");
+  acts.appendChild(cancel); acts.appendChild(save); acts.appendChild(opt);
+  bar.appendChild(acts);
+  d.appendChild(bar);
+
+  // 字段值直读 DOM（不重渲，不丢焦点）；脏态只同步保存按钮禁用态
+  const dirtyChk = ()=>{ save.disabled = !isDirty(); };
+  const isDirty = ()=> fTitle.value!==e.title || fType.value!==e.type
+    || fTags.value!==e.tags.join(", ") || fMand.checked!==e.mandatory
+    || fSummary.value!==e.summary || fBody.value!==e.body;
+
+  // 标题（整行）
+  const fTitle = el("input","pinput"); fTitle.value = DRAFT.title;
+  fTitle.oninput = ()=>{ DRAFT.title=fTitle.value; dirtyChk(); };
+  d.appendChild(efField(t("fTitle"), fTitle));
+
+  // 类型 / tags / mandatory：小控件收进一行
+  const meta = el("div","ef-meta");
+  const fType = el("select","pselect");
+  [["rule","typeRule"],["pitfall","typePitfall"],["note","typeNote"],["reference","typeReference"]]
+    .forEach(([v,k])=>{ const o=el("option"); o.value=v; o.textContent=t(k); fType.appendChild(o); });
+  fType.value = DRAFT.type;
+  fType.onchange = ()=>{ DRAFT.type=fType.value; dirtyChk(); };
+  meta.appendChild(efField(t("fType"), fType));
+  const fTags = el("input","pinput"); fTags.value = DRAFT.tags;
+  fTags.oninput = ()=>{ DRAFT.tags=fTags.value; dirtyChk(); };
+  const tagsF = efField(t("fTags"), fTags); tagsF.classList.add("ef-tags");
+  meta.appendChild(tagsF);
+  const fMand = el("input"); fMand.type="checkbox"; fMand.className="radio"; fMand.checked = DRAFT.mandatory;
+  fMand.onchange = ()=>{ DRAFT.mandatory=fMand.checked; dirtyChk(); };
+  const mandL = el("label","ef-mand");
+  mandL.appendChild(fMand); mandL.appendChild(document.createTextNode(t("fMand")));
+  meta.appendChild(mandL);
+  d.appendChild(meta);
+
+  // 摘要（整行）
+  const fSummary = el("input","pinput"); fSummary.value = DRAFT.summary;
+  fSummary.oninput = ()=>{ DRAFT.summary=fSummary.value; dirtyChk(); };
+  d.appendChild(efField(t("fSummary"), fSummary));
+
+  // 正文：撑满剩余高度（主要诉求）
+  const bodyF = el("div","ef ef-grow");
+  const bl = el("div","ef-label");
+  bl.textContent = t("fBody");
+  bl.appendChild(Object.assign(el("span","hint"),{textContent:"· "+t("fBodyHint")}));
+  bodyF.appendChild(bl);
+  const fBody = el("textarea","pinput ef-body"); fBody.value = DRAFT.body;
+  fBody.oninput = ()=>{ DRAFT.body=fBody.value; dirtyChk(); };
+  bodyF.appendChild(fBody);
+  d.appendChild(bodyF);
+
+  save.disabled = true;
+  save.onclick = ()=>{
+    // 保存成功：写回条目（原型为内存假数据），三按钮随编辑态消失，回到只读详情
+    e.title=fTitle.value; e.type=fType.value;
+    e.tags=fTags.value.split(",").map(s=>s.trim()).filter(Boolean);
+    e.mandatory=fMand.checked; e.summary=fSummary.value; e.body=fBody.value;
+    DRAFT=null; setView("read");
+    state.savedFb = true; render();
+    setTimeout(()=>{ state.savedFb=false; render(); }, 1500);
+  };
+  opt.onclick = ()=>{
+    if(!fBody.value.trim()) return;
+    opt.disabled = true; opt.textContent = t("optBusy");   // 假耗时 700ms → 对照态
+    setTimeout(()=>{ state.view="cmp"; render(); }, 700);
+  };
+  return d;
+}
+function efField(label, input){
+  const f = el("div","ef");
+  f.appendChild(Object.assign(el("div","ef-label"),{textContent:label}));
+  f.appendChild(input);
+  return f;
+}
+
+/* 优化对照态：小字段 old→new 紧凑对照（逐字段回填）+ 正文左右分栏 + 全部接受/放弃 */
+function renderCmp(){
+  const e = state.sel;
+  const d = el("div","detail compare");
+  d.appendChild(Object.assign(el("div","d-path"),
+    {textContent:projOf(e).root+"\\"+e.file.replace(/\//g,"\\")}));
+
+  // 顶部操作行：标题 + 依据 | tokens + 放弃 / 全部接受并回填
+  const bar = el("div","editbar");
+  const bt = el("span","eb-title");
+  bt.textContent = t("cmpTitle");
+  bt.appendChild(Object.assign(el("span","cmp-basis"),{textContent:" · "+t("cmpBasis")}));
+  bar.appendChild(bt);
+  const acts = el("span","eb-acts");
+  acts.appendChild(Object.assign(el("span","cmp-note"),
+    {textContent:t("cmpUsage").replace("{t}",OPTIMIZED.usage.prompt+OPTIMIZED.usage.completion)
+      .replace("{p}",OPTIMIZED.usage.prompt).replace("{c}",OPTIMIZED.usage.completion)}));
+  const discard = el("button","btn"); discard.textContent = t("cmpDiscard");
+  discard.onclick = ()=>{ state.view="edit"; render(); };   // 放弃 → 回编辑态（表单不动）
+  const apply = el("button","btn btn-primary"); apply.textContent = t("cmpApply");
+  apply.onclick = ()=>{ fillAll(); state.view="edit"; render(); };   // 接受 → 回填草稿回编辑态
+  acts.appendChild(discard); acts.appendChild(apply);
+  bar.appendChild(acts);
+  d.appendChild(bar);
+
+  // 小字段对照（标题/tags/摘要）：old → new 一行一个，右端逐字段回填
+  const meta = el("div","cmp-meta");
+  [["title","fTitle"],["tags","fTags"],["summary","fSummary"]].forEach(([key,labelKey])=>{
+    const row = el("div","cmp-mrow");
+    row.appendChild(Object.assign(el("span","k"),{textContent:t(labelKey)}));
+    const newVal = key==="tags" ? OPTIMIZED.tags.join(", ") : OPTIMIZED[key];
+    row.appendChild(Object.assign(el("span","old"),{textContent:DRAFT[key]}));
+    row.appendChild(Object.assign(el("span","arrow"),{textContent:"→"}));
+    row.appendChild(Object.assign(el("span","new"),{textContent:newVal}));
+    const fill = el("button","btn cmp-fill"); fill.textContent = t("cmpFill");
+    fill.onclick = ()=>{ DRAFT[key]=newVal; fill.textContent=t("cmpFilled"); fill.disabled=true; };
+    row.appendChild(fill);
+    meta.appendChild(row);
+  });
+  d.appendChild(meta);
+
+  // 正文左右分栏对照
+  const split = el("div","cmp-split");
+  const pnOld = el("div","cmp-pane old");
+  const hOld = el("div","cmp-pane-head");
+  hOld.innerHTML = '<span class="cmp-tag old">'+t("cmpOld")+'</span>';
+  pnOld.appendChild(hOld);
+  pnOld.appendChild(Object.assign(el("div","cmp-pane-body"),{textContent:DRAFT.body}));
+  const pnNew = el("div","cmp-pane new");
+  const hNew = el("div","cmp-pane-head");
+  hNew.innerHTML = '<span class="cmp-tag new">'+t("cmpNew")+'</span>';
+  const fillBody = el("button","btn cmp-fill"); fillBody.textContent = t("cmpFill");
+  fillBody.onclick = ()=>{ DRAFT.body=OPTIMIZED.body; fillBody.textContent=t("cmpFilled"); fillBody.disabled=true; };
+  hNew.appendChild(fillBody);
+  pnNew.appendChild(hNew);
+  pnNew.appendChild(Object.assign(el("div","cmp-pane-body"),{textContent:OPTIMIZED.body}));
+  split.appendChild(pnOld); split.appendChild(pnNew);
+  d.appendChild(split);
+
+  const note = el("div","cmp-note");
+  note.style.marginTop = "8px";
+  note.textContent = t("cmpNote");
+  d.appendChild(note);
+  return d;
+}
+function fillAll(){
+  DRAFT.title = OPTIMIZED.title;
+  DRAFT.tags = OPTIMIZED.tags.join(", ");
+  DRAFT.summary = OPTIMIZED.summary;
+  DRAFT.body = OPTIMIZED.body;
+}
+
+/* 锚点切态：#edit / #cmp 直接进入对应态（供评审与截图） */
+(function(){
+  const h = location.hash.replace(/^#/,"");
+  if(h==="edit" || h==="cmp") setView(h);
+  else render();
+})();
+</script>
+</body>
+</html>

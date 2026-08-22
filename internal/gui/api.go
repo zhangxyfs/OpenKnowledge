@@ -88,6 +88,9 @@ func NewHandler(webDir, token string, beats chan<- struct{}) *Handler {
 	api("POST /api/llm/test", h.apiLLMTest)
 	api("POST /api/entry/optimize", h.apiEntryOptimize)
 	api("GET /api/project/branch-info", h.apiProjectBranchInfo)
+	api("GET /api/project/readme", h.apiProjectReadme)
+	// README 相对路径图片直链：<img src> 无法带 X-Ok-Token 头，本端点另放 ?token= 校验
+	mux.HandleFunc("GET /api/project/readme-asset", h.withAuthQuery(h.apiProjectReadmeAsset))
 	api("POST /api/heartbeat", h.apiHeartbeat)
 	api("POST /api/shutdown", h.apiShutdown)
 	api("POST /api/uninstall", h.apiUninstall)
@@ -104,6 +107,10 @@ func NewHandler(webDir, token string, beats chan<- struct{}) *Handler {
 	api("POST /api/setup/embedding/open-models-dir", h.apiEmbeddingOpenModelsDir)
 	api("GET /api/setup/embedding/ollama-models", h.apiOllamaModels)
 	api("POST /api/reasonix/enforce-mode", h.apiReasonixEnforceMode)
+	api("POST /api/hooks/timeout", h.apiHooksTimeoutSet)
+	api("POST /api/setup/hooks/remove", h.apiSetupHooksRemove)
+	api("GET /api/enforce/rules", h.apiEnforceRulesGet)
+	api("POST /api/enforce/rules", h.apiEnforceRulesSet)
 	api("POST /api/toggle", h.apiToggle)
 	api("GET /api/changelog", h.apiChangelog)
 	api("POST /api/changelog/seen", h.apiChangelogSeen)
@@ -123,6 +130,18 @@ func (h *Handler) withAuth(fn http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-Ok-Token") != h.token {
 			writeErr(w, http.StatusUnauthorized, "缺少或错误的 X-Ok-Token")
+			return
+		}
+		fn(w, r)
+	}
+}
+
+// withAuthQuery 同 withAuth，另接受 ?token= 查询参数——仅供 <img src> 直链端点
+// （浏览器 img 请求无法携带自定义头），其他端点一律走 withAuth 不放查询令牌。
+func (h *Handler) withAuthQuery(fn http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Ok-Token") != h.token && r.URL.Query().Get("token") != h.token {
+			writeErr(w, http.StatusUnauthorized, "缺少或错误的令牌")
 			return
 		}
 		fn(w, r)
@@ -195,6 +214,37 @@ func resolveProject(w http.ResponseWriter, name string) *store.Store {
 		return nil
 	}
 	return st
+}
+
+// globalConfigPath 返回全局配置文件路径（OK_HOME/config.toml）。
+func globalConfigPath() string {
+	return filepath.Join(registry.Home(), "config.toml")
+}
+
+// resolveConfigTarget 把可选 project 参数解析为配置读写目标：空 = 全局
+// config.toml（读 config.Load，缺文件按默认值，不引入新错误路径）；非空 =
+// 项目 config.toml（读合并配置，项目非法/未注册走 resolveProject 的错误响应）。
+// 返回的 path 是对应 Set 函数的落盘目标。失败时已写错误响应，ok=false。
+func resolveConfigTarget(w http.ResponseWriter, project string) (path string, cfg config.Config, ok bool) {
+	if project == "" {
+		path = globalConfigPath()
+		cfg, err := config.Load(path)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return "", config.Config{}, false
+		}
+		return path, cfg, true
+	}
+	st := resolveProject(w, project)
+	if st == nil {
+		return "", config.Config{}, false
+	}
+	cfg, err := config.LoadMerged(st.ConfigPath(), globalConfigPath())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return "", config.Config{}, false
+	}
+	return st.ConfigPath(), cfg, true
 }
 
 // validProjectName 校验项目名形状：必须是不含路径分隔符与盘符的基本名。
@@ -1021,15 +1071,11 @@ func (h *Handler) apiEntryArchive(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, summaryOf(e))
 }
 
-// apiCaptureGet 返回项目合并配置中的捕获模式、turn_interval 与 provenance auto_born。
+// apiCaptureGet 返回捕获模式、turn_interval 与 provenance auto_born。
+// project 缺省 = 全局 config.toml；显式 project = 项目合并配置（旧行为）。
 func (h *Handler) apiCaptureGet(w http.ResponseWriter, r *http.Request) {
-	st := resolveProject(w, r.URL.Query().Get("project"))
-	if st == nil {
-		return
-	}
-	cfg, err := config.LoadMerged(st.ConfigPath(), filepath.Join(registry.Home(), "config.toml"))
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+	_, cfg, ok := resolveConfigTarget(w, r.URL.Query().Get("project"))
+	if !ok {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -1085,6 +1131,7 @@ func setProvenanceAutoBorn(path string, autoBorn bool) error {
 // apiCaptureSet 设置 capture 模式、轮次间隔与 provenance auto_born：
 // [capture] 小节走 config.SetCapture；[provenance] 小节走 setProvenanceAutoBorn。
 // mode 为空、turn_interval 为 0、auto_born 缺省（null）均表示保持不变。
+// project 缺省 = 写全局 config.toml；显式 project = 写项目 config.toml（旧行为）。
 func (h *Handler) apiCaptureSet(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Project      string `json:"project"`
@@ -1095,8 +1142,8 @@ func (h *Handler) apiCaptureSet(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	st := resolveProject(w, req.Project)
-	if st == nil {
+	cfgPath, cfg, ok := resolveConfigTarget(w, req.Project)
+	if !ok {
 		return
 	}
 	if req.Mode != "" && req.Mode != "propose" && req.Mode != "auto" {
@@ -1107,11 +1154,6 @@ func (h *Handler) apiCaptureSet(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "turn_interval 必须在 1~100 之间")
 		return
 	}
-	cfg, err := config.LoadMerged(st.ConfigPath(), filepath.Join(registry.Home(), "config.toml"))
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
 	mode := cfg.Capture.Mode
 	if req.Mode != "" {
 		mode = req.Mode
@@ -1120,14 +1162,14 @@ func (h *Handler) apiCaptureSet(w http.ResponseWriter, r *http.Request) {
 	if req.TurnInterval > 0 {
 		interval = req.TurnInterval
 	}
-	if err := config.SetCapture(st.ConfigPath(), mode, interval, ""); err != nil {
+	if err := config.SetCapture(cfgPath, mode, interval, ""); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	autoBorn := cfg.Provenance.AutoBorn
 	if req.AutoBorn != nil {
 		autoBorn = *req.AutoBorn
-		if err := setProvenanceAutoBorn(st.ConfigPath(), autoBorn); err != nil {
+		if err := setProvenanceAutoBorn(cfgPath, autoBorn); err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -1135,15 +1177,11 @@ func (h *Handler) apiCaptureSet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "mode": mode, "turn_interval": interval, "auto_born": autoBorn})
 }
 
-// apiGateGet 返回项目合并配置中的门控开关、内置短语表与 extra 追加层。
+// apiGateGet 返回门控开关、内置短语表与 extra 追加层。
+// project 缺省 = 全局 config.toml；显式 project = 项目合并配置（旧行为）。
 func (h *Handler) apiGateGet(w http.ResponseWriter, r *http.Request) {
-	st := resolveProject(w, r.URL.Query().Get("project"))
-	if st == nil {
-		return
-	}
-	cfg, err := config.LoadMerged(st.ConfigPath(), filepath.Join(registry.Home(), "config.toml"))
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+	_, cfg, ok := resolveConfigTarget(w, r.URL.Query().Get("project"))
+	if !ok {
 		return
 	}
 	extra := cfg.Retrieve.Gate.ExtraPhrases
@@ -1161,6 +1199,7 @@ func (h *Handler) apiGateGet(w http.ResponseWriter, r *http.Request) {
 // null 表示该字段不变。extra 校验：逐条 trim+折叠空白，按归一化形去重（与内置
 // 重复的直接丢弃），单条 ≤64 字符、总数 ≤200 条；非法即 400。
 // 落盘走 config.SetGate（[retrieve.gate] 整段替换）。
+// project 缺省 = 写全局 config.toml；显式 project = 写项目 config.toml（旧行为）。
 func (h *Handler) apiGateSet(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Project string    `json:"project"`
@@ -1170,13 +1209,8 @@ func (h *Handler) apiGateSet(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	st := resolveProject(w, req.Project)
-	if st == nil {
-		return
-	}
-	cfg, err := config.LoadMerged(st.ConfigPath(), filepath.Join(registry.Home(), "config.toml"))
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+	cfgPath, cfg, ok := resolveConfigTarget(w, req.Project)
+	if !ok {
 		return
 	}
 	enabled := cfg.Retrieve.Gate.Enabled
@@ -1193,7 +1227,7 @@ func (h *Handler) apiGateSet(w http.ResponseWriter, r *http.Request) {
 		extra = cleaned
 	}
 	if req.Enabled != nil || req.Extra != nil {
-		if err := config.SetGate(st.ConfigPath(), enabled, extra); err != nil {
+		if err := config.SetGate(cfgPath, enabled, extra); err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -1282,16 +1316,12 @@ func (h *Handler) apiInjectSet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "mandatory_max_tokens": req.MandatoryMaxTokens})
 }
 
-// apiRetrieveGet 返回项目合并配置中的跨轮注入冷却轮数
+// apiRetrieveGet 返回跨轮注入冷却轮数
 //（[retrieve] dedup_turns，默认 3；<0 归一为 0）。
+// project 缺省 = 全局 config.toml；显式 project = 项目合并配置（旧行为）。
 func (h *Handler) apiRetrieveGet(w http.ResponseWriter, r *http.Request) {
-	st := resolveProject(w, r.URL.Query().Get("project"))
-	if st == nil {
-		return
-	}
-	cfg, err := config.LoadMerged(st.ConfigPath(), filepath.Join(registry.Home(), "config.toml"))
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+	_, cfg, ok := resolveConfigTarget(w, r.URL.Query().Get("project"))
+	if !ok {
 		return
 	}
 	n := cfg.Retrieve.EffectiveDedupTurns()
@@ -1300,6 +1330,7 @@ func (h *Handler) apiRetrieveGet(w http.ResponseWriter, r *http.Request) {
 
 // apiRetrieveSet 设置跨轮注入冷却轮数（0~99，0=关闭，非法 400）；落盘走
 // config.SetRetrieveDedupTurns（[retrieve] 小节内单键 upsert，其余键保留）。
+// project 缺省 = 写全局 config.toml；显式 project = 写项目 config.toml（旧行为）。
 func (h *Handler) apiRetrieveSet(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Project    string `json:"project"`
@@ -1308,15 +1339,15 @@ func (h *Handler) apiRetrieveSet(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	st := resolveProject(w, req.Project)
-	if st == nil {
+	cfgPath, _, ok := resolveConfigTarget(w, req.Project)
+	if !ok {
 		return
 	}
 	if req.DedupTurns < 0 || req.DedupTurns > 99 {
 		writeErr(w, http.StatusBadRequest, "dedup_turns 必须在 0~99 之间")
 		return
 	}
-	if err := config.SetRetrieveDedupTurns(st.ConfigPath(), req.DedupTurns); err != nil {
+	if err := config.SetRetrieveDedupTurns(cfgPath, req.DedupTurns); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -1380,6 +1411,190 @@ func (h *Handler) apiProjectBranchInfo(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// apiProjectReadme 返回项目根目录的 README 正文，供管理页点击项目节点展示。
+// 依次尝试 README.md / README_EN.md / readme.md（项目根目录取注册表第一个路径）；
+// 无 README 文件时回落 wiki 概述条目——tags 含精确 wiki 标签（index/branch.go
+// hasWikiTag 口径）、已转正未归档、非分支差异（无 branch: 标签）的条目，取 mtime
+// 最新一条的正文。都没有返回 {"found":false}。正文截断至 256KB 防病态文件卡死页面。
+func (h *Handler) apiProjectReadme(w http.ResponseWriter, r *http.Request) {
+	name := r.URL.Query().Get("project")
+	st := resolveProject(w, name)
+	if st == nil {
+		return
+	}
+	reg, err := registry.Load(registry.DefaultPath())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	root := ""
+	for _, p := range reg.Projects {
+		if p.Name == name && len(p.Paths) > 0 {
+			root = p.Paths[0]
+			break
+		}
+	}
+	if root != "" {
+		for _, fn := range []string{"README.md", "README_EN.md", "readme.md"} {
+			data, err := os.ReadFile(filepath.Join(root, fn))
+			if err != nil || !utf8.Valid(data) {
+				continue
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"found":   true,
+				"source":  "readme",
+				"path":    fn,
+				"content": truncateUTF8(string(data), 256<<10),
+			})
+			return
+		}
+	}
+	// wiki 回落：概述类条目 = 精确 wiki 标签 + 非分支差异 + 已转正未归档
+	entries, err := entry.Load(st.KnowledgeDir())
+	if err == nil {
+		var best *entry.Entry
+		var bestMtime int64
+		for _, e := range entries {
+			if e.Draft || e.Archived || index.BranchOf(e.Tags) != "" {
+				continue
+			}
+			if !hasExactTag(e.Tags, "wiki") {
+				continue
+			}
+			var mtime int64
+			if fi, err := os.Stat(e.Path); err == nil {
+				mtime = fi.ModTime().Unix()
+			}
+			if best == nil || mtime > bestMtime {
+				best, bestMtime = e, mtime
+			}
+		}
+		if best != nil {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"found":   true,
+				"source":  "wiki",
+				"path":    "projects/" + name + "/knowledge/" + best.FileName(),
+				"title":   best.Title,
+				"content": truncateUTF8(best.Body, 256<<10),
+			})
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"found": false})
+}
+
+// readmeImageTypes：readme-asset 端点放行的图片扩展名 → Content-Type。
+// 硬编码不取 mime.TypeByExtension（Windows 下读注册表，结果不可靠）。
+var readmeImageTypes = map[string]string{
+	".png":  "image/png",
+	".jpg":  "image/jpeg",
+	".jpeg": "image/jpeg",
+	".gif":  "image/gif",
+	".svg":  "image/svg+xml",
+	".webp": "image/webp",
+	".ico":  "image/x-icon",
+	".bmp":  "image/bmp",
+}
+
+// apiProjectReadmeAsset 分发项目 README 引用的相对路径图片（管理页 README 视图把
+// 相对路径 <img> 重写为本端点直链）。安全口径：项目名走 resolveProject 校验；
+// path 拒绝绝对路径/盘符/rooted 路径与 .. 穿越（Clean 后仍须落在项目根目录内，
+// Abs 复核兜底）；仅放行 readmeImageTypes 图片扩展名；10MB 上限防病态文件。
+// 缺失 404、非法扩展 400、越界/超限 403。svg 经 <img> 加载脚本不执行，可放行。
+func (h *Handler) apiProjectReadmeAsset(w http.ResponseWriter, r *http.Request) {
+	name := r.URL.Query().Get("project")
+	if st := resolveProject(w, name); st == nil {
+		return
+	}
+	rel := r.URL.Query().Get("path")
+	if rel == "" {
+		writeErr(w, http.StatusBadRequest, "缺少 path 参数")
+		return
+	}
+	if filepath.IsAbs(rel) || filepath.VolumeName(rel) != "" ||
+		strings.HasPrefix(rel, "/") || strings.HasPrefix(rel, "\\") {
+		writeErr(w, http.StatusForbidden, "非法路径：拒绝绝对路径与盘符")
+		return
+	}
+	cleaned := filepath.Clean(rel)
+	if cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) || filepath.IsAbs(cleaned) {
+		writeErr(w, http.StatusForbidden, "非法路径：越出项目根目录")
+		return
+	}
+	ctype, ok := readmeImageTypes[strings.ToLower(filepath.Ext(cleaned))]
+	if !ok {
+		writeErr(w, http.StatusBadRequest, "仅允许图片扩展名")
+		return
+	}
+	reg, err := registry.Load(registry.DefaultPath())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	root := ""
+	for _, p := range reg.Projects {
+		if p.Name == name && len(p.Paths) > 0 {
+			root = p.Paths[0]
+			break
+		}
+	}
+	if root == "" {
+		writeErr(w, http.StatusNotFound, "项目无根目录")
+		return
+	}
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	full := filepath.Join(rootAbs, cleaned)
+	if full != rootAbs && !strings.HasPrefix(full, rootAbs+string(filepath.Separator)) {
+		writeErr(w, http.StatusForbidden, "非法路径：越出项目根目录")
+		return
+	}
+	fi, err := os.Stat(full)
+	if err != nil || fi.IsDir() {
+		writeErr(w, http.StatusNotFound, "文件不存在")
+		return
+	}
+	if fi.Size() > 10<<20 {
+		writeErr(w, http.StatusForbidden, "文件超过 10MB 上限")
+		return
+	}
+	data, err := os.ReadFile(full)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "文件不存在")
+		return
+	}
+	w.Header().Set("Content-Type", ctype)
+	w.Header().Set("Cache-Control", "no-cache")
+	// svg 直开（地址栏/新标签）时脚本会执行，CSP 禁脚本兜底硬化
+	w.Header().Set("Content-Security-Policy", "script-src 'none'")
+	_, _ = w.Write(data)
+}
+
+// hasExactTag 判定 tags 是否含精确等于 name 的标签（防 sewiki/nowiki 子串误判，
+// 与 index/branch.go hasWikiTag 同口径；index 层未导出该判定，此处按 tags 切片实现）。
+func hasExactTag(tags []string, name string) bool {
+	for _, t := range tags {
+		if t == name {
+			return true
+		}
+	}
+	return false
+}
+
+// truncateUTF8 截断至 max 字节且不切断多字节字符（越界短串原样返回）。
+func truncateUTF8(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	for max > 0 && !utf8.RuneStart(s[max]) {
+		max--
+	}
+	return s[:max] + "\n\n…"
 }
 
 // ---------- 心跳与停服 ----------
