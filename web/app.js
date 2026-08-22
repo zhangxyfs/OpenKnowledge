@@ -1,8 +1,8 @@
 "use strict";
 /* OkManager 配置中心外壳：五菜单左右栏 + 顶栏（侧栏折叠 / 中英 / 昼夜）+ hash 路由 + 整页重渲滚动保持。
    规范源 docs/prototypes/prototype-manager-v2.html——I18N/ICON/MENUS/el/esc/t/state/render/renderBody/
-   设置卡助手（pswitch/pcard/prow/pnumLive/ptext/pDirtyLive 等）均为原型平移；五个菜单页当前挂占位，
-   真实内容按 docs/superpowers/plans/2026-08-21-config-center-ui.md 的 Task 3-7 逐页接入。 */
+   设置卡助手（pswitch/pcard/prow/pnumLive/ptext/pDirtyLive 等）均为原型平移；日志页（Task 3）已接入
+   /api/logs 真实轮询，其余四页挂占位，按 docs/superpowers/plans/2026-08-21-config-center-ui.md 的 Task 4-7 逐页接入。 */
 
 /* ================= 后端 API ================= */
 // 语义沿用旧 GUI 的 api()：X-Ok-Token 鉴权头；对象 body 自动 JSON + Content-Type；204 → null；
@@ -182,7 +182,9 @@ const MENUS = [
 ];
 
 /* ================= 状态 ================= */
-const state = { menu:"manage", lang:"zh", theme:"light", collapsed:false };
+const state = { menu:"manage", lang:"zh", theme:"light", collapsed:false,
+                logSrc:{ ok:true, daemon:true, sidecar:true }, logSem:false, logQ:"",
+                logAuto:true, logStick:true };
 const t = k => I18N[state.lang][k];
 
 /* 设置卡脏态/已保存反馈（pcard/pDirtyLive/pSave 用；各页内容接入时复用） */
@@ -287,6 +289,86 @@ function renderMd(src){
   return html;
 }
 
+/* ================= 日志页 ================= */
+/* 三来源（ok=CLI/hook 客户端、daemon=守护进程、sidecar=embed 边车）实时日志查看器，只读。
+   2s 轮询 GET /api/logs?tail=400&sig=…：签名不变时后端回 {unchanged:true}，跳过重绘；
+   有变化则 lines 全量替换，按 state.logSrc/logSem/logQ 过滤渲染。仅菜单在 logs 且自动
+   刷新开启时轮询；离开页面不清状态（数据/签名/过滤/开关全保留），回来自动续轮。
+   结构/样式/交互照抄原型日志页（prototype-manager-v2.html 1475-1570），mock 换真。 */
+let LOG_LINES = [], logSig = "", logLoaded = false;
+let logBodyEl = null, logMetaEl = null;
+async function fetchLogs(){
+  let d;
+  try {
+    d = await api("/api/logs?tail=400&sig="+encodeURIComponent(logSig));
+  } catch(err){ return; }   // 轮询失败静默、下轮重试（401 由 api() 自动刷新取新 token）
+  if(!d || d.unchanged) return;
+  LOG_LINES = d.lines || [];
+  logSig = d.sig || "";
+  paintLogs();
+}
+function paintLogs(){
+  if(!logBodyEl) return;
+  const q = state.logQ.trim().toLowerCase();
+  let count = 0, html = "";
+  LOG_LINES.forEach(l=>{
+    if(!state.logSrc[l.src]) return;
+    if(state.logSem && !l.semantic) return;
+    if(q && l.text.toLowerCase().indexOf(q)<0) return;
+    count++;
+    html += '<span class="ls ls-'+l.src+'">'+l.src+'</span>'
+          + '<span class="sem'+(l.semantic?"":" off")+'">'+(l.semantic?"◆":"◇")+'</span> '
+          + esc(l.text)+"\n";
+  });
+  logBodyEl.innerHTML = count ? html : '<span class="empty">'+t("lgEmpty")+'</span>';
+  if(state.logStick) logBodyEl.scrollTop = logBodyEl.scrollHeight;
+  if(logMetaEl) logMetaEl.textContent =
+    t("lgMeta").replace("{n}",LOG_LINES.length).replace("{m}",count);
+}
+
+function renderLogs(){
+  const d = el("div","logs");
+  const bar = el("div","logbar");
+  [["ok","on-ok"],["daemon","on-daemon"],["sidecar","on-sidecar"]].forEach(([src,cls])=>{
+    const c = el("span","logchip"+(state.logSrc[src]?" "+cls:""));
+    c.textContent = src;
+    c.onclick = ()=>{ state.logSrc[src]=!state.logSrc[src]; c.classList.toggle(cls, state.logSrc[src]); paintLogs(); };
+    bar.appendChild(c);
+  });
+  const sem = el("span","logchip"+(state.logSem?" on-sem":""));
+  sem.textContent = t("lgSemantic");
+  sem.onclick = ()=>{ state.logSem=!state.logSem; sem.classList.toggle("on-sem", state.logSem); paintLogs(); };
+  bar.appendChild(sem);
+  const f = el("input","logfilter");
+  f.placeholder = t("lgFilter"); f.value = state.logQ;
+  f.oninput = ()=>{ state.logQ = f.value; paintLogs(); };
+  bar.appendChild(f);
+  const meta = el("span","logmeta");
+  logMetaEl = el("span");
+  meta.appendChild(logMetaEl);
+  meta.appendChild(Object.assign(el("span"),{textContent:t("lgAuto")}));
+  const sw = pswitch(state.logAuto, ()=>{
+    state.logAuto = !state.logAuto; sw.classList.toggle("on", state.logAuto);
+  });
+  meta.appendChild(sw);
+  bar.appendChild(meta);
+  d.appendChild(bar);
+  logBodyEl = el("div","logbody");
+  logBodyEl.addEventListener("scroll", ()=>{
+    state.logStick = logBodyEl.scrollHeight - logBodyEl.scrollTop - logBodyEl.clientHeight < 40;
+  });
+  d.appendChild(logBodyEl);
+  paintLogs();
+  if(!logLoaded){ logLoaded = true; fetchLogs(); }   // 首次进入立即拉取，不等首个轮询周期
+  return d;
+}
+
+/* 2s 轮询：仅日志页可见且自动刷新开启时请求（unchanged 响应在 fetchLogs 内跳过重绘） */
+setInterval(()=>{
+  if(state.menu!=="logs" || !state.logAuto) return;
+  fetchLogs();
+}, 2000);
+
 /* ================= 渲染 ================= */
 function el(tag, cls){ const n=document.createElement(tag); if(cls) n.className=cls; return n; }
 
@@ -346,8 +428,12 @@ function renderBody(app){
   });
   main.appendChild(side);
 
-  // 五个菜单页均为占位：真实内容（管理树+详情 / 引导卡 / 设置卡 / 日志查看器 / 其他卡）
-  // 按实施计划 Task 3-7 逐页接入，占位文案走 i18n（notImpl 键）
+  // 日志页已接入真实数据（Task 3）；管理/引导/设置/其他四页仍为占位：真实内容
+  // （管理树+详情 / 引导卡 / 设置卡 / 其他卡）按实施计划 Task 4-7 逐页接入，占位文案走 i18n（notImpl 键）
+  if(state.menu==="logs"){
+    main.appendChild(renderLogs());
+    return;
+  }
   const ph = el("div","placeholder");
   ph.textContent = "「"+t(state.menu)+"」"+t("notImpl");
   main.appendChild(ph);
