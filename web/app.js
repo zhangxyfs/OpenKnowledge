@@ -1,2004 +1,362 @@
-/* OpenKnowledge GUI — 两选项卡 SPA（管理 / 引导），原生 JS，无外部依赖。 */
-(function () {
-  "use strict";
+"use strict";
+/* OkManager 配置中心外壳：五菜单左右栏 + 顶栏（侧栏折叠 / 中英 / 昼夜）+ hash 路由 + 整页重渲滚动保持。
+   规范源 docs/prototypes/prototype-manager-v2.html——I18N/ICON/MENUS/el/esc/t/state/render/renderBody/
+   设置卡助手（pswitch/pcard/prow/pnumLive/ptext/pDirtyLive 等）均为原型平移；五个菜单页当前挂占位，
+   真实内容按 docs/superpowers/plans/2026-08-21-config-center-ui.md 的 Task 3-7 逐页接入。 */
 
-  var TOKEN = window.OK_TOKEN || "";
-  var state = {
-    status: null,
-    project: "",
-    entries: [],
-    editingFile: null, // null=新建；否则为正在编辑的条目 file（只读模式也用同一表单）
-    readOnly: false,
-    hitFiles: null, // 搜索命中的条目 file 集合；null 表示无搜索高亮
-    typeFilter: "", // "" = 全部；"draft" = 仅草稿；其余按条目类型过滤
-    branchFilter: "", // "" = 全部；选中后 = born==X ∪ scope==X ∪ 无 born 无 scope 的条目
-    sortDir: "desc", // 时间排序方向：desc 新→旧 / asc 旧→新
-    page: 1,
-    pageSize: 12,
-    lastVersion: 0 // 最近一次自动刷新见到的 kb.db 版本（mtime）
-  };
-  state.agent = localStorage.getItem("ok.agent") || "";
-
-  // ---------- 工具 ----------
-
-  function $(id) { return document.getElementById(id); }
-
-  function showError(msg) {
-    $("banner-text").textContent = msg;
-    $("banner").classList.remove("hidden", "info");
+/* ================= 后端 API ================= */
+// 语义沿用旧 GUI 的 api()：X-Ok-Token 鉴权头；对象 body 自动 JSON + Content-Type；204 → null；
+// 401 视为 daemon 被替换（多 exe 共存/重启）后页面 token 过期，自动刷新一次取新 token
+// （sessionStorage 标志防刷新循环，任一成功响应后清除）；网络层错误包装为"网络错误"。
+async function api(path, opts){
+  opts = opts || {};
+  const headers = { "X-Ok-Token": window.OK_TOKEN || "" };
+  let body = opts.body;
+  if(body != null){
+    headers["Content-Type"] = "application/json";
+    body = JSON.stringify(body);
   }
-  $("banner-close").addEventListener("click", function () {
-    $("banner").classList.add("hidden");
+  let res;
+  try {
+    res = await fetch(path, { method: opts.method || "GET", headers: headers, body: body });
+  } catch(err){
+    throw new Error("网络错误: " + err.message);
+  }
+  if(res.ok) sessionStorage.removeItem("ok-401-reload");
+  if(res.status === 204) return null;
+  const data = await res.json().catch(()=>({}));
+  if(!res.ok){
+    if(res.status === 401 && !sessionStorage.getItem("ok-401-reload")){
+      sessionStorage.setItem("ok-401-reload", "1");
+      setTimeout(()=>{ location.reload(); }, 800);
+      return new Promise(()=>{});
+    }
+    const err = new Error(data.error || ("请求失败: " + res.status));
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+}
+
+/* ================= i18n（仅界面 chrome，条目数据不翻译） ================= */
+const I18N = {
+  zh: {
+    manage:"管理", setup:"引导", prefs:"设置", logs:"日志", misc:"其他",
+    treeCaption:"知识条目", filter:"过滤条目…", pickEntry:"← 从树中选择一条知识条目",
+    notImpl:"页尚未接入 —— 当前为占位页", modified:"修改于",
+    mandatory:"★ mandatory", optional:"非 mandatory", draft:"草稿", archived:"已归档",
+    collapseTip:"收起/展开侧栏",
+    stDetected:"已检测到", stAgentUnit:"个 agent", stHooked:"已接入", stHookedUnit:"个",
+    setupSub:"接入 = 写入 hooks 配置 + 安装 ok 技能（等同 CLI 的 ok setup）",
+    redetect:"↻ 重新检测", detecting:"↻ 检测中…",
+    hookOn:"Hook 已接入", hookOff:"Hook 未接入", skillOn:"技能已安装", skillOff:"技能未安装",
+    install:"安装", uninstall:"卸载", installing:"安装中…", uninstalling:"卸载中…",
+    kindHook:"HOOK", kindPlugin:"插件",
+    detailQ:"▸ 安装会动哪些文件？", detailClose:"▾ 收起明细",
+    detailInstall:"<b>安装</b>：写入 hooks 配置", detailJoin:" + 安装 ok 技能到技能目录；",
+    detailRemove:"<b>卸载</b>：按标记移除 ok 写入的 hooks 段与技能目录条目，不动用户其他配置。",
+    fbInstall:"✓ 已接入：hooks 已写入，技能已安装（下次会话生效）",
+    fbUninstall:"✓ 已卸载：ok 写入的 hooks 与技能已移除",
+    noneDetected:"未检测到任何已安装的 agent",
+    save:"保存", saved:"✓ 已保存",
+    gTitle:"全局开关", gDesc:"一键启停全部 agent 的 hooks 注入与强制检查（等同 CLI 的 ok on / ok off）", gLabel:"启用全部 hooks",
+    gOnFb:"✓ 已开启全部 hooks", gOffFb:"✓ 已关闭全部 hooks",
+    eManage:"管理配置", eProfiles:"服务列表", eAdd:"+ 新增服务", eEdit:"编辑", eDel:"删除", eSetActive:"设为使用中",
+    fName:"名称", fType:"类型", fBase:"base_url", fModel:"模型", fKey:"api_key", fKeyEnv:"api_key_env（环境变量名）", fMirror:"下载源（仅 builtin）",
+    eAddTitle:"新增服务", eEditTitle:"编辑服务", fOk:"确定", fCancel:"取消",
+    typeBuiltin:"内置本地模型（ok 托管 · 无需联网）", typeOllama:"Ollama（本机/局域网服务）", typeOpenai:"自定义（OpenAI 兼容服务）",
+    tagBuiltin:"内置", tagOllama:"Ollama", tagCustom:"自定义",
+    mirrorHf:"hf-mirror 镜像（国内推荐）", mirrorOfficial:"huggingface 官方", downloaded:"（已下载）",
+    fOlUrl:"服务地址", keySaved:"已保存（留空保持不变）", eGlobal:"全局",
+    kindOpenai:"OpenAI 兼容（/chat/completions）", kindAnthropic:"Anthropic 兼容（/v1/messages）",
+    tagOpenai:"OpenAI 兼容", tagAnthropic:"Anthropic 兼容",
+    fTemp:"temperature（高级，留空 = 不传）", fMaxTokens:"max_tokens（高级，0 = 默认）",
+    eTitle:"语义检索（embedding）", eDesc:"混合检索的语义通道；不配置任何服务时退化为纯关键词检索",
+    eNone:"未配置（仅关键词检索）", eTimeout:"调用超时（秒）", eDir:"内置模型目录", eActive:"使用中",
+    lTitle:"模型配置（LLM）", lDesc:"生成场景（条目优化等）调用的大模型服务；temperature 留空 = 不传",
+    lTimeout:"生成超时（秒）", lTest:"测试连接", lTesting:"测试中…", lTestOk:"✓ 连通（231ms）",
+    hTitle:"Hook 超时", hDesc:"写入各 agent hooks 的超时秒数。2026-08-04 曾发生 Windows 高负载下 5s 超时致 PostToolUse 整会话静默丢失，故默认 10", hSec:"超时（秒）",
+    gtTitle:"泛化门控", gtDesc:"命中内置/自定义短语的泛化 prompt 跳过检索注入与 embed 调用",
+    gtOn:"启用门控", gtStatus:"内置 21 条 · 自定义 {n} 条", gtManage:"管理短语表",
+    gtBuiltin:"内置短语（只读，随版本演进）", gtCustom:"自定义短语", gtAdd:"+ 添加", gtPh:"新短语…", gtClose:"关闭",
+    cTitle:"跨轮注入冷却", cDesc:"同会话内已注入的检索条目冷却 N 个 prompt 轮不再注入（门控轮也计）；0 = 关闭（每轮都可注入）", cTurns:"冷却轮数",
+    rTitle:"规则配置（强制检查）", rDesc:"AI 改动命中 code globs 的文件时，回合结束校验 changelog 是否同步更新",
+    rType:"类型", rGlobs:"code globs", rCl:"changelog glob", rMsg:"提示语", rAdd:"+ 添加规则",
+    capTitle:"经验沉淀", capDesc:"propose = AI 提议草稿、人批准后入库；auto = 按轮次间隔自动提取",
+    capMode:"模式", capPropose:"propose（人批准）", capAuto:"auto（自动提取）", capInterval:"轮次间隔",
+    lgSemantic:"◆ 语义", lgFilter:"过滤日志…", lgAuto:"自动刷新",
+    lgMeta:"共 {n} 行 · 显示 {m} 行", lgEmpty:"（无匹配日志）",
+    xExport:"数据导出", xExportDesc:"导出 registry 与条目（不含索引，导入时自动重建）",
+    xImport:"数据导入", xImportDesc:"导入 zip 备份（数据导出的产物）；条目合并入库，索引自动重建",
+    xProject:"项目", xAllProjects:"全部项目", xDoExport:"导出", xDoImport:"导入",
+    xExported:"✓ 已导出（样例）", xImported:"✓ 已导入：恢复 42 条（样例）", xFile:"文件",
+    xChlog:"更新日志", xChlogDesc:"查看各版本的新功能与修复；升级后首次打开会自动弹出",
+    xHelp:"使用帮助", xHelpDesc:"怎么调用、怎么配置、常见问题", xView:"查看", xGotIt:"知道了",
+    xDel:"删除项目知识库", xDelDesc:"永久删除所选项目的全部知识、索引与配置，并注销注册表（hooks 不再注入）。项目源码目录不受影响。",
+    xDelBtn:"删除…", xDelImpact:"将永久删除 {p} 的 {n} 条知识条目、索引与项目配置，并从注册表注销（hooks 不再注入）。",
+    xDelBackup:"删除前先导出 zip 备份", xDelAck:"我已了解后果，此操作不可撤销", xDelHint:"请输入完整项目名以确认",
+    xDelConfirm:"永久删除", xDeleted:"✓ 已删除 {p}（样例）",
+    xAbout:"关于", xVer:"版本", xHome:"数据目录", xProjCount:"已注册项目", xProjUnit:" 个",
+  },
+  en: {
+    manage:"Manage", setup:"Setup", prefs:"Settings", logs:"Logs", misc:"Misc",
+    treeCaption:"Entries", filter:"Filter entries…", pickEntry:"← Select an entry from the tree",
+    notImpl:"is not wired up yet — placeholder page", modified:"Modified",
+    mandatory:"★ mandatory", optional:"optional", draft:"Draft", archived:"Archived",
+    collapseTip:"Collapse/expand sidebar",
+    stDetected:"Detected", stAgentUnit:"agents", stHooked:"integrated", stHookedUnit:"",
+    setupSub:"Integrating = writing hooks config + installing ok skills (same as CLI ok setup)",
+    redetect:"↻ Re-detect", detecting:"↻ Detecting…",
+    hookOn:"Hook integrated", hookOff:"Hook not integrated", skillOn:"Skills installed", skillOff:"Skills not installed",
+    install:"Install", uninstall:"Uninstall", installing:"Installing…", uninstalling:"Uninstalling…",
+    kindHook:"HOOK", kindPlugin:"PLUGIN",
+    detailQ:"▸ What files does install touch?", detailClose:"▾ Collapse",
+    detailInstall:"<b>Install</b>: writes hooks config to ", detailJoin:" and installs ok skills into the skills dir; ",
+    detailRemove:"<b>Uninstall</b>: removes only the ok-marked hooks block and skill entries, leaving other config untouched.",
+    fbInstall:"✓ Integrated: hooks written, skills installed (takes effect next session)",
+    fbUninstall:"✓ Uninstalled: ok-written hooks and skills removed",
+    noneDetected:"No installed agents detected",
+    save:"Save", saved:"✓ Saved",
+    gTitle:"Global switch", gDesc:"Enable/disable hooks injection and enforce checks for all agents (same as CLI ok on / ok off)", gLabel:"Enable all hooks",
+    gOnFb:"✓ All hooks enabled", gOffFb:"✓ All hooks disabled",
+    eManage:"Manage", eProfiles:"Services", eAdd:"+ Add service", eEdit:"Edit", eDel:"Delete", eSetActive:"Set active",
+    fName:"Name", fType:"Type", fBase:"base_url", fModel:"Model", fKey:"api_key", fKeyEnv:"api_key_env (env var)", fMirror:"Mirror (builtin only)",
+    eAddTitle:"Add service", eEditTitle:"Edit service", fOk:"OK", fCancel:"Cancel",
+    typeBuiltin:"Builtin local model (ok-managed, offline)", typeOllama:"Ollama (local/LAN service)", typeOpenai:"Custom (OpenAI-compatible)",
+    tagBuiltin:"Builtin", tagOllama:"Ollama", tagCustom:"Custom",
+    mirrorHf:"hf-mirror (recommended in CN)", mirrorOfficial:"huggingface official", downloaded:" (downloaded)",
+    fOlUrl:"Service URL", keySaved:"Saved (leave empty to keep)", eGlobal:"Global",
+    kindOpenai:"OpenAI-compatible (/chat/completions)", kindAnthropic:"Anthropic-compatible (/v1/messages)",
+    tagOpenai:"OpenAI-compat", tagAnthropic:"Anthropic-compat",
+    fTemp:"temperature (advanced, empty = not sent)", fMaxTokens:"max_tokens (advanced, 0 = default)",
+    eTitle:"Semantic retrieval (embedding)", eDesc:"The semantic channel of hybrid retrieval; degrades to keyword-only when no service is configured",
+    eNone:"Not configured (keyword-only)", eTimeout:"Timeout (s)", eDir:"Builtin models dir", eActive:"Active",
+    lTitle:"Model config (LLM)", lDesc:"LLM services for generation tasks (entry polishing etc.); empty temperature = not sent",
+    lTimeout:"Generation timeout (s)", lTest:"Test connection", lTesting:"Testing…", lTestOk:"✓ Connected (231ms)",
+    hTitle:"Hook timeout", hDesc:"Timeout seconds written into each agent's hooks. On 2026-08-04 a 5s timeout under Windows load silently dropped PostToolUse for an entire session — hence default 10", hSec:"Timeout (s)",
+    gtTitle:"Generalization gate", gtDesc:"Prompts matching builtin/custom phrases skip retrieval injection and embed calls",
+    gtOn:"Enable gate", gtStatus:"21 builtin · {n} custom", gtManage:"Manage phrases",
+    gtBuiltin:"Builtin phrases (read-only, evolve with releases)", gtCustom:"Custom phrases", gtAdd:"+ Add", gtPh:"New phrase…", gtClose:"Close",
+    cTitle:"Cross-turn injection cooldown", cDesc:"Retrieved entries already injected in this session cool down for N prompt turns (gate turns count too); 0 = off", cTurns:"Cooldown turns",
+    rTitle:"Rules (enforce checks)", rDesc:"When AI edits files matching code globs, session end verifies the changelog was updated",
+    rType:"Type", rGlobs:"code globs", rCl:"changelog glob", rMsg:"Message", rAdd:"+ Add rule",
+    capTitle:"Experience capture", capDesc:"propose = AI drafts, human approves; auto = extract every N turns",
+    capMode:"Mode", capPropose:"propose (human-approved)", capAuto:"auto (automatic)", capInterval:"Turn interval",
+    lgSemantic:"◆ Semantic", lgFilter:"Filter logs…", lgAuto:"Auto-refresh",
+    lgMeta:"{n} lines · showing {m}", lgEmpty:"(no matching logs)",
+    xExport:"Export data", xExportDesc:"Exports the registry and entries (no index — rebuilt on import).",
+    xImport:"Import data", xImportDesc:"Import a zip backup (produced by Export); entries merge in, index rebuilds automatically",
+    xProject:"Project", xAllProjects:"All projects", xDoExport:"Export", xDoImport:"Import",
+    xExported:"✓ Exported (sample)", xImported:"✓ Imported: 42 entries restored (sample)", xFile:"File",
+    xChlog:"Changelog", xChlogDesc:"New features and fixes per release; pops up automatically on first open after an upgrade",
+    xHelp:"User guide", xHelpDesc:"How to call, configure, and FAQ", xView:"View", xGotIt:"Got it",
+    xDel:"Delete project KB", xDelDesc:"Permanently deletes all entries, index and config of the selected project, and unregisters it (hooks stop injecting). Source directory is untouched.",
+    xDelBtn:"Delete…", xDelImpact:"This will permanently delete {p}'s {n} entries, index and project config, and unregister it (hooks stop injecting).",
+    xDelBackup:"Export a zip backup first", xDelAck:"I understand this cannot be undone", xDelHint:"Type the full project name to confirm",
+    xDelConfirm:"Delete forever", xDeleted:"✓ Deleted {p} (sample)",
+    xAbout:"About", xVer:"Version", xHome:"Data dir", xProjCount:"Registered projects", xProjUnit:"",
+  },
+};
+
+/* 线性 SVG 图标（Lucide 风格，stroke=currentColor，随主题/选中态变色） */
+function svg(inner, size){
+  size = size||16;
+  return '<svg viewBox="0 0 24 24" width="'+size+'" height="'+size+'" fill="none" stroke="currentColor"'
+       + ' stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+inner+'</svg>';
+}
+const ICON = {
+  manage: svg('<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>'),
+  setup:  svg('<circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/>'),
+  prefs:  svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>'),
+  logs:   svg('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>'),
+  misc:   svg('<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>'),
+  folder: svg('<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>', 14),
+  branch: svg('<line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>', 10),
+  panel:  svg('<rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/>'),
+  moon:   svg('<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>'),
+  sun:    svg('<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>'),
+};
+const MENUS = [
+  { key:"manage", ico:ICON.manage }, { key:"setup", ico:ICON.setup }, { key:"prefs", ico:ICON.prefs },
+  { key:"logs", ico:ICON.logs }, { key:"misc", ico:ICON.misc },
+];
+
+/* ================= 状态 ================= */
+const state = { menu:"manage", lang:"zh", theme:"light", collapsed:false };
+const t = k => I18N[state.lang][k];
+
+/* 设置卡脏态/已保存反馈（pcard/pDirtyLive/pSave 用；各页内容接入时复用） */
+const prefsDirty = {}, prefsSaved = {};
+
+/* 摘要行：标签紧贴内容（不吃 .prow .k 的 140px 固定宽），动作按钮靠右 */
+function sumRow(label, content, btn){
+  const r = el("div","prow");
+  const k = Object.assign(el("span","k"),{textContent:label});
+  k.style.width = "auto"; k.style.marginRight = "6px";
+  r.appendChild(k); r.appendChild(content);
+  if(btn){ btn.style.marginLeft = "auto"; r.appendChild(btn); }
+  return r;
+}
+
+function pDirty(k){ prefsDirty[k]=true; render(); }
+// 实时脏态：不重渲，直接同步该卡保存按钮的禁用态（数字输入边打边响应，且改回原值即变回灰）
+function pDirtyLive(k, dirty){
+  prefsDirty[k]=dirty;
+  document.querySelectorAll('[data-save="'+k+'"]').forEach(b=>{ b.disabled = !dirty; });
+}
+function pSave(k){
+  prefsDirty[k]=false; prefsSaved[k]=true; render();
+  setTimeout(()=>{ prefsSaved[k]=false; render(); }, 1500);
+}
+// 数字输入（设置卡用）：oninput 实时上报，由调用方 apply + 计算脏态；不重渲，避免丢焦点
+function pnumLive(val, min, max, onVal){
+  const i = el("input","pinput"); i.type="number"; i.min=min; i.max=max; i.value=val;
+  i.style.width="90px";
+  i.oninput = ()=>onVal(+i.value);
+  return i;
+}
+function pcard(key, title, desc, body, inlineRow){
+  const c = el("div","pcard");
+  const h = el("h3"); h.textContent = title; c.appendChild(h);
+  if(desc){ c.appendChild(Object.assign(el("div","pdesc"),{textContent:desc})); }
+  c.appendChild(body);
+  const sv = el("button","btn btn-primary");
+  sv.textContent = t("save"); sv.disabled = !prefsDirty[key];
+  sv.dataset.save = key;
+  sv.onclick = ()=>pSave(key);
+  if(inlineRow){
+    // 简单输入卡：保存按钮进控件行右端，不独占页脚
+    const wrap = el("span");
+    wrap.style.cssText = "margin-left:auto;display:flex;align-items:center;gap:10px;flex:none";
+    if(prefsSaved[key]) wrap.appendChild(Object.assign(el("span","fb2"),{textContent:t("saved")}));
+    wrap.appendChild(sv);
+    inlineRow.appendChild(wrap);
+  } else {
+    const f = el("div","pfoot");
+    f.appendChild(sv);
+    if(prefsSaved[key]) f.appendChild(Object.assign(el("span","fb2"),{textContent:t("saved")}));
+    c.appendChild(f);
+  }
+  return c;
+}
+function prow(k, input){
+  const r = el("div","prow");
+  r.appendChild(Object.assign(el("span","k"),{textContent:k}));
+  r.appendChild(input);
+  return r;
+}
+function pswitch(on, flip){
+  const s = el("button","switch"+(on?" on":""));
+  s.setAttribute("role","switch"); s.onclick = flip;
+  return s;
+}
+function pnum(val, min, max, commit){
+  const i = el("input","pinput"); i.type="number"; i.min=min; i.max=max; i.value=val;
+  i.style.width="90px"; i.onchange = ()=>commit(+i.value);
+  return i;
+}
+function ptext(val, commit, width){
+  const i = el("input","pinput"); i.value=val; if(width) i.style.width=width;
+  i.onchange = ()=>commit(i.value);   // onchange 提交，避免每键重渲丢焦点
+  return i;
+}
+/* ================= 极简 markdown 渲染 ================= */
+function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function inline(s){
+  return esc(s).replace(/`([^`]+)`/g,"<code>$1</code>").replace(/\*\*([^*]+)\*\*/g,"<b>$1</b>");
+}
+function renderMd(src){
+  const lines = src.split("\n"); let html="", i=0;
+  while(i<lines.length){
+    const l = lines[i];
+    if(l.startsWith("```")){
+      const buf=[]; i++;
+      while(i<lines.length && !lines[i].startsWith("```")) buf.push(lines[i++]);
+      i++; html += "<pre><code>"+esc(buf.join("\n"))+"</code></pre>"; continue;
+    }
+    const h = l.match(/^(#{1,3})\s+(.*)/);
+    if(h){ html += "<h"+h[1].length+">"+inline(h[2])+"</h"+h[1].length+">"; i++; continue; }
+    if(/^\s*[-*]\s+/.test(l)){
+      const items=[];
+      while(i<lines.length && /^\s*[-*]\s+/.test(lines[i])) items.push(lines[i++].replace(/^\s*[-*]\s+/,""));
+      html += "<ul>"+items.map(x=>"<li>"+inline(x)+"</li>").join("")+"</ul>"; continue;
+    }
+    if(l.trim()===""){ i++; continue; }
+    html += "<p>"+inline(l)+"</p>"; i++;
+  }
+  return html;
+}
+
+/* ================= 渲染 ================= */
+function el(tag, cls){ const n=document.createElement(tag); if(cls) n.className=cls; return n; }
+
+function render(){
+  document.documentElement.dataset.theme = state.theme;
+  const app = document.getElementById("app");
+  // 整页重渲不丢滚动：重渲前记住各滚动容器位置，重渲后同步恢复
+  const keep = {};
+  app.querySelectorAll(".prefs,.setup,.detail,.tree-scroll,.misc").forEach(n=>{
+    keep[n.className.split(" ")[0]] = n.scrollTop;
   });
-
-  function api(path, opts) {
-    opts = opts || {};
-    opts.headers = Object.assign({ "X-Ok-Token": TOKEN }, opts.headers || {});
-    if (opts.body && typeof opts.body !== "string") {
-      opts.headers["Content-Type"] = "application/json";
-      opts.body = JSON.stringify(opts.body);
-    }
-    return fetch(path, opts).then(function (res) {
-      if (res.ok) sessionStorage.removeItem("ok-401-reload");
-      if (res.status === 204) return null;
-      return res.json().then(function (data) {
-        if (!res.ok) {
-          // daemon 被替换（多 exe 共存/重启）后页面 token 过期：自动刷新一次取新 token
-          // （sessionStorage 标志防刷新循环；任一成功响应后清除，见上）
-          if (res.status === 401 && !sessionStorage.getItem("ok-401-reload")) {
-            sessionStorage.setItem("ok-401-reload", "1");
-            showError("服务已重启，正在刷新…");
-            setTimeout(function () { location.reload(); }, 800);
-            return new Promise(function () {});
-          }
-          var err = new Error((data && data.error) || ("请求失败: " + res.status));
-          err.status = res.status;
-          throw err;
-        }
-        return data;
-      });
-    }).catch(function (err) {
-      if (!err.status) throw new Error("网络错误: " + err.message);
-      throw err;
-    });
-  }
-
-  function esc(s) {
-    return String(s == null ? "" : s)
-      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
-  }
-
-  // 条目类型显示名：存储值固定英文（frontmatter/API 不变），界面显示中文。
-  var TYPE_LABELS = { rule: "规则", pitfall: "踩坑", note: "笔记", reference: "参考" };
-  function typeLabel(t) { return TYPE_LABELS[t] || t || ""; }
-
-  // ---------- 摘要浮窗（悬停显示完整内容） ----------
-
-  var tipEl = null;
-  function ensureTip() {
-    if (!tipEl) {
-      tipEl = document.createElement("div");
-      tipEl.id = "summary-tip";
-      tipEl.className = "hidden";
-      document.body.appendChild(tipEl);
-    }
-    return tipEl;
-  }
-  function showTip(text, x, y) {
-    if (!text) return;
-    var tip = ensureTip();
-    tip.textContent = text;
-    tip.classList.remove("hidden");
-    moveTip(x, y);
-  }
-  function moveTip(x, y) {
-    if (!tipEl || tipEl.classList.contains("hidden")) return;
-    var pad = 12;
-    var left = x + 14, top = y + 16;
-    // 溢出视口右侧/底部时翻到另一侧/贴底，保证完整可见
-    if (left + tipEl.offsetWidth + pad > window.innerWidth) left = Math.max(pad, x - tipEl.offsetWidth - 14);
-    if (top + tipEl.offsetHeight + pad > window.innerHeight) top = Math.max(pad, window.innerHeight - tipEl.offsetHeight - pad);
-    tipEl.style.left = left + "px";
-    tipEl.style.top = top + "px";
-  }
-  function hideTip() {
-    if (tipEl) tipEl.classList.add("hidden");
-  }
-  // 滚动（含表格横滑容器）时收起浮窗，避免浮窗与行错位
-  window.addEventListener("scroll", hideTip, true);
-
-  // ---------- 选项卡 ----------
-
-  function switchTab(name) {
-    $("tab-manage").classList.toggle("active", name === "manage");
-    $("tab-guide").classList.toggle("active", name === "guide");
-    $("tab-misc").classList.toggle("active", name === "misc");
-    $("tab-logs").classList.toggle("active", name === "logs");
-    $("page-manage").classList.toggle("hidden", name !== "manage");
-    $("page-guide").classList.toggle("hidden", name !== "guide");
-    $("page-misc").classList.toggle("hidden", name !== "misc");
-    $("page-logs").classList.toggle("hidden", name !== "logs");
-    if (name === "logs") {
-      logPollOnce();
-      logStartPolling();
-    } else {
-      logStopPolling();
-    }
-  }
-  $("tab-manage").addEventListener("click", function () { switchTab("manage"); });
-  $("tab-guide").addEventListener("click", function () { switchTab("guide"); });
-  $("tab-misc").addEventListener("click", function () { switchTab("misc"); });
-  $("tab-logs").addEventListener("click", function () { switchTab("logs"); });
-
-  // ---------- 启动与状态 ----------
-
-  function refreshStatus() {
-    return api("/api/status").then(function (s) {
-      state.status = s;
-      renderGuide(s);
-      $("misc-version").textContent = "OpenKnowledge v" + (s.app_version || "dev");
-      $("misc-home").textContent = "知识库目录：" + (s.home || "");
-      $("misc-project-count").textContent = "已注册项目：" + ((s.projects || []).length) + " 个";
-      if (!s.projects || s.projects.length === 0) {
-        // 首次运行：隐藏管理 tab，只展示引导页
-        $("tab-manage").classList.add("hidden");
-        switchTab("guide");
-      } else {
-        $("tab-manage").classList.remove("hidden");
-        renderProjectSelect(s.projects);
-        if ($("page-manage").classList.contains("hidden") &&
-            $("page-guide").classList.contains("hidden")) {
-          switchTab("manage");
-        }
-      }
-      return s;
-    }).catch(function (err) { showError(err.message); });
-  }
-
-  function renderProjectSelect(projects) {
-    var sel = $("project-select");
-    var prev = state.project;
-    state.projects = projects || []; // 供分页栏项目路径展示等复用
-    sel.innerHTML = "";
-    projects.forEach(function (p) {
-      var opt = document.createElement("option");
-      opt.value = p.name;
-      opt.textContent = p.name;
-      sel.appendChild(opt);
-    });
-    var names = projects.map(function (p) { return p.name; });
-    state.project = names.indexOf(prev) >= 0 ? prev : names[0];
-    sel.value = state.project;
-    // "其他"页的导出项目下拉：与管理页项目列表保持同步
-    var exp = $("misc-export-project");
-    if (exp) {
-      exp.innerHTML = "";
-      var all = document.createElement("option");
-      all.value = "all";
-      all.textContent = "全部项目";
-      exp.appendChild(all);
-      (projects || []).forEach(function (p) {
-        var o = document.createElement("option");
-        o.value = p.name;
-        o.textContent = p.name;
-        exp.appendChild(o);
-      });
-    }
-    // 删除项目卡下拉：与管理页项目列表同序同步（无"全部"项）
-    var del = $("del-project-select");
-    if (del) {
-      del.innerHTML = "";
-      (projects || []).forEach(function (p) {
-        var o = document.createElement("option");
-        o.value = p.name;
-        o.textContent = p.name;
-        del.appendChild(o);
-      });
-    }
-    renderProjectPath();
-    loadEntries();
-  }
-
-  // elideMiddle 路径过长时省略中间：保留头尾，中间插 …（title 悬停看全路径）
-  function elideMiddle(s, max) {
-    if (!s || s.length <= max) return s || "";
-    var head = Math.ceil((max - 1) / 2);
-    var tail = max - 1 - head;
-    return s.slice(0, head) + "…" + s.slice(s.length - tail);
-  }
-
-  // renderProjectPath 在分页栏中间显示当前项目目录（多个目录取第一个 + 「+N」）
-  function renderProjectPath() {
-    var el = $("entries-project-path");
-    if (!el) return;
-    var list = state.projects || [];
-    var cur = null;
-    for (var i = 0; i < list.length; i++) {
-      if (list[i].name === state.project) { cur = list[i]; break; }
-    }
-    var paths = (cur && cur.paths) || [];
-    if (!paths.length) { el.textContent = ""; el.title = ""; return; }
-    el.textContent = elideMiddle(paths[0], 64) + (paths.length > 1 ? "（+" + (paths.length - 1) + "）" : "");
-    el.title = paths.join("\n");
-  }
-
-  $("project-select").addEventListener("change", function () {
-    state.project = this.value;
-    state.page = 1;
-    state.lastVersion = 0;
-    renderProjectPath();
-    renderBranchFilter(); // 项目切换：先按现有条目重聚合分支选项（loadEntries 完成后会再次聚合）
-    renderBranchInfo(); // 分支上下文随项目联动（loadEntries 完成后会再刷一次）
-    loadEntries();
-    runSearch();
-    refreshCapture();
-    state.gate = null; // 项目切换：清空旧项目短语缓存，防弹窗展示/串写旧项目数据
-    refreshGate();
-    refreshInject();
-    refreshDedup();
+  renderBody(app);
+  Object.entries(keep).forEach(([cls,top])=>{
+    const n = app.querySelector("."+cls);
+    if(n) n.scrollTop = top;
   });
+}
 
-  $("branch-filter").addEventListener("change", function () {
-    state.branchFilter = this.value;
-    state.page = 1;
-    renderEntries();
+function renderBody(app){
+  app.innerHTML = "";
+
+  // 顶栏：品牌在前，折叠按钮紧随其后（用户指定位置）
+  const bar = el("div","topbar");
+  const brand = el("div","brand");
+  brand.innerHTML = '<span class="logo">ok</span>OkManager';
+  bar.appendChild(brand);
+  const collapse = el("button","collapse-btn");
+  collapse.innerHTML = ICON.panel; collapse.title = t("collapseTip");
+  collapse.onclick = ()=>{ state.collapsed=!state.collapsed; render(); };
+  bar.appendChild(collapse);
+  const lang = el("div","lang-seg");
+  [["zh","中"],["en","EN"]].forEach(([k,label])=>{
+    const b = el("button", state.lang===k?"on":"");
+    b.textContent = label;
+    b.onclick = ()=>{ state.lang=k; render(); };
+    lang.appendChild(b);
   });
+  bar.appendChild(lang);
+  const theme = el("button","theme-btn");
+  theme.innerHTML = state.theme==="light" ? ICON.moon : ICON.sun;
+  theme.onclick = ()=>{ state.theme = state.theme==="light"?"dark":"light"; render(); };
+  bar.appendChild(theme);
+  app.appendChild(bar);
 
-  $("type-filter").addEventListener("change", function () {
-    state.typeFilter = this.value;
-    state.page = 1;
-    renderEntries();
+  // 主体
+  const main = el("div","main");
+  app.appendChild(main);
+
+  // 侧栏（同一 DOM，collapsed class 切两态）
+  const side = el("aside","side"+(state.collapsed?" collapsed":""));
+  MENUS.forEach(m=>{
+    const b = el("button","mi"+(state.menu===m.key?" active":""));
+    b.innerHTML = '<span class="ico">'+m.ico+'</span><span class="txt">'+t(m.key)+'</span>'
+                + '<span class="tip">'+t(m.key)+'</span>';
+    b.onclick = ()=>{ state.menu=m.key; location.hash=m.key; render(); };
+    side.appendChild(b);
   });
-
-  $("th-time").addEventListener("click", function () {
-    state.sortDir = state.sortDir === "desc" ? "asc" : "desc";
-    $("time-arrow").textContent = state.sortDir === "desc" ? "↓" : "↑";
-    renderEntries();
-  });
-
-  $("btn-refresh").addEventListener("click", function () {
-    var btn = this;
-    if (btn.disabled) return;
-    btn.disabled = true;
-    btn.textContent = "刷新中…";
-    state.lastVersion = 0; // 手动刷新后重新记录版本，避免下一次心跳重复拉取
-    // 全量刷新：状态（含项目下拉/排序）+ 条目列表（renderProjectSelect 内部触发 loadEntries）；
-    // refreshStatus 内部已 catch（错误走横幅），then 必定到达，按钮态必恢复
-    refreshStatus().then(function () {
-      btn.textContent = "已刷新 ✓";
-      setTimeout(function () { btn.disabled = false; btn.textContent = "刷新"; }, 1200);
-    });
-  });
-
-  $("btn-prev").addEventListener("click", function () {
-    if (state.page > 1) { state.page--; renderEntries(); }
-  });
-  $("btn-next").addEventListener("click", function () {
-    state.page++;
-    renderEntries();
-  });
-
-  // ---------- 管理页：条目列表 ----------
-
-  function loadEntries() {
-    if (!state.project) return;
-    api("/api/entries?project=" + encodeURIComponent(state.project)).then(function (list) {
-      state.entries = list || [];
-      renderBranchFilter(); // 分支选项随条目（含项目切换）重新聚合
-      renderEntries();
-      renderBranchInfo(); // 分支上下文/谱系随条目加载完成刷新
-    }).catch(function (err) { showError(err.message); });
-  }
-
-  function fmtTime(unix) {
-    if (!unix) return "";
-    var d = new Date(unix * 1000);
-    var p = function (n) { return String(n).padStart(2, "0"); };
-    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) +
-      " " + p(d.getHours()) + ":" + p(d.getMinutes());
-  }
-
-  // entryBranch 提取条目的分支标签（branch:<名>，第一个）；无则空串
-  function entryBranch(e) {
-    var tags = e.tags || [];
-    for (var i = 0; i < tags.length; i++) {
-      if (tags[i].indexOf("branch:") === 0) return tags[i].slice(7);
-    }
-    return "";
-  }
-
-  // bornOf 取条目出生分支（born:<名>，第一个）；无则空串
-  function bornOf(e) {
-    var tags = e.tags || [];
-    for (var i = 0; i < tags.length; i++) {
-      if (tags[i].indexOf("born:") === 0) return tags[i].slice(5);
-    }
-    return "";
-  }
-
-  // renderBranchInfo 拉取并渲染分支上下文与合并谱系（随项目联动）
-  function renderBranchInfo() {
-    var el = $("branch-context");
-    if (!el || !state.project) return;
-    api("/api/project/branch-info?project=" + encodeURIComponent(state.project)).then(function (info) {
-      var base = info.base_branch || "—";
-      var cur = info.current_branch || "—";
-      el.innerHTML = "";
-      var b = document.createElement("span");
-      b.textContent = "基准分支: " + base + " · 当前分支: ";
-      var c = document.createElement("span");
-      if (info.branch_state === "inherited") {
-        // 变体 A 内联徽标：inherited 态用中性绿徽标「继承基线」，不加警示色；
-        // 无 branch_state 的旧后端走 else，行为与旧版逐位一致
-        c.className = "badge-inherit";
-        c.textContent = cur + " · 继承基线";
-        // hover 浮动窗（原型变体 C 的 bubble）：继承来源@commit + 落后数
-        var tip = document.createElement("span");
-        tip.className = "tip";
-        tip.appendChild(c);
-        var bubble = document.createElement("span");
-        bubble.className = "bubble";
-        var src = info.inherited_from || info.base_branch || "—";
-        var short = String(info.last_commit || "").slice(0, 7);
-        bubble.textContent = "wiki 基线继承自 " + src + (short ? "@" + short : "") +
-          " · 落后 " + (info.behind || 0) + " commit";
-        tip.appendChild(bubble);
-        c = tip;
-      } else {
-        c.textContent = cur;
-        if (info.base_branch && info.current_branch && info.base_branch !== info.current_branch) {
-          c.className = "branch-warn";
-        }
-      }
-      el.appendChild(b); el.appendChild(c);
-      var lineage = $("merge-lineage");
-      var ms = info.merges || [];
-      if (ms.length > 0) {
-        var last = ms[ms.length - 1];
-        lineage.textContent = "合并谱系: " + last.from + " → " + last.to +
-          "（" + String(last.time || "").slice(0, 10) + "，共 " + ms.length + " 条）";
-        lineage.classList.remove("hidden");
-      } else {
-        lineage.classList.add("hidden");
-      }
-      // 工具栏摘要：inherited 且超阈值时追加落后徽标（与继承徽标同色，信息不阻断）
-      if (info.branch_state === "inherited" && info.stale) {
-        var tag = document.createElement("span");
-        tag.className = "badge-inherit";
-        tag.textContent = "wiki 落后 " + info.behind;
-        el.appendChild(document.createTextNode(" "));
-        el.appendChild(tag);
-      }
-    }).catch(function () {});
-  }
-
-  // renderBranchFilter 按当前项目条目聚合分支选项（born ∪ scope；项目切换时重聚合，联动）
-  function renderBranchFilter() {
-    var sel = $("branch-filter");
-    if (!sel) return;
-    var seen = {};
-    (state.entries || []).forEach(function (e) {
-      var b = entryBranch(e);
-      if (b) seen[b] = true;
-      var bo = bornOf(e);
-      if (bo) seen[bo] = true;
-    });
-    var cur = state.branchFilter || "";
-    sel.innerHTML = '<option value="">全部</option>';
-    Object.keys(seen).sort().forEach(function (b) {
-      var o = document.createElement("option");
-      o.value = b;
-      o.textContent = b;
-      sel.appendChild(o);
-    });
-    if (cur && seen[cur]) sel.value = cur; else { state.branchFilter = ""; sel.value = ""; }
-  }
-
-  function renderEntries() {
-    var tbody = $("entries-body");
-    tbody.innerHTML = "";
-    // 类型过滤（draft 选项只看草稿）+ 分支过滤（选中 X = born==X ∪ scope==X ∪ 无 born 无 scope）
-    var list = state.entries.filter(function (e) {
-      if (state.typeFilter === "draft" && !e.draft) return false;
-      if (state.typeFilter && state.typeFilter !== "draft" && e.type !== state.typeFilter) return false;
-      if (state.branchFilter) {
-        var bo = bornOf(e), sc = entryBranch(e);
-        if (bo !== state.branchFilter && sc !== state.branchFilter && (bo !== "" || sc !== "")) return false;
-      }
-      return true;
-    });
-    $("entries-empty").classList.toggle("hidden", list.length > 0);
-    // 默认按时间排序（方向见 state.sortDir）；搜索命中时命中项置顶（组内仍按时间排）
-    list = list.slice().sort(function (a, b) {
-      var ha = state.hitFiles && state.hitFiles[a.file] ? 1 : 0;
-      var hb = state.hitFiles && state.hitFiles[b.file] ? 1 : 0;
-      if (ha !== hb) return hb - ha;
-      var d = (b.mtime || 0) - (a.mtime || 0);
-      return state.sortDir === "asc" ? -d : d;
-    });
-    // 分页
-    var total = list.length;
-    var pages = Math.max(1, Math.ceil(total / state.pageSize));
-    if (state.page > pages) state.page = pages;
-    var start = (state.page - 1) * state.pageSize;
-    var pageItems = list.slice(start, start + state.pageSize);
-    $("entries-total").textContent = "共 " + total + " 条";
-    $("entries-page").textContent = "第 " + state.page + " / " + pages + " 页";
-    $("btn-prev").disabled = state.page <= 1;
-    $("btn-next").disabled = state.page >= pages;
-    pageItems.forEach(function (e) {
-      var tr = document.createElement("tr");
-      if (state.hitFiles && state.hitFiles[e.file]) tr.classList.add("hit-row");
-      if (e.archived) tr.classList.add("arch-row");
-      // 分支格双徽标：born（出生分支，溯源）+ scope（branch: 作用域标签）
-      var born = bornOf(e), scope = entryBranch(e);
-      var branchCell = "";
-      if (born) branchCell += '<span class="badge badge-born">⎇ ' + esc(born) + "</span> ";
-      if (scope) branchCell += '<span class="badge badge-branch">⇢ ' + esc(scope) + "</span>";
-      tr.innerHTML =
-        '<td class="muted">' + fmtTime(e.mtime) + "</td>" +
-        '<td>' + branchCell + "</td>" +
-        "<td>" + esc(e.title) + (e.draft ? ' <span class="badge badge-draft">草稿</span>' : "") +
-        (e.archived ? ' <span class="badge badge-arch">归档</span>' : "") + "</td>" +
-        "<td>" + esc(typeLabel(e.type)) + "</td>" +
-        "<td>" + esc((e.tags || []).join(", ")) + "</td>" +
-        "<td>" + (e.mandatory ? "✓" : "") + "</td>" +
-        '<td><span class="summary-clip">' + esc(e.summary) + "</span></td>" +
-        '<td class="ops">' +
-        '<button type="button" data-act="view">查看</button> ' +
-        '<button type="button" data-act="edit">编辑</button> ' +
-        (e.draft ? '<button type="button" data-act="approve">采纳</button> ' : "") +
-        (e.archived
-          ? '<button type="button" data-act="unarchive">恢复</button> '
-          : '<button type="button" data-act="archive">归档</button> ') +
-        '<button type="button" data-act="del" class="danger-link">删除</button>' +
-        "</td>";
-      var sumEl = tr.querySelector(".summary-clip");
-      sumEl.addEventListener("mouseenter", function (ev) { showTip(e.summary, ev.clientX, ev.clientY); });
-      sumEl.addEventListener("mousemove", function (ev) { moveTip(ev.clientX, ev.clientY); });
-      sumEl.addEventListener("mouseleave", hideTip);
-      tr.querySelectorAll("button").forEach(function (btn) {
-        btn.addEventListener("click", function () {
-          var act = btn.getAttribute("data-act");
-          if (act === "view") openForm(e, true);
-          else if (act === "edit") openForm(e, false);
-          else if (act === "approve") approveEntry(e);
-          else if (act === "archive") archiveEntry(e, false);
-          else if (act === "unarchive") archiveEntry(e, true);
-          else delEntry(e);
-        });
-      });
-      tbody.appendChild(tr);
-    });
-  }
-
-  // ---------- 管理页：搜索（300ms 防抖） ----------
-
-  var searchTimer = null;
-  var searchSeq = 0; // 单调递增请求序号，用于丢弃过期响应
-  $("search-input").addEventListener("input", function () {
-    clearTimeout(searchTimer);
-    searchTimer = setTimeout(runSearch, 300);
-  });
-
-  function runSearch() {
-    var q = $("search-input").value.trim();
-    var box = $("search-results");
-    var seq = ++searchSeq;
-    state.page = 1; // 新搜索回到第一页
-    if (!q || !state.project) {
-      box.classList.add("hidden");
-      box.innerHTML = "";
-      state.hitFiles = null;
-      renderEntries();
-      return;
-    }
-    api("/api/search?project=" + encodeURIComponent(state.project) +
-        "&q=" + encodeURIComponent(q)).then(function (hits) {
-      // 竞态防护：响应到达时若已有更新的请求或输入已被清空/修改，丢弃本次结果
-      if (seq !== searchSeq || $("search-input").value.trim() !== q) return;
-      if (!hits || hits.length === 0) {
-        box.innerHTML = '<span class="muted">无匹配结果</span>';
-      } else {
-        box.innerHTML = hits.map(function (h) {
-          return '<div class="hit"><span class="hit-title">' + esc(h.title) +
-            '</span> <span class="hit-score">' + Number(h.score).toFixed(3) + "</span></div>";
-        }).join("");
-      }
-      box.classList.remove("hidden");
-      // 命中条目在表格中高亮并置顶
-      var files = {};
-      (hits || []).forEach(function (h) { files[h.file] = true; });
-      state.hitFiles = files;
-      renderEntries();
-    }).catch(function (err) { showError(err.message); });
-  }
-
-  // ---------- 管理页：条目表单（新建 / 查看 / 编辑） ----------
-
-  function openForm(entry, readOnly) {
-    state.readOnly = !!readOnly;
-    state.editingFile = entry ? entry.file : null;
-    $("entry-modal-title").textContent = entry ? (readOnly ? "查看条目" : "编辑条目") : "新建条目";
-    var fill = function (d) {
-      $("f-title").value = d.title || "";
-      $("f-type").value = d.type || "note";
-      $("f-tags").value = (d.tags || []).join(", ");
-      $("f-mandatory").checked = !!d.mandatory;
-      $("f-summary").value = d.summary || "";
-      $("f-body").value = d.body || "";
-      setFormReadOnly(state.readOnly);
-      $("entry-modal").classList.remove("hidden");
-    };
-    if (entry) {
-      api("/api/entry?project=" + encodeURIComponent(state.project) +
-          "&file=" + encodeURIComponent(entry.file)).then(fill)
-        .catch(function (err) { showError(err.message); });
-    } else {
-      fill({});
-    }
-  }
-
-  function setFormReadOnly(ro) {
-    ["f-title", "f-type", "f-tags", "f-summary", "f-body"].forEach(function (id) {
-      $(id).disabled = ro;
-    });
-    $("f-mandatory").disabled = ro;
-    $("f-save").classList.toggle("hidden", ro);
-  }
-
-  function closeForm() {
-    if (optAbort) optAbort.abort(); // 优化进行中关闭弹窗 = 取消本次优化（服务端随连接断开一并取消）
-    $("entry-modal").classList.add("hidden");
-  }
-
-  // ---------- 更新日志 ----------
-
-  // renderMd 极简 markdown 渲染：# / ## 标题、- 列表、**粗体**、`行内代码`；先 esc 转义防注入。
-  function renderMd(md) {
-    function inline(s) {
-      return esc(s)
-        .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-        .replace(/`([^`]+)`/g, "<code>$1</code>");
-    }
-    var html = [];
-    var inList = false;
-    function closeList() { if (inList) { html.push("</ul>"); inList = false; } }
-    md.split(/\r?\n/).forEach(function (line) {
-      var t = line.trim();
-      if (t.indexOf("## ") === 0) { closeList(); html.push("<h4>" + inline(t.slice(3)) + "</h4>"); }
-      else if (t.indexOf("# ") === 0) { closeList(); html.push("<h3>" + inline(t.slice(2)) + "</h3>"); }
-      else if (t.indexOf("- ") === 0) { if (!inList) { html.push("<ul>"); inList = true; } html.push("<li>" + inline(t.slice(2)) + "</li>"); }
-      else if (t === "") { closeList(); }
-      else { closeList(); html.push("<p>" + inline(t) + "</p>"); }
-    });
-    closeList();
-    return html.join("");
-  }
-
-  // changelogFromPending 标记当前弹窗是否由升级弹窗（pending）打开：仅此时关闭才 POST seen；常驻入口只查看、不影响 seen 状态。
-  var changelogFromPending = false;
-
-  function openChangelogModal(title, entries) {
-    $("changelog-modal-title").textContent = title;
-    var content = $("changelog-content");
-    if (!entries || entries.length === 0) {
-      content.innerHTML = '<p class="muted">暂无更新日志</p>';
-    } else {
-      // 最新版本在最前（API 返回升序，展示层翻转为降序；标题取 latest 的逻辑不受影响）
-      content.innerHTML = entries.slice().reverse().map(function (e) { return renderMd(e.log); }).join("<hr>");
-    }
-    $("changelog-modal").classList.remove("hidden");
-  }
-
-  // checkChangelog 启动时拉取：pending 非空弹升级日志；结果缓存供常驻入口使用。
-  function checkChangelog() {
-    api("/api/changelog").then(function (c) {
-      state.changelog = c;
-      if (c.pending && c.pending.length > 0) {
-        var latest = c.pending[c.pending.length - 1].version;
-        var title = c.pending.length > 1
-          ? ("已更新到 v" + latest + "（含最近 " + c.pending.length + " 个版本）")
-          : ("新版本 v" + latest + " 更新内容");
-        changelogFromPending = true;
-        openChangelogModal(title, c.pending);
-      }
-    }).catch(function () { /* 拉取失败不阻断主界面 */ });
-  }
-
-  $("changelog-close").addEventListener("click", function () {
-    $("changelog-modal").classList.add("hidden");
-    if (!changelogFromPending) return;
-    changelogFromPending = false;
-    api("/api/changelog/seen", { method: "POST" }).catch(function (err) { showError(err.message); });
-  });
-
-  $("btn-changelog").addEventListener("click", function () {
-    changelogFromPending = false;
-    openChangelogModal("更新日志", state.changelog ? state.changelog.all : null);
-  });
-
-  // 使用帮助：拉取 help.md 复用 changelog 弹窗渲染；不属于升级弹窗，不影响 seen
-  $("btn-help").addEventListener("click", function () {
-    changelogFromPending = false;
-    fetch("/help.md").then(function (r) {
-      if (!r.ok) throw new Error("HTTP " + r.status);
-      return r.text();
-    }).then(function (md) {
-      openChangelogModal("使用帮助", [{ log: md }]);
-    }).catch(function () {
-      openChangelogModal("使用帮助", [{ log: "帮助文档加载失败，请检查安装是否完整。" }]);
-    });
-  });
-
-  $("f-cancel").addEventListener("click", closeForm);
-  $("btn-new").addEventListener("click", function () { openForm(null, false); });
-
-  $("entry-form").addEventListener("submit", function (ev) {
-    ev.preventDefault();
-    var tags = $("f-tags").value.split(",").map(function (t) { return t.trim(); })
-      .filter(function (t) { return t; });
-    var payload = {
-      project: state.project,
-      title: $("f-title").value,
-      type: $("f-type").value,
-      tags: tags,
-      mandatory: $("f-mandatory").checked,
-      summary: $("f-summary").value,
-      body: $("f-body").value
-    };
-    var req;
-    if (state.editingFile) {
-      payload.file = state.editingFile; // 以原文件名作为身份，不支持改名
-      req = api("/api/entry", { method: "PUT", body: payload });
-    } else {
-      req = api("/api/entry", { method: "POST", body: payload });
-    }
-    req.then(function () {
-      closeForm();
-      loadEntries();
-    }).catch(function (err) {
-      showError(err.status === 409 ? "条目已存在" : err.message);
-    });
-  });
-
-  // ---------- 编辑弹窗：✨ 优化（对照预览确认回填，保存才落盘） ----------
-
-  var OPTIMIZE_TIP = "结合项目真实代码与相关条目据实润色标题/标签/摘要/正文（类型与 mandatory 不动）；先出对照预览，确认回填后点保存才生效。";
-  var optBtn = $("f-optimize");
-  optBtn.addEventListener("mouseenter", function (ev) { showTip(OPTIMIZE_TIP, ev.clientX, ev.clientY); });
-  optBtn.addEventListener("mousemove", function (ev) { moveTip(ev.clientX, ev.clientY); });
-  optBtn.addEventListener("mouseleave", hideTip);
-
-  var cmpOld = null, cmpNew = null;
-  var optAbort = null; // 优化进行中的 AbortController；关闭编辑弹窗即取消
-  var CMP_FIELDS = [
-    ["title", "标题", "f-title"],
-    ["tags", "tags", "f-tags"],
-    ["summary", "摘要", "f-summary"],
-    ["body", "正文", "f-body"]
-  ];
-
-  // usageText 格式化 token 消耗；服务未回 usage（双零）时返回空串不显示
-  function usageText(u) {
-    if (!u || (!u.prompt && !u.completion)) return "";
-    return "消耗 " + (u.prompt + u.completion) + " token（入 " + u.prompt + " / 出 " + u.completion + "）";
-  }
-
-  function openCmpModal(oldV, newV) {
-    cmpOld = oldV; cmpNew = newV;
-    $("cmp-basis").textContent = "依据：条目引用的真实代码 + 相关条目 + INDEX 摘录";
-    $("cmp-usage").textContent = usageText(newV.usage);
-    var notice = $("cmp-notice");
-    if (newV.no_change) {
-      // token 消耗已在 cmp-usage 行展示，提示文案里不再重复
-      notice.textContent = "模型判断：当前内容已足够简练准确，无需优化。如下仍有差异仅为排版/标点，可逐字段回填或直接放弃。";
-      notice.classList.remove("hidden");
-    } else {
-      notice.classList.add("hidden");
-    }
-    var box = $("cmp-fields");
-    box.innerHTML = "";
-    CMP_FIELDS.forEach(function (f) {
-      var key = f[0], label = f[1];
-      var oldText = key === "tags" ? (oldV.tags || "") : (oldV[key] || "");
-      var newText = key === "tags" ? (newV.tags || []).join(", ") : (newV[key] || "");
-      // 模型自报 no_change 时不回字段，"优化后" 回退显示原值，避免空行
-      if (newV.no_change && !newText) newText = oldText;
-      var div = document.createElement("div");
-      div.className = "cmp-field";
-      div.innerHTML = '<div class="cmp-name"><span>' + label + '</span>' +
-        '<button type="button" class="btn cmp-fill" data-field="' + key + '">回填</button></div>' +
-        '<div class="cmp-old"><span class="cmp-tag old">原数据</span></div>' +
-        '<div class="cmp-new"><span class="cmp-tag new">优化后</span></div>';
-      div.querySelector(".cmp-old").appendChild(document.createTextNode(oldText));
-      div.querySelector(".cmp-new").appendChild(document.createTextNode(newText));
-      box.appendChild(div);
-    });
-    $("cmp-modal").classList.remove("hidden");
-  }
-
-  // 单字段回填：只把该字段的优化值写回表单（不关弹窗，可逐字段挑选）
-  // 空值回退原值：no_change 场景模型可能不回字段，回填不得清空表单
-  function cmpFillField(key) {
-    if (!cmpNew) return "";
-    if (key === "tags") {
-      var t = (cmpNew.tags || []).join(", ");
-      return t || cmpOld.tags || "";
-    }
-    return cmpNew[key] || cmpOld[key] || "";
-  }
-
-  $("cmp-fields").addEventListener("click", function (ev) {
-    var key = ev.target.getAttribute && ev.target.getAttribute("data-field");
-    if (!key) return;
-    CMP_FIELDS.forEach(function (f) {
-      if (f[0] === key) $(f[2]).value = cmpFillField(key);
-    });
-    ev.target.textContent = "已回填";
-  });
-
-  $("cmp-discard").addEventListener("click", function () { $("cmp-modal").classList.add("hidden"); });
-  $("cmp-apply").addEventListener("click", function () {
-    if (cmpNew) {
-      CMP_FIELDS.forEach(function (f) { $(f[2]).value = cmpFillField(f[0]); });
-    }
-    $("cmp-modal").classList.add("hidden");
-  });
-
-  $("llm-needed-ok").addEventListener("click", function () { $("llm-needed-modal").classList.add("hidden"); });
-  $("llm-needed-go").addEventListener("click", function () {
-    $("llm-needed-modal").classList.add("hidden");
-    closeForm();
-    switchTab("guide");
-    openLLMModal();
-  });
-
-  optBtn.addEventListener("click", function () {
-    if (!state.project) {
-      showError("尚无已注册项目，请先 ok init");
-      return;
-    }
-    if (!$("f-body").value.trim()) {
-      showError("正文为空，无可优化内容");
-      return;
-    }
-    hideTip();
-    optBtn.disabled = true;
-    var oldText = optBtn.textContent;
-    optBtn.textContent = "优化中…";
-    optAbort = new AbortController();
-    api("/api/entry/optimize", {
-      method: "POST",
-      signal: optAbort.signal,
-      body: {
-        project: state.project,
-        file: state.editingFile || "",
-        title: $("f-title").value,
-        tags: $("f-tags").value,
-        summary: $("f-summary").value,
-        body: $("f-body").value
-      }
-    }).then(function (out) {
-      // 优化完成一律打开对照弹窗；no_change 提示在弹窗内展示
-      openCmpModal({ title: $("f-title").value, tags: $("f-tags").value, summary: $("f-summary").value, body: $("f-body").value }, out);
-    }).catch(function (err) {
-      if (optAbort && optAbort.signal.aborted) return; // 关闭弹窗主动取消，静默
-      if (err.status === 409) {
-        $("llm-needed-modal").classList.remove("hidden");
-      } else {
-        showError(err.message);
-      }
-    }).finally(function () {
-      optAbort = null;
-      optBtn.disabled = false;
-      optBtn.textContent = oldText;
-    });
-  });
-
-  function delEntry(e) {
-    if (!confirm("确定删除条目「" + e.title + "」？")) return;
-    api("/api/entry?project=" + encodeURIComponent(state.project) +
-        "&file=" + encodeURIComponent(e.file), { method: "DELETE" })
-      .then(loadEntries)
-      .catch(function (err) { showError(err.message); });
-  }
-
-  // 采纳草稿：draft 翻正并同步索引与向量，随后刷新列表
-  function approveEntry(e) {
-    api("/api/approve", {
-      method: "POST",
-      body: { project: state.project, file: e.file }
-    }).then(loadEntries)
-      .catch(function (err) { showError(err.message); });
-  }
-
-  // 归档/恢复：归档后不进 INDEX 与 Wiki 目录、不参与 mandatory 注入，仍可检索
-  function archiveEntry(e, undo) {
-    if (!undo && !confirm("归档条目「" + e.title + "」？归档后退出 INDEX 与强制注入，仍可被检索命中。")) return;
-    api("/api/entry/archive", {
-      method: "POST",
-      body: { project: state.project, file: e.file, undo: !!undo }
-    }).then(loadEntries)
-      .catch(function (err) { showError(err.message); });
-  }
-
-  // ---------- 引导页 ----------
-
-  function setBadge(id, ok, okText, offText) {
-    var el = $(id);
-    el.textContent = ok ? okText : offText;
-    el.classList.toggle("badge-on", ok);
-    el.classList.toggle("badge-off", !ok);
-  }
-
-  function currentAgent() {
-    var agents = (state.status && state.status.agents) || [];
-    for (var i = 0; i < agents.length; i++) {
-      if (agents[i].id === state.agent) return agents[i];
-    }
-    return null;
-  }
-
-  function renderAgentSelect(agents) {
-    var sel = $("agent-select");
-    sel.innerHTML = "";
-    agents.forEach(function (a) {
-      var opt = document.createElement("option");
-      opt.value = a.id;
-      opt.textContent = a.name + (a.detected ? "" : "（未安装）");
-      opt.disabled = !a.detected;
-      sel.appendChild(opt);
-    });
-    var ids = agents.map(function (a) { return a.id; });
-    if (ids.indexOf(state.agent) < 0) {
-      var first = agents.filter(function (a) { return a.detected; })[0] || agents[0];
-      state.agent = first ? first.id : "";
-    }
-    sel.value = state.agent;
-  }
-
-  function renderGuide(s) {
-    var agents = s.agents || [];
-    renderAgentSelect(agents);
-    var cur = currentAgent();
-    setBadge("badge-hooks", !!(cur && cur.hooksInstalled), "已安装", "未配置");
-    $("hooks-agent-name").textContent = cur ? cur.name : "agent";
-    $("btn-hooks").textContent = cur ? ("写入 " + cur.name + " hooks 配置") : "写入 hooks 配置";
-    $("hooks-timeout").value = s.hooksTimeout || 10;
-    renderRxEnforce();
-    renderCodexHelp();
-    setBadge("badge-skills", s.skillsInstalled, "已安装", "未配置");
-    var emb = s.embedding || {};
-    setBadge("badge-embedding", !!emb.configured, "已配置", "未配置");
-    var ec = $("emb-current");
-    if (emb.configured) {
-      var tag = emb.type === "builtin" ? "内置" : emb.type === "ollama" ? "Ollama" : "自定义";
-      var parts = ["[" + tag + "] " + emb.name];
-      parts.push(emb.type === "builtin" ? (emb.model_label || emb.model) : (emb.model + " @ " + (emb.base_url || "")));
-      if (emb.type === "builtin") parts.push("本地运行，无需联网");
-      ec.textContent = parts.join(" · ");
-    } else {
-      ec.textContent = "未启用（仅关键词检索）";
-    }
-    setBadge("badge-toggle", !s.disabled, "已开启", "已关闭");
-    $("btn-toggle").textContent = s.disabled ? "开启" : "关闭";
-    refreshCapture();
-    refreshGate();
-    refreshInject();
-    refreshDedup();
-    refreshLLM();
-  }
-
-  // renderRxEnforce 三档卡仅 agent=reasonix 时显示，并回填当前保存的档位。
-  // 由 renderGuide 调用（状态刷新与 agent 下拉切换都会经过 renderGuide）。
-  function renderRxEnforce() {
-    var card = $("rx-enforce-card");
-    if (!card) return;
-    var isRx = state.agent === "reasonix";
-    card.classList.toggle("hidden", !isRx);
-    if (isRx) {
-      var mode = (state.status && state.status.rxEnforceMode) || "mixed";
-      var radios = document.getElementsByName("rx-enforce");
-      for (var i = 0; i < radios.length; i++) {
-        radios[i].checked = radios[i].value === mode;
-      }
-    }
-  }
-
-  // renderCodexHelp 信任门说明按钮仅 agent=codex 时显示；切走隐藏说明卡。
-  // 由 renderGuide 调用（状态刷新与 agent 下拉切换都会经过 renderGuide）。
-  function renderCodexHelp() {
-    var btn = $("btn-codex-help");
-    if (!btn) return;
-    var isCodex = state.agent === "codex";
-    btn.classList.toggle("hidden", !isCodex);
-    if (!isCodex) {
-      var card = $("codex-help-card");
-      if (card) card.classList.add("hidden");
-    }
-  }
-
-  // ---------- 引导页：经验沉淀卡片 ----------
-
-  // captureProject 取管理页当前选中项目，缺省取第一个项目。
-  function captureProject() {
-    if (state.project) return state.project;
-    var ps = state.status && state.status.projects;
-    return ps && ps.length > 0 ? ps[0].name : "";
-  }
-
-  function refreshCapture() {
-    var project = captureProject();
-    var statusEl = $("capture-status");
-    if (!project) {
-      statusEl.textContent = "当前模式：尚无已注册项目（先 ok init）";
-      return;
-    }
-    api("/api/capture?project=" + encodeURIComponent(project)).then(function (c) {
-      statusEl.textContent = "当前模式：" + c.mode +
-        "（turn_interval=" + c.turn_interval + "，项目 " + project + "）";
-      $("capture-interval").value = c.turn_interval;
-      $("auto-born").checked = !!c.auto_born;
-      $("capture-mode-note").textContent = c.mode === "auto"
-        ? "auto 模式：每 " + c.turn_interval + " 个回合结束强制自省一次"
-        : "propose 模式：由 AI 自主判断，无轮次限制";
-    }).catch(function (err) { showError(err.message); });
-  }
-
-  // provenance 开关：勾选变更即随 capture 保存路径落盘（nil=不变，显式布尔才改写）
-  $("auto-born").addEventListener("change", function () {
-    var project = captureProject();
-    if (!project) {
-      showError("尚无已注册项目，请先 ok init");
-      this.checked = !this.checked;
-      return;
-    }
-    api("/api/capture", {
-      method: "POST",
-      body: { project: project, auto_born: this.checked }
-    }).then(refreshCapture)
-      .catch(function (err) { showError(err.message); refreshCapture(); });
-  });
-
-  function setCaptureMode(mode) {
-    var project = captureProject();
-    if (!project) {
-      showError("尚无已注册项目，请先 ok init");
-      return;
-    }
-    api("/api/capture", {
-      method: "POST",
-      body: { project: project, mode: mode }
-    }).then(refreshCapture)
-      .catch(function (err) { showError(err.message); });
-  }
-
-  $("btn-capture-propose").addEventListener("click", function () { setCaptureMode("propose"); });
-  $("btn-capture-auto").addEventListener("click", function () { setCaptureMode("auto"); });
-
-  $("btn-capture-interval").addEventListener("click", function () {
-    var project = captureProject();
-    if (!project) {
-      showError("尚无已注册项目，请先 ok init");
-      return;
-    }
-    var n = parseInt($("capture-interval").value, 10);
-    if (!n || n < 1 || n > 100) {
-      showError("轮次间隔必须是 1~100 的整数");
-      return;
-    }
-    api("/api/capture", {
-      method: "POST",
-      body: { project: project, turn_interval: n }
-    }).then(refreshCapture)
-      .catch(function (err) { showError(err.message); });
-  });
-
-  // ---------- 引导页：泛化门控卡片 ----------
-
-  function gateDirty() {
-    return !!(state.gate) && $("gate-enabled").checked !== !!state.gate.enabled;
-  }
-
-  function updateGateSaveBtn() {
-    // 有未保存改动时高亮保存按钮
-    $("btn-gate-save").className = gateDirty() ? "btn btn-primary" : "btn";
-  }
-
-  function refreshGate() {
-    var project = captureProject();
-    var statusEl = $("gate-status");
-    if (!project) {
-      statusEl.textContent = "门控：尚无已注册项目（先 ok init）";
-      $("badge-gate").className = "badge badge-off";
-      $("badge-gate").textContent = "无项目";
-      return;
-    }
-    api("/api/gate?project=" + encodeURIComponent(project)).then(function (g) {
-      state.gate = g;
-      $("gate-enabled").checked = !!g.enabled;
-      updateGateSaveBtn();
-      $("badge-gate").className = "badge " + (g.enabled ? "badge-on" : "badge-off");
-      $("badge-gate").textContent = g.enabled ? "启用" : "停用";
-      statusEl.textContent = "门控：" + (g.enabled ? "启用" : "停用") +
-        "（内置 " + g.builtin.length + " 条 + 自定义 " + (g.extra || []).length +
-        " 条，项目 " + project + "）";
-    }).catch(function (err) { showError(err.message); });
-  }
-
-  $("gate-enabled").addEventListener("change", function () {
-    if (!captureProject()) {
-      showError("尚无已注册项目，请先 ok init");
-      this.checked = !this.checked;
-      return;
-    }
-    updateGateSaveBtn(); // 勾选只改本地状态，点保存才提交
-  });
-
-  $("btn-gate-save").addEventListener("click", function () {
-    var project = captureProject();
-    if (!project) {
-      showError("尚无已注册项目，请先 ok init");
-      return;
-    }
-    if (!gateDirty()) return;
-    api("/api/gate", {
-      method: "POST",
-      body: { project: project, enabled: $("gate-enabled").checked }
-    }).then(refreshGate)
-      .catch(function (err) { showError(err.message); refreshGate(); });
-  });
-
-  // ---------- 引导页：规则配置卡（mandatory 预算上限） ----------
-
-  function refreshInject() {
-    var project = captureProject();
-    if (!project) return;
-    api("/api/inject?project=" + encodeURIComponent(project)).then(function (cfg) {
-      $("mandatory-max-tokens").value = cfg.mandatory_max_tokens;
-    }).catch(function (err) { showError(err.message); });
-  }
-
-  $("btn-mandatory-save").addEventListener("click", function () {
-    var project = captureProject();
-    if (!project) {
-      showError("尚无已注册项目，请先 ok init");
-      return;
-    }
-    var n = parseInt($("mandatory-max-tokens").value, 10);
-    if (!n || n < 100 || n > 100000) {
-      showError("最大 token 必须在 100~100000 之间");
-      refreshInject();
-      return;
-    }
-    api("/api/inject", {
-      method: "POST",
-      body: { project: project, mandatory_max_tokens: n }
-    }).then(refreshInject)
-      .catch(function (err) { showError(err.message); refreshInject(); });
-  });
-
-  // ---------- 引导页：跨轮注入冷却卡（dedup_turns） ----------
-
-  function refreshDedup() {
-    var project = captureProject();
-    if (!project) return;
-    api("/api/retrieve?project=" + encodeURIComponent(project)).then(function (cfg) {
-      $("retrieve-dedup-turns").value = cfg.dedup_turns;
-    }).catch(function (err) { showError(err.message); });
-  }
-
-  $("btn-dedup-save").addEventListener("click", function () {
-    var project = captureProject();
-    if (!project) {
-      showError("尚无已注册项目，请先 ok init");
-      return;
-    }
-    var n = parseInt($("retrieve-dedup-turns").value, 10);
-    if (isNaN(n) || n < 0 || n > 99) {
-      showError("冷却轮数必须在 0~99 之间");
-      refreshDedup();
-      return;
-    }
-    api("/api/retrieve", {
-      method: "POST",
-      body: { project: project, dedup_turns: n }
-    }).then(refreshDedup)
-      .catch(function (err) { showError(err.message); refreshDedup(); });
-  });
-
-  // ---------- 引导页：模型配置卡 + 弹窗（全局 [llm]，卡片列表 + 行内展开） ----------
-
-  function refreshLLM() {
-    api("/api/llm").then(function (cfg) {
-      state.llm = cfg;
-      var active = null;
-      (cfg.profiles || []).forEach(function (p) { if (p.active) active = p; });
-      if (active) {
-        $("badge-llm").className = "badge badge-on";
-        $("badge-llm").textContent = "已配置";
-        $("llm-current").textContent = "使用中：" + active.name + " · " + active.model +
-          "（" + (active.kind === "anthropic" ? "Anthropic 兼容" : "OpenAI 兼容") + "）";
-        $("llm-max-tokens").value = active.max_tokens || 0;
-      } else {
-        $("badge-llm").className = "badge badge-off";
-        $("badge-llm").textContent = cfg.profiles && cfg.profiles.length ? "未启用" : "未配置";
-        $("llm-current").textContent = cfg.profiles && cfg.profiles.length
-          ? "已有 " + cfg.profiles.length + " 个配置但未设「使用中」，条目优化不可用"
-          : "未启用（条目优化不可用）";
-      }
-      // 最大 token 写的是使用中 profile 的字段：无使用中项时不可编辑
-      $("llm-max-tokens").disabled = !active;
-      $("btn-llm-max-save").disabled = !active;
-    }).catch(function (err) { showError(err.message); });
-  }
-
-  // 最大 token 两段式：文本框只改本地值，点保存才落盘（同规则配置卡约定）
-  $("btn-llm-max-save").addEventListener("click", function () {
-    var n = parseInt($("llm-max-tokens").value, 10);
-    if (isNaN(n) || (n !== 0 && (n < 1024 || n > 131072))) {
-      showError("最大 token 为 0（默认 8192）或 1024~131072");
-      refreshLLM();
-      return;
-    }
-    api("/api/llm/max-tokens", { method: "POST", body: { max_tokens: n } })
-      .then(refreshLLM)
-      .catch(function (err) { showError(err.message); refreshLLM(); });
-  });
-
-  // llmExpanded：当前展开编辑的卡（profile 名；"__new__" = 添加中的新卡）
-  var llmExpanded = null;
-
-  function openLLMModal() {
-    refreshLLM();
-    renderLLMCards();
-    $("llm-modal").classList.remove("hidden");
-  }
-
-  function llmFormHTML(p) {
-    return '<form onsubmit="return false">' +
-      '<label>名称 <input type="text" data-f="name" value="' + esc(p.name || "") + '" autocomplete="off"></label>' +
-      '<label>类型 <select data-f="kind">' +
-      '<option value="openai"' + (p.kind !== "anthropic" ? " selected" : "") + '>OpenAI 兼容（/chat/completions）</option>' +
-      '<option value="anthropic"' + (p.kind === "anthropic" ? " selected" : "") + '>Anthropic 兼容（/v1/messages）</option>' +
-      '</select></label>' +
-      '<label>base_url <input type="text" data-f="base_url" value="' + esc(p.base_url || "") + '" placeholder="https://api.openai.com/v1" autocomplete="off"></label>' +
-      '<label>模型 <input type="text" data-f="model" value="' + esc(p.model || "") + '" autocomplete="off"></label>' +
-      '<label>api_key <input type="password" data-f="api_key" value="' + esc(p.api_key || "") + '" placeholder="留空或掩码 = 保留原值" autocomplete="off"></label>' +
-      '<div class="modal-actions" style="margin-top:8px">' +
-      '<button type="button" class="btn btn-primary" data-act="save">保存</button>' +
-      '<button type="button" class="btn" data-act="test">测试</button>' +
-      '<button type="button" class="btn" data-act="adv">高级</button>' +
-      '<span class="grow"></span>' +
-      '<button type="button" class="btn btn-danger" data-act="delete">删除</button>' +
-      '</div>' +
-      // 高级参数：某些模型锁死特定参数值（如 Kimi k3 temperature=1），按服务要求显式覆盖
-      '<div class="llm-adv hidden">' +
-      '<label>temperature <input type="text" data-f="temperature" value="' + esc(p.temperature || "") + '" placeholder="留空 = 服务端默认（0~2）" autocomplete="off"></label>' +
-      '<label>max_tokens <input type="text" data-f="max_tokens" value="' + (p.max_tokens || "") + '" placeholder="0 或留空 = 默认" autocomplete="off"></label>' +
-      '</div>' +
-      '<p class="llm-msg" data-msg></p>' +
-      '</form>';
-  }
-
-  function renderLLMCards() {
-    var list = $("llm-list");
-    list.innerHTML = "";
-    var profiles = (state.llm && state.llm.profiles) || [];
-    if (llmExpanded === "__new__") profiles = profiles.concat([{ name: "", kind: "openai", base_url: "", model: "", api_key: "", _new: true }]);
-    profiles.forEach(function (p) {
-      var key = p._new ? "__new__" : p.name;
-      var card = document.createElement("div");
-      card.className = "llm-card";
-      var head = '<div class="llm-card-head">' +
-        '<span class="emb-dot' + (p.active ? "" : " off") + '"></span>' +
-        '<span class="llm-card-name">' + esc(p.name || "（新配置）") + '</span>' +
-        '<span class="llm-tag' + (p.kind === "anthropic" ? " anthropic" : "") + '">' +
-        (p.kind === "anthropic" ? "Anthropic 兼容" : "OpenAI 兼容") + '</span>';
-      if (p.active) {
-        head += '<span class="llm-using">使用中</span>';
-      }
-      head += '<span class="grow"></span>';
-      if (!p.active && !p._new) {
-        head += '<button type="button" class="btn" data-act="activate">设为使用中</button>';
-      }
-      head += '<button type="button" class="btn" data-act="toggle">' + (llmExpanded === key ? "收起" : "编辑") + '</button></div>';
-      card.innerHTML = head;
-      if (!p._new) {
-        var meta = document.createElement("p");
-        meta.className = "llm-card-meta";
-        meta.textContent = (p.model || "—") + " · " + (p.base_url || "—");
-        card.appendChild(meta);
-      }
-      if (llmExpanded === key) {
-        var wrap = document.createElement("div");
-        wrap.innerHTML = llmFormHTML(p);
-        card.appendChild(wrap.firstChild);
-        // 类型下拉切换时同步卡头徽标（未保存只改显示，表单值仍以保存为准）
-        var kindSel = card.querySelector('[data-f="kind"]');
-        var kindTag = card.querySelector(".llm-tag");
-        kindSel.addEventListener("change", function () {
-          var anth = kindSel.value === "anthropic";
-          kindTag.textContent = anth ? "Anthropic 兼容" : "OpenAI 兼容";
-          kindTag.classList.toggle("anthropic", anth);
-        });
-      }
-      card.addEventListener("click", function (ev) {
-        var act = ev.target.getAttribute && ev.target.getAttribute("data-act");
-        if (!act) return;
-        llmCardAction(act, key, card);
-      });
-      list.appendChild(card);
-    });
-  }
-
-  function llmCardForm(card) {
-    var v = {};
-    card.querySelectorAll("[data-f]").forEach(function (el) { v[el.getAttribute("data-f")] = el.value; });
-    return v;
-  }
-
-  function llmCardMsg(card, text, cls) {
-    var m = card.querySelector("[data-msg]");
-    if (m) { m.textContent = text; m.className = "llm-msg" + (cls ? " " + cls : ""); }
-  }
-
-  function llmCardAction(act, key, card) {
-    if (act === "toggle") {
-      llmExpanded = llmExpanded === key ? null : key;
-      renderLLMCards();
-      return;
-    }
-    if (act === "activate") {
-      api("/api/llm/active", { method: "POST", body: { name: key } })
-        .then(function (cfg) { state.llm = cfg; refreshLLM(); renderLLMCards(); })
-        .catch(function (err) { showError(err.message); });
-      return;
-    }
-    if (act === "delete") {
-      if (!confirm("删除配置「" + key + "」？")) return;
-      api("/api/llm/delete", { method: "POST", body: { name: key } })
-        .then(function (cfg) { state.llm = cfg; if (llmExpanded === key) llmExpanded = null; refreshLLM(); renderLLMCards(); })
-        .catch(function (err) { showError(err.message); });
-      return;
-    }
-    if (act === "adv") {
-      var adv = card.querySelector(".llm-adv");
-      if (adv) adv.classList.toggle("hidden");
-      return;
-    }
-    var f = llmCardForm(card);
-    f.max_tokens = parseInt(f.max_tokens, 10) || 0;
-    if (act === "test") {
-      llmCardMsg(card, "测试中…");
-      api("/api/llm/test", { method: "POST", body: { name: f.name, kind: f.kind, base_url: f.base_url, model: f.model, api_key: f.api_key, temperature: f.temperature, max_tokens: f.max_tokens } })
-        .then(function () { llmCardMsg(card, "连接成功", "ok"); })
-        .catch(function (err) { llmCardMsg(card, err.message, "err"); });
-      return;
-    }
-    if (act === "save") {
-      api("/api/llm/profile", { method: "POST", body: {
-        name: f.name, kind: f.kind, base_url: f.base_url, model: f.model, api_key: f.api_key,
-        temperature: f.temperature, max_tokens: f.max_tokens, activate: false
-      } })
-        .then(function (cfg) {
-          state.llm = cfg;
-          llmExpanded = f.name; // 新卡保存后定位到实名卡
-          refreshLLM(); renderLLMCards();
-        })
-        .catch(function (err) { llmCardMsg(card, err.message, "err"); });
-    }
-  }
-
-  $("btn-llm-config").addEventListener("click", openLLMModal);
-  $("llm-close").addEventListener("click", function () { $("llm-modal").classList.add("hidden"); });
-  $("llm-add").addEventListener("click", function () { llmExpanded = "__new__"; renderLLMCards(); });
-
-  // ---- 短语管理弹窗 ----
-  function renderGatePhrases() {
-    var g = state.gate || { builtin: [], extra: [] };
-    var list = $("gate-phrase-list");
-    list.innerHTML = "";
-    g.builtin.forEach(function (p) {
-      list.appendChild(gatePhraseRow(p, "内置", null));
-    });
-    (g.extra || []).forEach(function (p, i) {
-      list.appendChild(gatePhraseRow(p, "自定义", i));
-    });
-  }
-
-  // onEdit==null → 内置只读行；否则为 extra 下标（编辑/删除）
-  function gatePhraseRow(phrase, source, extraIdx) {
-    var row = document.createElement("div");
-    row.className = "gate-phrase-row";
-    var text = document.createElement("span");
-    text.className = "grow";
-    text.textContent = phrase;
-    var src = document.createElement("span");
-    src.className = "muted";
-    src.textContent = source;
-    row.appendChild(text);
-    row.appendChild(src);
-    if (extraIdx === null) return row;
-    var edit = document.createElement("button");
-    edit.type = "button";
-    edit.className = "btn";
-    edit.textContent = "编辑";
-    edit.addEventListener("click", function () {
-      var input = document.createElement("input");
-      input.type = "text";
-      input.maxLength = 64;
-      input.value = phrase;
-      row.replaceChild(input, text);
-      input.focus();
-      var done = false;
-      function finish(save) {
-        if (done) return;
-        done = true;
-        if (save) saveGateExtra(function (xs) { xs[extraIdx] = input.value; });
-        else renderGatePhrases();
-      }
-      input.addEventListener("keydown", function (ev) {
-        if (ev.key === "Enter") finish(true);
-        if (ev.key === "Escape") finish(false);
-      });
-      input.addEventListener("blur", function () { finish(false); });
-    });
-    var del = document.createElement("button");
-    del.type = "button";
-    del.className = "btn btn-danger";
-    del.textContent = "删除";
-    del.addEventListener("click", function () {
-      saveGateExtra(function (xs) { xs.splice(extraIdx, 1); });
-    });
-    row.appendChild(edit);
-    row.appendChild(del);
-    return row;
-  }
-
-  // 全量替换语义：本地改完整个 extra 列表后一次性 POST（幂等）
-  function saveGateExtra(mutate) {
-    var project = captureProject();
-    if (!project) { showError("尚无已注册项目，请先 ok init"); return; }
-    var xs = ((state.gate && state.gate.extra) || []).slice();
-    mutate(xs);
-    api("/api/gate", {
-      method: "POST",
-      body: { project: project, extra: xs }
-    }).then(function (g) {
-      state.gate = g;
-      renderGatePhrases();
-      refreshGate();
-    }).catch(function (err) { showError(err.message); renderGatePhrases(); });
-  }
-
-  $("btn-gate-add").addEventListener("click", function () {
-    var input = $("gate-phrase-input");
-    var v = input.value.trim();
-    if (!v) return;
-    saveGateExtra(function (xs) { xs.push(v); });
-    input.value = "";
-  });
-  $("gate-phrase-input").addEventListener("keydown", function (ev) {
-    if (ev.key === "Enter") $("btn-gate-add").click();
-  });
-  $("btn-gate-phrases").addEventListener("click", function () {
-    renderGatePhrases();
-    $("gate-modal").classList.remove("hidden");
-  });
-  $("gate-close").addEventListener("click", function () {
-    $("gate-modal").classList.add("hidden");
-  });
-
-  $("agent-select").addEventListener("change", function () {
-    state.agent = this.value;
-    localStorage.setItem("ok.agent", state.agent);
-    if (state.status) renderGuide(state.status);
-  });
-
-  $("btn-hooks").addEventListener("click", function () {
-    api("/api/setup/hooks", { method: "POST", body: { agent: state.agent } })
-      .then(function () { refreshStatus(); })
-      .catch(function (err) { showError(err.message); });
-  });
-
-  // 信任门说明按钮：点击切换说明卡显隐（按钮本身仅 codex 时可见）。
-  $("btn-codex-help").addEventListener("click", function () {
-    var card = $("codex-help-card");
-    if (card) card.classList.toggle("hidden");
-  });
-
-  // hook 超时为全局统一设置：保存后对所有已检测 agent 重写 hooks（不传 agent）。
-  $("btn-hooks-timeout").addEventListener("click", function () {
-    var timeout = parseInt($("hooks-timeout").value, 10);
-    if (!timeout || timeout < 1 || timeout > 60) {
-      showError("hook 超时必须是 1~60 的整数");
-      return;
-    }
-    api("/api/setup/hooks", { method: "POST", body: { timeout_sec: timeout } })
-      .then(function () { refreshStatus(); })
-      .catch(function (err) { showError(err.message); });
-  });
-
-  // reasonix 三档：radio 变更即保存（sidecar 实时读配置，即时生效）；
-  // 失败时回退 radio 到已保存档位。
-  document.getElementsByName("rx-enforce").forEach(function (r) {
-    r.addEventListener("change", function () {
-      api("/api/reasonix/enforce-mode", { method: "POST", body: { mode: r.value } })
-        .then(function () {
-          if (state.status) state.status.rxEnforceMode = r.value;
-        })
-        .catch(function (err) {
-          showError("强制检查方式保存失败：" + err.message);
-          renderRxEnforce();
-        });
-    });
-  });
-
-  $("btn-skills").addEventListener("click", function () {
-    api("/api/setup/skills", { method: "POST" })
-      .then(function () { refreshStatus(); })
-      .catch(function (err) { showError(err.message); });
-  });
-
-  $("btn-toggle").addEventListener("click", function () {
-    var on = state.status ? state.status.disabled : false;
-    api("/api/toggle", { method: "POST", body: { on: on } })
-      .then(function () { refreshStatus(); })
-      .catch(function (err) { showError(err.message); });
-  });
-
-  $("btn-uninstall").addEventListener("click", function () {
-    if (!confirm("确认卸载？将移除 hooks 配置、技能与全局 embedding 配置。\n知识库数据（条目、索引、注册表）全部保留。")) return;
-    api("/api/uninstall", { method: "POST" })
-      .then(function (r) {
-        showError("已卸载：hooks " + (r.hooks_removed ? "已移除" : "无") +
-          "，技能移除 " + r.skills_removed + " 个，embedding " +
-          (r.embedding_removed ? "已移除" : "无") + "。知识库数据已保留。");
-        refreshStatus();
-      })
-      .catch(function (err) { showError(err.message); });
-  });
-
-  // ---------- 其他页：导出 / 导入 ----------
-
-  $("btn-export").addEventListener("click", function () {
-    var p = $("misc-export-project").value || "all"; // 无项目时下拉为空，回退到全部
-    fetch("/api/export?project=" + encodeURIComponent(p), {
-      headers: { "X-Ok-Token": TOKEN },
-    }).then(function (res) {
-      if (!res.ok) {
-        return res.json().catch(function () { return {}; }).then(function (e) {
-          showError("导出失败：" + (e.error || res.status));
-        });
-      }
-      return res.blob().then(function (blob) {
-        var a = document.createElement("a");
-        a.href = URL.createObjectURL(blob);
-        a.download = "openknowledge-backup-" + p + ".zip";
-        a.click();
-        URL.revokeObjectURL(a.href);
-      });
-    }).catch(function (err) { showError("网络错误: " + err.message); });
-  });
-
-  $("btn-import").addEventListener("click", function () {
-    var out = $("misc-import-result");
-    var f = $("misc-import-file").files[0];
-    if (!f) {
-      out.textContent = "请先选择 zip 文件";
-      return;
-    }
-    var fd = new FormData();
-    fd.append("file", f);
-    fetch("/api/import", { method: "POST", headers: { "X-Ok-Token": TOKEN }, body: fd })
-      .then(function (res) {
-        return res.json().catch(function () { return {}; }).then(function (data) {
-          if (!res.ok) {
-            out.textContent = "导入失败：" + (data.error || res.status);
-            return;
-          }
-          out.textContent = "导入 " + data.imported + " 条，跳过 " + data.skipped +
-            " 条（格式损坏），涉及项目：" + (data.projects || []).join("、") + "；同名条目已覆盖";
-          state.lastVersion = 0;
-          refreshStatus();
-          loadEntries();
-        });
-      }).catch(function (err) { showError("网络错误: " + err.message); });
-  });
-
-  // ---------- 其他页：删除项目知识库（三重确认：备份可选 + 勾选了解 + 输入项目名） ----------
-
-  var delTarget = ""; // 当前弹窗要删的项目名
-
-  function updateDelConfirm() {
-    var ok = $("del-ack").checked && $("del-name").value.trim() === delTarget && delTarget !== "";
-    $("btn-del-confirm").disabled = !ok;
-  }
-
-  $("btn-del-project").addEventListener("click", function () {
-    delTarget = $("del-project-select").value || "";
-    if (!delTarget) return;
-    $("del-impact").textContent = "正在统计条目…";
-    $("del-backup").checked = true;
-    $("del-ack").checked = false;
-    $("del-name").value = "";
-    $("del-name-hint").firstChild.textContent = "请输入完整项目名 " + delTarget + " 以确认 ";
-    $("btn-del-confirm").textContent = "永久删除";
-    $("del-modal").classList.remove("hidden");
-    updateDelConfirm();
-    // 影响面统计失败不阻塞确认流程
-    api("/api/entries?project=" + encodeURIComponent(delTarget)).then(function (list) {
-      list = list || [];
-      var drafts = list.filter(function (e) { return e.draft; }).length;
-      $("del-impact").textContent = "将永久删除项目「" + delTarget + "」的知识库：共 " +
-        list.length + " 条知识（含 " + drafts + " 条草稿）、索引与项目配置，并注销注册表" +
-        "（hooks 不再注入）。项目源码目录不受影响。";
-    }).catch(function () {
-      $("del-impact").textContent = "条目统计失败（不影响删除操作）。将删除项目「" + delTarget +
-        "」的知识库、索引与项目配置，并注销注册表。项目源码目录不受影响。";
-    });
-  });
-
-  ["del-ack", "del-name"].forEach(function (id) {
-    $(id).addEventListener("input", updateDelConfirm);
-    $(id).addEventListener("change", updateDelConfirm);
-  });
-  $("btn-del-cancel").addEventListener("click", function () {
-    $("del-modal").classList.add("hidden");
-  });
-
-  $("btn-del-confirm").addEventListener("click", function () {
-    var btn = this;
-    if (btn.disabled) return;
-    btn.disabled = true;
-    btn.textContent = "删除中…";
-    var name = delTarget;
-    // 可选备份：复用导出卡的 blob 下载写法；导出失败中止删除
-    var backup = Promise.resolve();
-    if ($("del-backup").checked) {
-      backup = fetch("/api/export?project=" + encodeURIComponent(name), {
-        headers: { "X-Ok-Token": TOKEN },
-      }).then(function (res) {
-        if (!res.ok) throw new Error("备份导出失败（" + res.status + "），已中止删除");
-        return res.blob().then(function (blob) {
-          var a = document.createElement("a");
-          a.href = URL.createObjectURL(blob);
-          a.download = "openknowledge-backup-" + name + ".zip";
-          a.click();
-          URL.revokeObjectURL(a.href);
-        });
-      });
-    }
-    backup.then(function () {
-      return api("/api/project?project=" + encodeURIComponent(name), { method: "DELETE" });
-    }).then(function (res) {
-      $("del-modal").classList.add("hidden");
-      state.lastVersion = 0;
-      if (state.project === name) state.project = ""; // 删的是当前选中项目：先清空，避免 refreshCapture 拿着已删项目名 404 误报
-      refreshStatus();
-      if (res && res.warning) {
-        showError("项目已注销，但" + res.warning + "，请手动清理 " + (res.dir || ""));
-      }
-    }).catch(function (err) {
-      showError(err.message);
-    }).then(function () {
-      btn.disabled = false;
-      btn.textContent = "永久删除";
-      updateDelConfirm();
-    });
-  });
-
-  // ---------- 心跳（5s 轮询，变更才重拉；进程由 daemon 托管，页面关闭不退出） ----------
-
-  setInterval(function () {
-    // 心跳顺带做"变更才重拉"的自动刷新：版本（kb.db mtime）变化才重载列表
-    var url = "/api/heartbeat" + (state.project ? "?project=" + encodeURIComponent(state.project) : "");
-    api(url, { method: "POST" }).then(function (res) {
-      var v = res && res.version ? res.version : 0;
-      if (state.lastVersion !== 0 && v !== 0 && v !== state.lastVersion) {
-        loadEntries(); // 数据库有变更，自动刷新（仅此时才重拉）
-      }
-      if (v !== 0) state.lastVersion = v;
-    }).catch(function () { /* 心跳失败不打扰用户 */ });
-  }, 5000);
-
-  // ---------- embedding 配置弹窗 ----------
-
-  var embState = { data: null, sel: -1, pollTimer: null, draft: false };
-
-  function embOpen() {
-    $("emb-modal").classList.remove("hidden");
-    embState.draft = false; // 每次打开重置草稿态
-    embRefresh();
-  }
-  function embClose() {
-    $("emb-modal").classList.add("hidden");
-    if (embState.pollTimer) { clearTimeout(embState.pollTimer); embState.pollTimer = null; }
-  }
-  function embRefresh(keepSel, selectName) {
-    var embProject = state.project || (state.status && state.status.projects && state.status.projects[0] && state.status.projects[0].name) || "";
-    api("/api/setup/embedding?project=" + encodeURIComponent(embProject)).then(function (d) {
-      embState.data = d;
-      if (selectName != null) {
-        embState.sel = d.profiles.findIndex(function (p) { return p.name === selectName; });
-      } else if (!keepSel) {
-        embState.sel = d.active ? d.profiles.findIndex(function (p) { return p.name === d.active; }) : -1;
-      }
-      if (!embState.draft && embState.sel < 0 && d.profiles.length > 0) embState.sel = 0;
-      embRenderList();
-      if (keepSel && embState.draft) {
-        embRenderBiStatus(); // 草稿进行中只刷新下载状态区，不重填表单（评审修复）
-      } else {
-        embRenderForm();
-      }
-      embSchedulePoll();
-    });
-  }
-  function embRenderList() {
-    var d = embState.data, box = $("emb-list");
-    box.innerHTML = "";
-    d.profiles.forEach(function (p, i) {
-      var item = document.createElement("div");
-      item.className = "emb-item" + (i === embState.sel ? " active" : "");
-      var dot = document.createElement("span");
-      dot.className = "emb-dot" + (p.name === d.active ? "" : " off");
-      dot.title = "使用中";
-      var right = document.createElement("div");
-      var nm = document.createElement("div");
-      nm.className = "emb-item-name";
-      nm.textContent = p.name;
-      var tag = document.createElement("span");
-      tag.className = "emb-tag" + (p.type === "builtin" ? " local" : "");
-      tag.textContent = p.type === "builtin" ? "内置" : p.type === "ollama" ? "Ollama" : "自定义";
-      right.appendChild(nm); right.appendChild(tag);
-      item.appendChild(dot); item.appendChild(right);
-      item.onclick = function () { embState.sel = i; embState.draft = false; embMsg(""); embRenderList(); embRenderForm(); };
-      box.appendChild(item);
-    });
-    // 草稿临时条目（添加后未保存）：createElement/textContent 构建，不拼 innerHTML
-    if (embState.draft) {
-      var draft = document.createElement("div");
-      draft.className = "emb-item" + (embState.sel === -1 ? " active" : "");
-      var ddot = document.createElement("span");
-      ddot.className = "emb-dot off";
-      ddot.title = "未保存";
-      var dright = document.createElement("div");
-      var dnm = document.createElement("div");
-      dnm.className = "emb-item-name";
-      dnm.id = "emb-draft-name";
-      dnm.textContent = $("emb-f-name").value.trim() || "自定义";
-      var dtag = document.createElement("span");
-      dtag.id = "emb-draft-tag";
-      dtag.className = "emb-tag";
-      dtag.textContent = "自定义";
-      dright.appendChild(dnm); dright.appendChild(dtag);
-      draft.appendChild(ddot); draft.appendChild(dright);
-      draft.onclick = function () { embState.sel = -1; embMsg(""); embRenderList(); embRenderForm(); };
-      box.appendChild(draft);
-    }
-  }
-  function embCur() {
-    var d = embState.data;
-    return embState.sel >= 0 && d && d.profiles[embState.sel] ? d.profiles[embState.sel] : null;
-  }
-  function embRenderForm() {
-    var p = embCur(), d = embState.data;
-    $("emb-f-name").value = p ? p.name : "";
-    $("emb-f-type").value = p ? p.type : "openai"; // 新建默认自定义
-    $("emb-f-type").disabled = !embState.draft; // 类型保存后锁定，仅草稿可改
-    // 草稿态：名称徽标随表单重填同步（embRenderList 先于本函数，读到的是旧值）
-    if (embState.draft) {
-      var dn = document.getElementById("emb-draft-name");
-      if (dn) dn.textContent = $("emb-f-name").value.trim() || "自定义";
-    }
-    // 内置模型下拉
-    var biSel = $("emb-f-bi-model");
-    biSel.innerHTML = "";
-    (d.builtin_models || []).forEach(function (m) {
-      var o = document.createElement("option");
-      o.value = m.id; o.textContent = m.label + (m.downloaded ? "（已下载）" : "");
-      biSel.appendChild(o);
-    });
-    if (p && p.type === "builtin") biSel.value = p.model;
-    $("emb-f-bi-mirror").value = (p && p.mirror) || "hf-mirror";
-    $("emb-f-bi-dir").value = d.models_dir || "";
-    $("emb-f-bi-dir").placeholder = d.models_dir_default || "";
-    $("emb-f-ol-url").value = p && p.type === "ollama" ? p.base_url : "http://localhost:11434";
-    $("emb-f-base-url").value = p && p.type === "openai" ? p.base_url : "";
-    $("emb-f-model").value = p && p.type === "openai" ? p.model : "";
-    $("emb-f-api-key").value = "";
-    $("emb-f-api-key").placeholder = p && p.has_key ? "已保存（留空保持不变）" : "api_key";
-    embTypeSwitch();
-    embRenderBiStatus();
-    var d0 = embState.data || {};
-    var warnEl = $("emb-warn");
-    if (d0.active_identity && d0.index_model && d0.active_identity !== d0.index_model) {
-      warnEl.textContent = "⚠ 使用中模型（" + d0.active_identity + "）与当前项目索引（" + d0.index_model + "）不符——切换后请运行 ok index 重建";
-    } else {
-      warnEl.textContent = "";
-    }
-  }
-  function embTypeSwitch() {
-    var t = $("emb-f-type").value;
-    $("emb-fs-builtin").classList.toggle("hidden", t !== "builtin");
-    $("emb-fs-ollama").classList.toggle("hidden", t !== "ollama");
-    $("emb-fs-openai").classList.toggle("hidden", t !== "openai");
-    if (t === "ollama") embLoadOllamaModels();
-    // 草稿态：类型徽标实时联动
-    if (embState.draft) {
-      var dt = document.getElementById("emb-draft-tag");
-      if (dt) {
-        dt.textContent = t === "builtin" ? "内置" : t === "ollama" ? "Ollama" : "自定义";
-        dt.className = "emb-tag" + (t === "builtin" ? " local" : "");
-      }
-    }
-  }
-  function embLoadOllamaModels() {
-    var base = $("emb-f-ol-url").value.trim() || "http://localhost:11434";
-    var p = embCur();
-    api("/api/setup/embedding/ollama-models?base_url=" + encodeURIComponent(base)).then(function (r) {
-      var sel = $("emb-f-ol-model");
-      sel.innerHTML = "";
-      var ok = r.models && r.models.length > 0;
-      $("emb-ol-sel-row").classList.toggle("hidden", !ok);
-      $("emb-ol-input-row").classList.toggle("hidden", ok);
-      if (ok) {
-        r.models.forEach(function (m) {
-          var o = document.createElement("option"); o.value = m; o.textContent = m; sel.appendChild(o);
-        });
-        if (p && p.type === "ollama") sel.value = p.model;
-        $("emb-ol-hint").textContent = "已探测到 " + r.models.length + " 个已安装模型";
-      } else {
-        if (p && p.type === "ollama") $("emb-f-ol-model-text").value = p.model;
-        $("emb-ol-hint").textContent = "未能探测模型列表（" + (r.error || "无模型") + "），手动输入；未安装请先 ollama pull bge-m3";
-      }
-    });
-  }
-  function embRenderBiStatus() {
-    var d = embState.data, box = $("emb-bi-status");
-    var id = $("emb-f-bi-model").value;
-    var m = (d.builtin_models || []).filter(function (x) { return x.id === id; })[0];
-    if (!m) { box.textContent = "…"; return; }
-    var dl = d.download || {};
-    if (dl.state === "downloading" && dl.model_id === id) {
-      var pct = dl.total ? Math.floor(dl.done * 100 / dl.total) : 0;
-      box.innerHTML = "";
-      box.appendChild(document.createTextNode("正在下载 — " + fmtMB(dl.done) + " / " + fmtMB(dl.total)));
-      var bar = document.createElement("div"); bar.className = "emb-prog";
-      var fill = document.createElement("i"); fill.style.width = pct + "%";
-      bar.appendChild(fill); box.appendChild(bar);
-      var tip = document.createElement("span"); tip.textContent = pct + "%";
-      box.appendChild(tip);
-      var cancel = document.createElement("button");
-      cancel.className = "btn"; cancel.textContent = "取消"; cancel.style.marginLeft = "8px";
-      cancel.onclick = function () {
-        api("/api/setup/embedding/download/cancel", { method: "POST", body: { model_id: id } })
-          .then(function () { embRefresh(true); });
-      };
-      box.appendChild(cancel);
-      return;
-    }
-    if (m.downloaded) {
-      box.textContent = "✓ 模型已就绪（" + m.dim + " 维），sidecar 按需拉起、空闲自动退出";
-      return;
-    }
-    box.innerHTML = "";
-    if (!d.runtime_available) {
-      box.textContent = "⚠ 推理运行时缺失——内置模式仅安装版可用（裸 exe 形态请用 Ollama/自定义）";
-      return;
-    }
-    var btn = document.createElement("button");
-    btn.className = "btn"; btn.textContent = "下载模型（" + fmtMB(m.size) + "）";
-    btn.onclick = function () {
-      api("/api/setup/embedding/download", { method: "POST", body: { model_id: id, mirror: $("emb-f-bi-mirror").value } })
-        .then(function () { embRefresh(true); });
-    };
-    box.appendChild(btn);
-    if (dl.state === "error" && dl.model_id === id) {
-      var err = document.createElement("span");
-      err.style.color = "var(--danger)";
-      err.textContent = "  上次下载失败：" + dl.error;
-      box.appendChild(err);
-    }
-  }
-  function fmtMB(n) { return (n / 1048576).toFixed(0) + " MB"; }
-  function embSchedulePoll() {
-    if (embState.pollTimer) clearTimeout(embState.pollTimer);
-    var dl = embState.data && embState.data.download;
-    if (dl && dl.state === "downloading") {
-      embState.pollTimer = setTimeout(function () { embRefresh(true); }, 1000);
-    }
-  }
-  function embMsg(text, cls) {
-    var el = $("emb-form-msg");
-    el.textContent = text || "";
-    el.className = "emb-note" + (cls ? " " + cls : "");
-  }
-  function embCollect() {
-    var t = $("emb-f-type").value;
-    var body = { name: $("emb-f-name").value.trim(), type: t };
-    if (t === "openai") {
-      body.base_url = $("emb-f-base-url").value.trim();
-      body.model = $("emb-f-model").value.trim();
-      body.api_key = $("emb-f-api-key").value;
-    } else if (t === "ollama") {
-      body.base_url = $("emb-f-ol-url").value.trim() || "http://localhost:11434";
-      var selOk = !$("emb-ol-sel-row").classList.contains("hidden");
-      body.model = selOk ? $("emb-f-ol-model").value : $("emb-f-ol-model-text").value.trim();
-    } else {
-      body.model = $("emb-f-bi-model").value;
-      body.mirror = $("emb-f-bi-mirror").value;
-    }
-    return body;
-  }
-
-  $("btn-embedding-config").onclick = embOpen;
-  $("emb-close").onclick = embClose;
-  $("emb-f-type").onchange = embTypeSwitch;
-  $("emb-f-bi-model").onchange = embRenderBiStatus;
-  $("emb-f-ol-url").onchange = embLoadOllamaModels;
-  // 模型目录：失焦/回车自动保存（空串=恢复默认）；已有模型文件不随迁
-  $("emb-f-bi-dir").onchange = function () {
-    api("/api/setup/embedding/models-dir", { method: "POST", body: { path: this.value.trim() } }).then(function () {
-      embMsg("模型目录已更新（已有模型文件不随迁，状态按新目录判定）", "ok");
-      embRefresh(true);
-    }).catch(function (e) {
-      embMsg(e.message || String(e), "err");
-      embRefresh(true); // 回显旧值
-    });
-  };
-  $("emb-bi-opendir").onclick = function () {
-    api("/api/setup/embedding/open-models-dir", { method: "POST" })
-      .catch(function (e) { embMsg(e.message || String(e), "err"); });
-  };
-  $("emb-add").onclick = function () { embState.sel = -1; embState.draft = true; embMsg(""); embRenderList(); embRenderForm(); $("emb-f-name").focus(); };
-  $("emb-f-name").oninput = function () {
-    if (embState.draft) {
-      var el = document.getElementById("emb-draft-name");
-      if (el) el.textContent = this.value.trim() || "自定义";
-    }
-  };
-  $("emb-save").onclick = function () {
-    var body = embCollect();
-    if (!body.name) { embMsg("名称不能为空", "err"); return; }
-    api("/api/setup/embedding/profile", { method: "POST", body: body }).then(function () {
-      embMsg("已保存", "ok");
-      embState.draft = false;
-      embRefresh(true, body.name);
-      refreshStatus();
-    }).catch(function (e) { embMsg(e.message || String(e), "err"); });
-  };
-  $("emb-activate").onclick = function () {
-    var body = embCollect();
-    if (!body.name) { embMsg("名称不能为空", "err"); return; }
-    api("/api/setup/embedding/profile", { method: "POST", body: body }).then(function () {
-      return api("/api/setup/embedding/active", { method: "POST", body: { name: body.name } });
-    }).then(function () {
-      embMsg("已设为使用中", "ok");
-      embState.draft = false;
-      embRefresh(true, body.name);
-      refreshStatus();
-    }).catch(function (e) { embMsg(e.message || String(e), "err"); });
-  };
-  $("emb-test").onclick = function () {
-    var body = embCollect(); // 按表单当前内容测，不要求先保存
-    if (!body.name) { embMsg("先填写名称", "err"); return; }
-    embMsg("测试中…");
-    api("/api/setup/embedding/test", { method: "POST", body: body }).then(function (r) {
-      embMsg(r.ok ? "✓ 可用" : "✗ " + (r.error || "失败"), r.ok ? "ok" : "err");
-    }).catch(function (e) { embMsg(e.message || String(e), "err"); });
-  };
-  $("emb-delete").onclick = function () {
-    var p = embCur();
-    if (!p) return;
-    if (!confirm("删除配置「" + p.name + "」？" + (embState.data.active === p.name ? "它是使用中项，删除后退回关键词检索。" : ""))) return;
-    api("/api/setup/embedding/profile", { method: "DELETE", body: { name: p.name } }).then(function () {
-      embState.sel = -1;
-      embRefresh();
-      refreshStatus();
-    }).catch(function (e) { embMsg(e.message || String(e), "err"); });
-  };
-
-  // ---------- 日志页 ----------
-
-  var logState = {
-    lines: [],
-    sources: { ok: true, daemon: true, sidecar: true },
-    semanticOnly: false,
-    filter: "",
-    poll: null,
-    stickBottom: true,
-    sig: "", // 上轮日志文件签名（size-mtime），用于 unchanged 跳过重绘
-  };
-
-  function logActive() {
-    return !$("page-logs").classList.contains("hidden");
-  }
-
-  function logPollOnce() {
-    if (!logActive() || !$("log-autorefresh").checked) return;
-    // 带上轮签名：文件没变时服务端只回 unchanged，跳过重绘（大文件下避免每 2s 全量渲染）
-    var url = "/api/logs?tail=400" + (logState.sig ? "&sig=" + encodeURIComponent(logState.sig) : "");
-    api(url).then(function (data) {
-      if (!data) return;
-      logState.sig = data.sig || logState.sig;
-      if (data.unchanged) return;
-      logState.lines = data.lines || [];
-      logRender();
-    }).catch(function () { /* 轮询静默失败 */ });
-  }
-
-  function logStartPolling() {
-    if (logState.poll) return;
-    logState.poll = setInterval(logPollOnce, 2000);
-  }
-
-  function logStopPolling() {
-    if (logState.poll) {
-      clearInterval(logState.poll);
-      logState.poll = null;
-    }
-  }
-
-  function logRender() {
-    var body = $("logs-body");
-    var q = logState.filter.toLowerCase();
-    var html = "";
-    var count = 0;
-    logState.lines.forEach(function (l) {
-      if (!logState.sources[l.src]) return;
-      if (logState.semanticOnly && !l.semantic) return;
-      if (q && String(l.text).toLowerCase().indexOf(q) < 0) return;
-      count++;
-      html += '<span class="log-src log-src-' + esc(l.src) + '">' + esc(l.src) + '</span>' +
-        '<span class="log-sem' + (l.semantic ? '' : ' log-sem-off') + '">' + (l.semantic ? '◆' : '◇') + '</span>' +
-        esc(l.text) + "\n";
-    });
-    body.innerHTML = count ? html : '<span class="muted">（无匹配日志）</span>';
-    if (logState.stickBottom) body.scrollTop = body.scrollHeight;
-    $("log-meta").textContent = "共 " + logState.lines.length + " 行 / 显示 " + count + " 行";
-  }
-
-  $("logs-body").addEventListener("scroll", function () {
-    var b = $("logs-body");
-    logState.stickBottom = b.scrollHeight - b.scrollTop - b.clientHeight < 40;
-  });
-
-  function logToggleSource(key, btn) {
-    logState.sources[key] = !logState.sources[key];
-    btn.classList.toggle("chip-on", logState.sources[key]);
-    logRender();
-  }
-
-  $("log-src-ok").addEventListener("click", function () { logToggleSource("ok", this); });
-  $("log-src-daemon").addEventListener("click", function () { logToggleSource("daemon", this); });
-  $("log-src-sidecar").addEventListener("click", function () { logToggleSource("sidecar", this); });
-  $("log-semantic-only").addEventListener("click", function () {
-    logState.semanticOnly = !logState.semanticOnly;
-    this.classList.toggle("chip-on", logState.semanticOnly);
-    logRender();
-  });
-  $("log-filter").addEventListener("input", function () {
-    logState.filter = this.value;
-    logRender();
-  });
-  $("log-autorefresh").addEventListener("change", function () {
-    if (this.checked) {
-      logPollOnce();
-      logStartPolling();
-    } else {
-      logStopPolling();
-    }
-  });
-
-  // ---------- 启动 ----------
-
-  refreshStatus().then(function () {
-    if (state.status && state.status.projects && state.status.projects.length > 0) {
-      switchTab("manage");
-    }
-  }).then(checkChangelog);
+  main.appendChild(side);
+
+  // 五个菜单页均为占位：真实内容（管理树+详情 / 引导卡 / 设置卡 / 日志查看器 / 其他卡）
+  // 按实施计划 Task 3-7 逐页接入，占位文案走 i18n（notImpl 键）
+  const ph = el("div","placeholder");
+  ph.textContent = "「"+t(state.menu)+"」"+t("notImpl");
+  main.appendChild(ph);
+}
+
+/* 刷新恢复选中菜单：菜单点击时写入 location.hash，启动时读回（非法值回退 manage） */
+(function(){
+  const h = location.hash.replace(/^#/,"");
+  if(MENUS.some(m=>m.key===h)) state.menu = h;
 })();
+
+render();
