@@ -13,8 +13,10 @@ VERSION=$(sed -n 's/^#define AppVersion "\(.*\)"/\1/p' installer/openknowledge.i
 changed=0
 for f in README.md README_EN.md; do
   before=$(sed -n 's/.*badge\/version-\([0-9.]*\)-.*/\1/p' "$f" | head -1)
-  sed -i "s|\(badge/version-\)[0-9.]*\(-[0-9a-fA-F]\{6\}\)|\1${VERSION}\2|" "$f"
+  # 版本一致时不跑 sed -i——sed 重写会把 CRLF 工作区翻成 LF 造成"假漂移"，
+  # pre-push 守门会因此永远拦推（2026-08-22 实报）
   if [ "$before" != "$VERSION" ]; then
+    sed -i "s|\(badge/version-\)[0-9.]*\(-[0-9a-fA-F]\{6\}\)|\1${VERSION}\2|" "$f"
     echo "$f: version 徽标 $before → $VERSION"
     changed=1
   fi
