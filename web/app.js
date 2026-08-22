@@ -1,9 +1,9 @@
 "use strict";
 /* OkManager 配置中心外壳：五菜单左右栏 + 顶栏（侧栏折叠 / 中英 / 昼夜）+ hash 路由 + 整页重渲滚动保持。
    规范源 docs/prototypes/prototype-manager-v2.html——I18N/ICON/MENUS/el/esc/t/state/render/renderBody/
-   设置卡助手（pswitch/pcard/prow/pnumLive/ptext/pDirtyLive 等）均为原型平移；日志页（Task 3）与其他页
-   （Task 4）已接真后端，其余三页挂占位，按 docs/superpowers/plans/2026-08-21-config-center-ui.md 的
-   Task 5-7 逐页接入。 */
+   设置卡助手（pswitch/pcard/prow/pnumLive/ptext/pDirtyLive 等）均为原型平移；日志页（Task 3）、其他页
+   （Task 4）、管理页（Task 5）与设置页（Task 6）已接真后端，引导页挂占位，按
+   docs/superpowers/plans/2026-08-21-config-center-ui.md 的 Task 7 接入。 */
 
 /* ================= 后端 API ================= */
 // 语义沿用旧 GUI 的 api()：X-Ok-Token 鉴权头；对象 body 自动 JSON + Content-Type；204 → null；
@@ -76,11 +76,17 @@ const I18N = {
     eTitle:"语义检索（embedding）", eDesc:"混合检索的语义通道；不配置任何服务时退化为纯关键词检索",
     eNone:"未配置（仅关键词检索）", eTimeout:"调用超时（秒）", eDir:"内置模型目录", eActive:"使用中",
     lTitle:"模型配置（LLM）", lDesc:"生成场景（条目优化等）调用的大模型服务；temperature 留空 = 不传",
-    lTimeout:"生成超时（秒）", lTest:"测试连接", lTesting:"测试中…", lTestOk:"✓ 连通（231ms）",
+    lTimeout:"生成超时（秒）", lTest:"测试连接", lTesting:"测试中…", lTestOk:"✓ 连通（{ms}ms）",
     hTitle:"Hook 超时", hDesc:"写入各 agent hooks 的超时秒数。2026-08-04 曾发生 Windows 高负载下 5s 超时致 PostToolUse 整会话静默丢失，故默认 10", hSec:"超时（秒）",
     gtTitle:"泛化门控", gtDesc:"命中内置/自定义短语的泛化 prompt 跳过检索注入与 embed 调用",
-    gtOn:"启用门控", gtStatus:"内置 21 条 · 自定义 {n} 条", gtManage:"管理短语表",
+    gtOn:"启用门控", gtStatus:"内置 {b} 条 · 自定义 {n} 条", gtManage:"管理短语表",
     gtBuiltin:"内置短语（只读，随版本演进）", gtCustom:"自定义短语", gtAdd:"+ 添加", gtPh:"新短语…", gtClose:"关闭",
+    noProject:"尚无已注册项目（先 ok init）——该项目级设置暂不可用",
+    eDlReady:"✓ 模型已就绪（{dim} 维），sidecar 按需拉起、空闲自动退出",
+    eDlBtn:"下载模型（{size}）", eDlDoing:"正在下载 — {done} / {total}", eDlErr:"上次下载失败：",
+    eDlNoRt:"⚠ 推理运行时缺失——内置模式仅安装版可用（裸 exe 形态请用 Ollama/自定义）",
+    eDirOpen:"打开",
+    eIdxWarn:"⚠ 使用中模型（{a}）与当前项目索引（{i}）不符——切换后请运行 ok index 重建",
     cTitle:"跨轮注入冷却", cDesc:"同会话内已注入的检索条目冷却 N 个 prompt 轮不再注入（门控轮也计）；0 = 关闭（每轮都可注入）", cTurns:"冷却轮数",
     rTitle:"规则配置（强制检查）", rDesc:"AI 改动命中 code globs 的文件时，回合结束校验 changelog 是否同步更新",
     rType:"类型", rGlobs:"code globs", rCl:"changelog glob", rMsg:"提示语", rAdd:"+ 添加规则",
@@ -162,11 +168,17 @@ const I18N = {
     eTitle:"Semantic retrieval (embedding)", eDesc:"The semantic channel of hybrid retrieval; degrades to keyword-only when no service is configured",
     eNone:"Not configured (keyword-only)", eTimeout:"Timeout (s)", eDir:"Builtin models dir", eActive:"Active",
     lTitle:"Model config (LLM)", lDesc:"LLM services for generation tasks (entry polishing etc.); empty temperature = not sent",
-    lTimeout:"Generation timeout (s)", lTest:"Test connection", lTesting:"Testing…", lTestOk:"✓ Connected (231ms)",
+    lTimeout:"Generation timeout (s)", lTest:"Test connection", lTesting:"Testing…", lTestOk:"✓ Connected ({ms}ms)",
     hTitle:"Hook timeout", hDesc:"Timeout seconds written into each agent's hooks. On 2026-08-04 a 5s timeout under Windows load silently dropped PostToolUse for an entire session — hence default 10", hSec:"Timeout (s)",
     gtTitle:"Generalization gate", gtDesc:"Prompts matching builtin/custom phrases skip retrieval injection and embed calls",
-    gtOn:"Enable gate", gtStatus:"21 builtin · {n} custom", gtManage:"Manage phrases",
+    gtOn:"Enable gate", gtStatus:"{b} builtin · {n} custom", gtManage:"Manage phrases",
     gtBuiltin:"Builtin phrases (read-only, evolve with releases)", gtCustom:"Custom phrases", gtAdd:"+ Add", gtPh:"New phrase…", gtClose:"Close",
+    noProject:"No registered project yet (run ok init) — this project-level setting is unavailable",
+    eDlReady:"✓ Model ready ({dim} dim); sidecar starts on demand and exits when idle",
+    eDlBtn:"Download model ({size})", eDlDoing:"Downloading — {done} / {total}", eDlErr:"Last download failed: ",
+    eDlNoRt:"⚠ Inference runtime missing — builtin mode requires the installer edition (bare exe: use Ollama/custom)",
+    eDirOpen:"Open",
+    eIdxWarn:"⚠ Active model ({a}) differs from the project index ({i}) — run ok index to rebuild after switching",
     cTitle:"Cross-turn injection cooldown", cDesc:"Retrieved entries already injected in this session cool down for N prompt turns (gate turns count too); 0 = off", cTurns:"Cooldown turns",
     rTitle:"Rules (enforce checks)", rDesc:"When AI edits files matching code globs, session end verifies the changelog was updated",
     rType:"Type", rGlobs:"code globs", rCl:"changelog glob", rMsg:"Message", rAdd:"+ Add rule",
@@ -246,8 +258,8 @@ const state = { menu:"manage", lang:"zh", theme:"light", collapsed:false,
                 logAuto:true, logStick:true, miscFb:null };
 const t = k => I18N[state.lang][k];
 
-/* 设置卡脏态/已保存反馈（pcard/pDirtyLive/pSave 用；各页内容接入时复用） */
-const prefsDirty = {}, prefsSaved = {};
+/* 设置卡脏态/已保存反馈（pcard/pDirtyLive/pSave 用）；prefsErr 驻留保存失败的后端错误（400 信息等） */
+const prefsDirty = {}, prefsSaved = {}, prefsErr = {};
 
 /* 摘要行：标签紧贴内容（不吃 .prow .k 的 140px 固定宽），动作按钮靠右 */
 function sumRow(label, content, btn){
@@ -266,7 +278,7 @@ function pDirtyLive(k, dirty){
   document.querySelectorAll('[data-save="'+k+'"]').forEach(b=>{ b.disabled = !dirty; });
 }
 function pSave(k){
-  prefsDirty[k]=false; prefsSaved[k]=true; render();
+  prefsDirty[k]=false; prefsErr[k]=null; prefsSaved[k]=true; render();
   setTimeout(()=>{ prefsSaved[k]=false; render(); }, 1500);
 }
 // 数字输入（设置卡用）：oninput 实时上报，由调用方 apply + 计算脏态；不重渲，避免丢焦点
@@ -290,12 +302,14 @@ function pcard(key, title, desc, body, inlineRow){
     const wrap = el("span");
     wrap.style.cssText = "margin-left:auto;display:flex;align-items:center;gap:10px;flex:none";
     if(prefsSaved[key]) wrap.appendChild(Object.assign(el("span","fb2"),{textContent:t("saved")}));
+    if(prefsErr[key]) wrap.appendChild(Object.assign(el("span","fb2 err"),{textContent:prefsErr[key]}));
     wrap.appendChild(sv);
     inlineRow.appendChild(wrap);
   } else {
     const f = el("div","pfoot");
     f.appendChild(sv);
     if(prefsSaved[key]) f.appendChild(Object.assign(el("span","fb2"),{textContent:t("saved")}));
+    if(prefsErr[key]) f.appendChild(Object.assign(el("span","fb2 err"),{textContent:prefsErr[key]}));
     c.appendChild(f);
   }
   return c;
@@ -796,6 +810,858 @@ function openLlmNeededModal(){
   document.body.appendChild(mask);
 }
 
+/* ================= 设置页 ================= */
+/* 八卡照抄原型 renderPrefs（docs/prototypes/prototype-manager-v2.html:801-979），mock 换真。
+   初始聚合拉取：status 先行（取项目名 + hooksTimeout/disabled），随后 embedding/llm 全局两件与
+   retrieve/capture/gate/enforce-rules 项目级四件并行；单件失败只记 PREFS.errs[key]，不拖垮整页。
+   项目级卡（冷却/沉淀/门控/规则）作用项目 = 第一个注册项目（旧 GUI captureProject 缺省语义），
+   无项目时该卡退化为只读提示。保存语义（Global Constraints 范式 2）：
+   - 开关即开即存：全局总闸 POST /api/toggle、门控 POST /api/gate {enabled}；
+   - 行内保存：Hook 超时 POST /api/hooks/timeout、冷却 POST /api/retrieve、沉淀 POST /api/capture
+     ——pDirtyLive 对「读回的服务端原值」（PREFS 各件）实时判脏，改回原值自动变灰，oninput 不重渲不丢焦点；
+   - 确定即生效：embedding/LLM/短语表弹窗与规则卡保存按钮，成功后卡片闪 ✓。
+   工作副本 PREFS_D 与服务端读回值 PREFS 分离：整页重渲/他卡保存不丢本卡脏态。
+   embedding 弹窗下载进度沿用旧 app.js 的 dlJob 机制（internal/gui/embedding.go:22-51 dlSnapshot）：
+   POST download 后每 1s 重拉 GET /api/setup/embedding，只重画状态条（paintEmbDl，不整页重渲，
+   保表单输入态），state 离开 downloading 停轮，关弹窗清计时器。
+   两处原型字段无对应端点已裁剪（config 有 [embedding]/[llm] timeout_sec 键但无读写端点）：
+   embedding/LLM 弹窗「全局」段的调用/生成超时。Hook 超时上限按后端校验取 1~60（原型 120 会 400）。 */
+let PREFS = null;      // 服务端读回值 {status,project,emb,llm,retr,cap,gate,rules,errs{}}
+let PREFS_D = null;    // 工作副本 {hooksTimeout,dedupTurns,capMode,capInterval,rules:[{type,globs,cl,msg}]}
+const prefsFb = {};    // 开关/弹窗卡的 ✓ 反馈（g/gt/e/l），1.5s 自消
+let gateModal = false, gateDraft = [], gateErr = "";
+let embModal = false, embDraft = null, embEdit = -1, embForm = null, embErr = "";
+let embDlEl = null, embPollT = null;
+let llmModal = false, llmDraft = null, llmEdit = -1, llmForm = null, llmErr = "";
+
+function flashPrefs(key){
+  prefsFb[key] = true; render();
+  setTimeout(()=>{ prefsFb[key] = false; render(); }, 1500);
+}
+function loadPrefs(){ if(PREFS) return; PREFS = { errs:{} }; refreshPrefs(); }
+// 聚合拉取（多请求并行，非新聚合端点）；项目级四件在无项目时跳过（后端缺 project 400）
+function refreshPrefs(){
+  api("/api/status").then(st=>{
+    const project = (st.projects && st.projects[0] && st.projects[0].name) || "";
+    const jobs = {
+      emb: api("/api/setup/embedding"+(project?"?project="+encodeURIComponent(project):"")),
+      llm: api("/api/llm"),
+    };
+    if(project){
+      const urls = { retr:"/api/retrieve", cap:"/api/capture", gate:"/api/gate", rules:"/api/enforce/rules" };
+      Object.keys(urls).forEach(k=>{
+        jobs[k] = api(urls[k]+"?project="+encodeURIComponent(project));
+      });
+    }
+    const keys = Object.keys(jobs);
+    return Promise.all(keys.map(k=>jobs[k].catch(e=>({ __err:e.message })))).then(vals=>{
+      const out = { status:st, project:project, errs:{} };
+      keys.forEach((k,i)=>{
+        if(vals[i] && vals[i].__err) out.errs[k] = vals[i].__err;
+        else out[k] = vals[i];
+      });
+      PREFS = out;
+      syncPrefsDraft();
+    });
+  }).catch(err=>{
+    PREFS = { errs:{}, loadErr: err.message };
+  }).then(()=>{ if(state.menu==="prefs" && !embModal && !llmModal && !gateModal) render(); });
+}
+// 服务端值 → 工作副本（规则转文本形：code_globs 数组 ↔ 逗号分隔串）
+function syncRulesDraft(){
+  const rules = (PREFS.rules && PREFS.rules.rules) || [];
+  PREFS_D.rules = rules.map(r=>({ type:r.type, globs:(r.code_globs||[]).join(", "),
+    cl:r.changelog_glob||"", msg:r.message||"" }));
+}
+function syncPrefsDraft(){
+  PREFS_D = {
+    hooksTimeout: PREFS.status.hooksTimeout || 10,
+    dedupTurns: PREFS.retr ? PREFS.retr.dedup_turns : 0,
+    capMode: PREFS.cap ? PREFS.cap.mode : "propose",
+    capInterval: PREFS.cap ? PREFS.cap.turn_interval : 5,
+    rules: [],
+  };
+  syncRulesDraft();
+}
+// 弹窗应用成功后的局部刷新（不碰其他卡的工作副本/脏态）
+function refreshEmb(){
+  return api("/api/setup/embedding"+(PREFS.project?"?project="+encodeURIComponent(PREFS.project):""))
+    .then(d=>{ PREFS.emb = d; PREFS.errs.emb = ""; });
+}
+function refreshLlm(){
+  return api("/api/llm").then(d=>{ PREFS.llm = d; PREFS.errs.llm = ""; });
+}
+function builtinLabel(id){
+  const list = (PREFS.emb && PREFS.emb.builtin_models) || [];
+  const m = list.find(x=>x.id===id);
+  return m ? m.label : id;
+}
+// 无项目/单件加载失败时的只读提示卡
+function prefsNoteCard(title, desc, note, isErr){
+  const c = el("div","pcard");
+  c.appendChild(Object.assign(el("h3"),{textContent:title}));
+  if(desc) c.appendChild(Object.assign(el("div","pdesc"),{textContent:desc}));
+  const n = Object.assign(el("div","pdesc"),{textContent:note});
+  if(isErr) n.className = "pdesc fb2 err";
+  c.appendChild(n);
+  return c;
+}
+// pcard 的保存按钮默认 onclick 是 mock 的 pSave——设置页逐卡换成真实保存
+function wireSave(card, key, fn){
+  card.querySelector('[data-save="'+key+'"]').onclick = fn;
+}
+
+function splitGlobs(s){ return String(s||"").split(/[,，]/).map(x=>x.trim()).filter(Boolean); }
+function rulesNorm(list){
+  return JSON.stringify(list.map(r=>({ type:r.type, globs:splitGlobs(r.globs),
+    cl:String(r.cl||"").trim(), msg:String(r.msg||"").trim() })));
+}
+// 规则卡判脏：工作副本 vs 服务端读回值（文本形同构后比较）——改回原值即变回灰
+function rulesDirty(){
+  const src = ((PREFS.rules && PREFS.rules.rules) || []).map(r=>({ type:r.type,
+    globs:(r.code_globs||[]).join(", "), cl:r.changelog_glob||"", msg:r.message||"" }));
+  return rulesNorm(PREFS_D.rules) !== rulesNorm(src);
+}
+function saveRules(){
+  prefsErr.r = "";
+  const payload = PREFS_D.rules.map(r=>({ type:r.type, code_globs:splitGlobs(r.globs),
+    changelog_glob:String(r.cl||"").trim(), message:String(r.msg||"").trim() }));
+  api("/api/enforce/rules", { method:"POST", body:{ project:PREFS.project, rules:payload } })
+    .then(()=>api("/api/enforce/rules?project="+encodeURIComponent(PREFS.project)))   // 复读核对
+    .then(d=>{ PREFS.rules = d; syncRulesDraft(); pSave("r"); })
+    .catch(err=>{ prefsErr.r = err.message; render(); });
+}
+
+function renderPrefs(){
+  loadPrefs();
+  const d = el("div","prefs");
+  if(PREFS.loadErr){
+    d.appendChild(Object.assign(el("div","pdesc fb2 err"),{textContent:t("xLoadFail")+PREFS.loadErr}));
+    return d;
+  }
+  if(!PREFS.status){
+    d.appendChild(Object.assign(el("div","placeholder"),{textContent:t("mgLoading")}));
+    return d;
+  }
+  const noProj = !PREFS.project;
+
+  // 1. 全局开关：总闸即开即存（setupx Enable/Disable ⇔ OK_HOME/hooks-disabled 标志文件）
+  {
+    const c = el("div","pcard");
+    c.appendChild(Object.assign(el("h3"),{textContent:t("gTitle")}));
+    const r = el("div","prow"); r.style.margin = "0";
+    const dsc = Object.assign(el("span","pdesc"),{textContent:t("gDesc")}); dsc.style.margin = "0";
+    r.appendChild(dsc);
+    const right = el("span");
+    right.style.cssText = "margin-left:auto;display:flex;align-items:center;gap:10px;flex:none";
+    if(prefsFb.g) right.appendChild(Object.assign(el("span","fb2"),
+      {textContent:PREFS.status.disabled?t("gOffFb"):t("gOnFb")}));
+    if(prefsErr.g) right.appendChild(Object.assign(el("span","fb2 err"),{textContent:prefsErr.g}));
+    const on = !PREFS.status.disabled;
+    right.appendChild(pswitch(on, ()=>{
+      const want = !on;
+      prefsErr.g = "";
+      api("/api/toggle", { method:"POST", body:{ on:want } }).then(()=>{
+        PREFS.status.disabled = !want;
+        flashPrefs("g");
+      }).catch(err=>{ prefsErr.g = err.message; render(); });
+    }));
+    r.appendChild(right);
+    c.appendChild(r);
+    d.appendChild(c);
+  }
+  // 2. 语义检索（embedding）：摘要行 + 管理配置弹窗；增删改/使用中/模型目录全在弹窗内，确定即生效
+  {
+    const c = el("div","pcard");
+    c.appendChild(Object.assign(el("h3"),{textContent:t("eTitle")}));
+    c.appendChild(Object.assign(el("div","pdesc"),{textContent:t("eDesc")}));
+    const sumBody = el("span");
+    if(PREFS.errs.emb){
+      sumBody.appendChild(Object.assign(el("span","fb2 err"),{textContent:PREFS.errs.emb}));
+    } else if(PREFS.emb){
+      const cur = (PREFS.emb.profiles||[]).find(p=>p.name===PREFS.emb.active);
+      if(cur){
+        const detail = cur.type==="builtin" ? builtinLabel(cur.model)
+                     : (cur.model||"")+(cur.base_url?" @ "+cur.base_url:"");
+        sumBody.innerHTML = '<span class="badge-type t-'+(cur.type==="builtin"?"reference":cur.type==="ollama"?"note":"rule")+'">'
+          + esc(cur.type==="builtin"?t("tagBuiltin"):cur.type==="ollama"?t("tagOllama"):t("tagCustom")) + '</span>'
+          + ' <b>'+esc(cur.name)+'</b> <span class="mono">'+esc(detail)+'</span>';
+      } else {
+        sumBody.innerHTML = '<span class="muted">'+t("eNone")+'</span>';
+      }
+    }
+    const mg = el("button","btn"); mg.textContent = t("eManage");
+    mg.disabled = !PREFS.emb;
+    mg.onclick = openEmbModal;
+    c.appendChild(sumRow(t("eActive"), sumBody, mg));
+    if(prefsFb.e) c.appendChild(Object.assign(el("span","fb2"),{textContent:t("saved")}));
+    d.appendChild(c);
+  }
+  // 3. 模型配置（LLM）：与 embedding 同构——摘要行 + 管理配置弹窗，确定即生效
+  {
+    const c = el("div","pcard");
+    c.appendChild(Object.assign(el("h3"),{textContent:t("lTitle")}));
+    c.appendChild(Object.assign(el("div","pdesc"),{textContent:t("lDesc")}));
+    const sumBody = el("span");
+    if(PREFS.errs.llm){
+      sumBody.appendChild(Object.assign(el("span","fb2 err"),{textContent:PREFS.errs.llm}));
+    } else if(PREFS.llm){
+      const cur = (PREFS.llm.profiles||[]).find(p=>p.name===PREFS.llm.active);
+      if(cur){
+        sumBody.innerHTML = '<span class="badge-type t-'+(cur.kind==="anthropic"?"pitfall":"rule")+'">'
+          + esc(cur.kind==="anthropic"?t("tagAnthropic"):t("tagOpenai")) + '</span>'
+          + ' <b>'+esc(cur.name)+'</b> <span class="mono">'+esc((cur.model||"")+(cur.base_url?" @ "+cur.base_url:""))+'</span>';
+      } else {
+        sumBody.innerHTML = '<span class="muted">'+t("eNone")+'</span>';
+      }
+    }
+    const mg = el("button","btn"); mg.textContent = t("eManage");
+    mg.disabled = !PREFS.llm;
+    mg.onclick = openLlmModal;
+    c.appendChild(sumRow(t("eActive"), sumBody, mg));
+    if(prefsFb.l) c.appendChild(Object.assign(el("span","fb2"),{textContent:t("saved")}));
+    d.appendChild(c);
+  }
+  // 4. Hook 超时（全局；独立写端点，不重装 hooks）
+  {
+    const b = el("div");
+    const orig = PREFS.status.hooksTimeout || 10;
+    const row = prow(t("hSec"), pnumLive(PREFS_D.hooksTimeout,1,60,v=>{
+      PREFS_D.hooksTimeout=v; pDirtyLive("h", v!==orig);
+    }));
+    b.appendChild(row);
+    const card = pcard("h", t("hTitle"), t("hDesc"), b, row);
+    wireSave(card, "h", ()=>{
+      const v = PREFS_D.hooksTimeout;
+      prefsErr.h = "";
+      api("/api/hooks/timeout", { method:"POST", body:{ timeout_sec:v } }).then(()=>{
+        PREFS.status.hooksTimeout = v; pSave("h");
+      }).catch(err=>{ prefsErr.h = err.message; render(); });
+    });
+    d.appendChild(card);
+  }
+  // 5. 跨轮注入冷却（项目级）
+  if(noProj){
+    d.appendChild(prefsNoteCard(t("cTitle"), t("cDesc"), t("noProject")));
+  } else if(PREFS.errs.retr){
+    d.appendChild(prefsNoteCard(t("cTitle"), t("cDesc"), t("xLoadFail")+PREFS.errs.retr, true));
+  } else {
+    const b = el("div");
+    const orig = PREFS.retr ? PREFS.retr.dedup_turns : 0;
+    const row = prow(t("cTurns"), pnumLive(PREFS_D.dedupTurns,0,99,v=>{
+      PREFS_D.dedupTurns=v; pDirtyLive("c", v!==orig);
+    }));
+    b.appendChild(row);
+    const card = pcard("c", t("cTitle"), t("cDesc"), b, row);
+    wireSave(card, "c", ()=>{
+      const v = PREFS_D.dedupTurns;
+      prefsErr.c = "";
+      api("/api/retrieve", { method:"POST", body:{ project:PREFS.project, dedup_turns:v } }).then(()=>{
+        PREFS.retr.dedup_turns = v; pSave("c");
+      }).catch(err=>{ prefsErr.c = err.message; render(); });
+    });
+    d.appendChild(card);
+  }
+  // 6. 经验沉淀（项目级）：保存按钮收进「轮次间隔」行右端；模式+间隔合并判脏
+  if(noProj){
+    d.appendChild(prefsNoteCard(t("capTitle"), t("capDesc"), t("noProject")));
+  } else if(PREFS.errs.cap){
+    d.appendChild(prefsNoteCard(t("capTitle"), t("capDesc"), t("xLoadFail")+PREFS.errs.cap, true));
+  } else {
+    const b = el("div");
+    const origM = PREFS.cap.mode, origI = PREFS.cap.turn_interval;
+    const chk = ()=>pDirtyLive("cap", PREFS_D.capMode!==origM || PREFS_D.capInterval!==origI);
+    const modeRow = el("div","prow");
+    modeRow.appendChild(Object.assign(el("span","k"),{textContent:t("capMode")}));
+    [["propose",t("capPropose")],["auto",t("capAuto")]].forEach(([v,label])=>{
+      const lab = el("label","prow"); lab.style.margin="0";
+      const rd = el("input"); rd.type="radio"; rd.name="capmode"; rd.className="radio";
+      rd.checked = PREFS_D.capMode===v;
+      rd.onchange = ()=>{ PREFS_D.capMode=v; chk(); };
+      lab.appendChild(rd); lab.appendChild(document.createTextNode(label));
+      modeRow.appendChild(lab);
+    });
+    b.appendChild(modeRow);
+    const iRow = prow(t("capInterval"), pnumLive(PREFS_D.capInterval,1,100,v=>{
+      PREFS_D.capInterval=v; chk();
+    }));
+    b.appendChild(iRow);
+    const card = pcard("cap", t("capTitle"), t("capDesc"), b, iRow);
+    wireSave(card, "cap", ()=>{
+      prefsErr.cap = "";
+      api("/api/capture", { method:"POST", body:{ project:PREFS.project,
+        mode:PREFS_D.capMode, turn_interval:PREFS_D.capInterval } }).then(r=>{
+        PREFS.cap.mode = r.mode; PREFS.cap.turn_interval = r.turn_interval; pSave("cap");
+      }).catch(err=>{ prefsErr.cap = err.message; render(); });
+    });
+    d.appendChild(card);
+  }
+  // 7. 泛化门控（项目级）：单行布局（开关即开即存，短语表弹窗内编辑、确定即生效），无保存按钮
+  if(noProj){
+    d.appendChild(prefsNoteCard(t("gtTitle"), t("gtDesc"), t("noProject")));
+  } else if(PREFS.errs.gate){
+    d.appendChild(prefsNoteCard(t("gtTitle"), t("gtDesc"), t("xLoadFail")+PREFS.errs.gate, true));
+  } else {
+    const c = el("div","pcard");
+    c.appendChild(Object.assign(el("h3"),{textContent:t("gtTitle")}));
+    c.appendChild(Object.assign(el("div","pdesc"),{textContent:t("gtDesc")}));
+    const r = el("div","prow"); r.style.margin = "0";
+    r.appendChild(Object.assign(el("span","k"),{textContent:t("gtOn")}));
+    const g = PREFS.gate || { enabled:false, builtin:[], extra:[] };
+    r.appendChild(pswitch(!!g.enabled, ()=>{
+      const want = !g.enabled;
+      prefsErr.gt = "";
+      api("/api/gate", { method:"POST", body:{ project:PREFS.project, enabled:want } }).then(ng=>{
+        PREFS.gate = ng; flashPrefs("gt");
+      }).catch(err=>{ prefsErr.gt = err.message; render(); });
+    }));
+    r.appendChild(Object.assign(el("span","muted"),{textContent:
+      t("gtStatus").replace("{b}",(g.builtin||[]).length).replace("{n}",(g.extra||[]).length)}));
+    const right = el("span");
+    right.style.cssText = "margin-left:auto;display:flex;align-items:center;gap:10px;flex:none";
+    if(prefsFb.gt) right.appendChild(Object.assign(el("span","fb2"),{textContent:t("saved")}));
+    if(prefsErr.gt) right.appendChild(Object.assign(el("span","fb2 err"),{textContent:prefsErr.gt}));
+    const mg = el("button","btn"); mg.textContent = t("gtManage");
+    mg.onclick = ()=>{ gateDraft = (g.extra||[]).slice(); gateErr = ""; gateModal = true; render(); };
+    right.appendChild(mg);
+    r.appendChild(right);
+    c.appendChild(r);
+    d.appendChild(c);
+  }
+  // 8. 规则配置（项目级）：保存按钮收进「添加规则」行右端；后端 400 信息经 prefsErr 展示
+  if(noProj){
+    d.appendChild(prefsNoteCard(t("rTitle"), t("rDesc"), t("noProject")));
+  } else if(PREFS.errs.rules){
+    d.appendChild(prefsNoteCard(t("rTitle"), t("rDesc"), t("xLoadFail")+PREFS.errs.rules, true));
+  } else {
+    const b = el("div");
+    const tb = el("table","rules");
+    tb.innerHTML = "<thead><tr><th style='width:110px'>"+t("rType")+"</th><th>"+t("rGlobs")+"</th><th>"+t("rCl")+"</th><th>"+t("rMsg")+"</th><th style='width:40px'></th></tr></thead>";
+    const tbBody = el("tbody");
+    PREFS_D.rules.forEach((rule,idx)=>{
+      const tr = el("tr");
+      const td0 = el("td");
+      const sel = el("select","pselect");
+      ["changelog"].forEach(o=>{ const op=el("option"); op.value=o; op.textContent=o; sel.appendChild(op); });
+      sel.value = rule.type;
+      sel.onchange = ()=>{ rule.type=sel.value; pDirtyLive("r", rulesDirty()); };
+      td0.appendChild(sel); tr.appendChild(td0);
+      [["globs"],["cl"],["msg"]].forEach(([f])=>{
+        const td = el("td");
+        td.appendChild(ptext(rule[f], v=>{ rule[f]=v; pDirtyLive("r", rulesDirty()); }));
+        tr.appendChild(td);
+      });
+      const tdX = el("td");
+      const del = el("button","btn"); del.textContent = "×"; del.style.padding="2px 10px";
+      del.onclick = ()=>{ PREFS_D.rules.splice(idx,1); prefsDirty.r = true; render(); };
+      tdX.appendChild(del); tr.appendChild(tdX);
+      tbBody.appendChild(tr);
+    });
+    tb.appendChild(tbBody);
+    b.appendChild(tb);
+    const addRow = el("div");
+    addRow.style.cssText = "display:flex;align-items:center;margin-top:8px";
+    const add = el("button","btn"); add.textContent = t("rAdd");
+    add.onclick = ()=>{ PREFS_D.rules.push({type:"changelog",globs:"",cl:"",msg:""}); prefsDirty.r = true; render(); };
+    addRow.appendChild(add);
+    b.appendChild(addRow);
+    const card = pcard("r", t("rTitle"), t("rDesc"), b, addRow);
+    wireSave(card, "r", saveRules);
+    d.appendChild(card);
+  }
+
+  if(gateModal) d.appendChild(renderGateModal());
+  if(embModal) d.appendChild(renderEmbModal());
+  if(llmModal) d.appendChild(renderLlmModal());
+  return d;
+}
+
+/* ---------- 门控短语表弹窗：内置只读列表 + 自定义草稿（增删）+ 确定全量替换（POST /api/gate {extra}） ---------- */
+function renderGateModal(){
+  const g = PREFS.gate || { builtin:[], extra:[] };
+  const mask = el("div","mask");
+  const m = el("div","modal");
+  m.appendChild(Object.assign(el("h3"),{textContent:t("gtManage")}));
+  m.appendChild(Object.assign(el("div","sec-label"),{textContent:t("gtBuiltin")}));
+  (g.builtin||[]).forEach(p=>{
+    const row = el("div","prof");
+    row.style.cursor = "default";
+    row.appendChild(Object.assign(el("span","info"),{textContent:p}));
+    m.appendChild(row);
+  });
+  m.appendChild(Object.assign(el("div","sec-label"),{textContent:t("gtCustom")}));
+  gateDraft.forEach((p,idx)=>{
+    const row = el("div","prof");
+    row.style.cursor = "default";
+    row.appendChild(Object.assign(el("span","info"),{textContent:p}));
+    const del = el("button","btn btn-danger"); del.textContent = t("eDel");
+    del.style.cssText = "margin-left:auto;padding:2px 10px;flex:none";
+    del.onclick = ()=>{ gateDraft.splice(idx,1); render(); };
+    row.appendChild(del);
+    m.appendChild(row);
+  });
+  const addRow = el("div","ph-row");
+  const inp = ptext("", ()=>{});
+  inp.placeholder = t("gtPh");
+  const add = el("button","btn"); add.textContent=t("gtAdd"); add.style.flex="none";
+  const doAdd = ()=>{ const v = inp.value.trim(); if(v){ gateDraft.push(v); render(); } };
+  add.onclick = doAdd;
+  inp.onkeydown = e=>{ if(e.key==="Enter") doAdd(); };
+  addRow.appendChild(inp); addRow.appendChild(add);
+  m.appendChild(addRow);
+  if(gateErr) m.appendChild(Object.assign(el("div","pdesc fb2 err"),{textContent:gateErr}));
+  const foot = el("div","mfoot");
+  const cancel = el("button","btn"); cancel.textContent = t("fCancel");
+  cancel.onclick = ()=>{ gateModal=false; render(); };
+  const ok = el("button","btn btn-primary"); ok.textContent = t("fOk");
+  ok.onclick = ()=>{
+    gateErr = "";
+    api("/api/gate", { method:"POST", body:{ project:PREFS.project, extra:gateDraft } }).then(ng=>{
+      PREFS.gate = ng;   // 响应含 enabled/builtin/extra 全量（清洗去重后的服务端形）
+      gateModal = false;
+      flashPrefs("gt");
+    }).catch(err=>{ gateErr = err.message; render(); });
+  };
+  foot.appendChild(cancel); foot.appendChild(ok);
+  m.appendChild(foot);
+  mask.appendChild(m);
+  mask.onclick = e=>{ if(e.target===mask){ gateModal=false; render(); } };
+  return mask;
+}
+
+/* ---------- embedding 服务管理弹窗：列表（设为使用中/编辑/删除）+ 按类型表单（字段对齐
+   /api/setup/embedding/profile：builtin=模型下拉+下载源+下载状态条，ollama=地址+模型，
+   openai=base_url+模型+key；类型保存后锁定，仅新增可改）+ 全局段（模型目录，空=恢复默认）。
+   草稿制：弹窗内改动先落 embDraft，确定才按 diff 批量调端点生效；取消整盘放弃。 ---------- */
+function openEmbModal(){
+  const e = PREFS.emb || {};
+  embDraft = { active:e.active||"",
+    dir:e.models_dir||"",
+    profiles:(e.profiles||[]).map(p=>({ name:p.name, type:p.type, base:p.base_url||"",
+      model:p.model||"", key:"", has_key:!!p.has_key, mirror:p.mirror||"" })) };
+  embEdit = -1; embForm = null; embErr = ""; embModal = true; render();
+  embPoll();   // 打开时若已有下载任务（此前发起）即续轮
+}
+function closeEmbModal(){
+  embModal = false; embDraft = null; embEdit = -1; embForm = null;
+  if(embPollT){ clearTimeout(embPollT); embPollT = null; }
+  render();
+}
+// 确定即生效：upserts → deletes → 模型目录 → 使用中切换；任一步失败中止并展示后端错误
+async function embApply(){
+  const draft = embDraft, old = PREFS.emb || {};
+  for(const p of draft.profiles){
+    await api("/api/setup/embedding/profile", { method:"POST", body:{
+      name:p.name.trim(), type:p.type, base_url:String(p.base||"").trim(), model:String(p.model||"").trim(),
+      api_key:p.key||"", mirror:p.mirror||"" } });   // api_key 空 = 同名保留旧 key（后端收口）
+  }
+  const keep = {}; draft.profiles.forEach(p=>{ keep[p.name]=true; });
+  let serverActive = old.active || "";
+  for(const sp of old.profiles||[]){
+    if(!keep[sp.name]){
+      await api("/api/setup/embedding/profile", { method:"DELETE", body:{ name:sp.name } });
+      if(serverActive===sp.name) serverActive = "";   // 后端删使用中项自动置空
+    }
+  }
+  const dir = String(draft.dir||"").trim();
+  if(dir !== String(old.models_dir||"").trim()){
+    await api("/api/setup/embedding/models-dir", { method:"POST", body:{ path:dir } });
+  }
+  if(draft.active !== serverActive){
+    await api("/api/setup/embedding/active", { method:"POST", body:{ name:draft.active } });
+  }
+}
+function fmtMB(n){ return (n/1048576).toFixed(0)+" MB"; }
+// 下载状态条（旧 embRenderBiStatus 平移）：进行中=进度条+取消；已下载=就绪；未下载=下载按钮+上次错误
+function paintEmbDl(){
+  if(!embDlEl || !embForm || (embForm.type||"openai")!=="builtin") return;
+  const e = PREFS.emb || {};
+  const id = embForm.model || ((e.builtin_models||[])[0] && e.builtin_models[0].id) || "";
+  const bm = (e.builtin_models||[]).find(x=>x.id===id);
+  const box = embDlEl;
+  box.innerHTML = "";
+  if(!bm){ box.textContent = "…"; return; }
+  const dl = e.download || {};
+  if(dl.state==="downloading" && dl.model_id===id){
+    const pct = dl.total ? Math.floor(dl.done*100/dl.total) : 0;
+    box.appendChild(document.createTextNode(
+      t("eDlDoing").replace("{done}",fmtMB(dl.done||0)).replace("{total}",fmtMB(dl.total||0))));
+    const bar = el("div","emb-prog");
+    const fill = el("i"); fill.style.width = pct+"%";
+    bar.appendChild(fill); box.appendChild(bar);
+    box.appendChild(Object.assign(el("span"),{textContent:pct+"%"}));
+    const cancel = el("button","btn"); cancel.textContent = t("fCancel"); cancel.style.marginLeft = "8px";
+    cancel.onclick = ()=>{
+      api("/api/setup/embedding/download/cancel", { method:"POST", body:{ model_id:id } })
+        .then(()=>embPoll());
+    };
+    box.appendChild(cancel);
+    return;
+  }
+  if(bm.downloaded){
+    box.appendChild(Object.assign(el("span","fb2"),{textContent:t("eDlReady").replace("{dim}",bm.dim)}));
+    return;
+  }
+  if(!e.runtime_available){
+    box.appendChild(Object.assign(el("span","fb2 err"),{textContent:t("eDlNoRt")}));
+    return;
+  }
+  const btn = el("button","btn"); btn.textContent = t("eDlBtn").replace("{size}",fmtMB(bm.size));
+  btn.onclick = ()=>{
+    api("/api/setup/embedding/download", { method:"POST", body:{ model_id:id, mirror:embForm.mirror||"hf-mirror" } })
+      .then(()=>embPoll())
+      .catch(err=>{ embErr = err.message; render(); });
+  };
+  box.appendChild(btn);
+  if(dl.state==="error" && dl.model_id===id){
+    box.appendChild(Object.assign(el("span","fb2 err"),{textContent:" "+t("eDlErr")+(dl.error||"")}));
+  }
+}
+// 下载进度轮询（旧 embRefresh(true)+embSchedulePoll 语义）：只重画状态条不整页重渲；
+// state 仍为 downloading 时 1s 后续轮。失败静默（用户动作会再触发）
+function embPoll(){
+  if(embPollT){ clearTimeout(embPollT); embPollT = null; }
+  if(!embModal) return;
+  api("/api/setup/embedding"+(PREFS.project?"?project="+encodeURIComponent(PREFS.project):""))
+    .then(d=>{
+      PREFS.emb = d; PREFS.errs.emb = "";
+      paintEmbDl();
+      if(embModal && d.download && d.download.state==="downloading"){
+        embPollT = setTimeout(embPoll, 1000);
+      }
+    }).catch(()=>{});
+}
+function renderEmbModal(){
+  const mask = el("div","mask");
+  const m = el("div","modal");
+  m.appendChild(Object.assign(el("h3"),{textContent:t("eTitle")+" · "+t("eProfiles")}));
+  // 使用中模型与当前项目索引模型不符警示（旧 GUI 语义，GET ?project= 的 index_model/active_identity）
+  const e0 = PREFS.emb || {};
+  if(e0.active_identity && e0.index_model && e0.active_identity!==e0.index_model){
+    m.appendChild(Object.assign(el("div","pdesc fb2 err"),
+      {textContent:t("eIdxWarn").replace("{a}",e0.active_identity).replace("{i}",e0.index_model)}));
+  }
+
+  embDraft.profiles.forEach((p,idx)=>{
+    const row = el("div","prof"+(embDraft.active===p.name?" sel":""));
+    row.style.cursor = "default";
+    const info = el("span","info");
+    const detail = p.type==="builtin" ? builtinLabel(p.model) : (p.model||"")+(p.base?" @ "+p.base:"");
+    info.innerHTML = '<span class="badge-type t-'+(p.type==="builtin"?"reference":p.type==="ollama"?"note":"rule")+'">'
+      + esc(p.type==="builtin"?t("tagBuiltin"):p.type==="ollama"?t("tagOllama"):t("tagCustom")) + '</span>'
+      + ' <b>'+esc(p.name)+'</b> <span class="mono">'+esc(detail)+'</span>';
+    row.appendChild(info);
+    const acts = el("span");
+    acts.style.cssText = "margin-left:auto;display:flex;gap:6px;flex:none";
+    if(embDraft.active===p.name){
+      acts.appendChild(Object.assign(el("span","chip on"),{textContent:t("eActive")}));
+    } else {
+      const sa = el("button","btn"); sa.textContent = t("eSetActive"); sa.style.padding="2px 10px";
+      sa.onclick = ()=>{ embDraft.active = p.name; render(); };
+      acts.appendChild(sa);
+    }
+    const ed = el("button","btn"); ed.textContent = t("eEdit"); ed.style.padding="2px 10px";
+    ed.onclick = ()=>{ embEdit = idx; embForm = JSON.parse(JSON.stringify(p)); render(); };
+    acts.appendChild(ed);
+    const del = el("button","btn btn-danger"); del.textContent = t("eDel"); del.style.padding="2px 10px";
+    del.onclick = ()=>{
+      if(embDraft.active===p.name) embDraft.active = "";
+      embDraft.profiles.splice(idx,1);
+      if(embEdit===idx){ embEdit=-1; embForm=null; }
+      render();
+    };
+    acts.appendChild(del);
+    row.appendChild(acts);
+    m.appendChild(row);
+  });
+
+  if(embForm){
+    m.appendChild(Object.assign(el("div","sec-label"),
+      {textContent:embEdit===-2?t("eAddTitle"):t("eEditTitle")}));
+    m.appendChild(prow(t("fName"), ptext(embForm.name||"", v=>{ embForm.name=v; }, "300px")));
+    // 类型：保存后锁定，仅新增可改（沿用旧 GUI 语义）
+    const typeRow = el("div","prow");
+    typeRow.appendChild(Object.assign(el("span","k"),{textContent:t("fType")}));
+    const sel = el("select","pselect");
+    [["builtin",t("typeBuiltin")],["ollama",t("typeOllama")],["openai",t("typeOpenai")]].forEach(([v,label])=>{
+      const op=el("option"); op.value=v; op.textContent=label; sel.appendChild(op);
+    });
+    sel.value = embForm.type||"openai";
+    sel.disabled = embEdit >= 0;
+    sel.onchange = ()=>{ embForm.type = sel.value; render(); };
+    typeRow.appendChild(sel);
+    m.appendChild(typeRow);
+    // 按类型切换字段组
+    const ty = embForm.type||"openai";
+    if(ty==="builtin"){
+      if(!embForm.mirror) embForm.mirror = "hf-mirror";   // 显示默认同时落草稿（未触碰也按默认提交）
+      const mRow = el("div","prow");
+      mRow.appendChild(Object.assign(el("span","k"),{textContent:t("fModel")}));
+      const mSel = el("select","pselect"); mSel.style.maxWidth="420px";
+      (e0.builtin_models||[]).forEach(bm=>{
+        const op=el("option"); op.value=bm.id;
+        op.textContent = bm.label + (bm.downloaded?t("downloaded"):"");
+        mSel.appendChild(op);
+      });
+      if(e0.builtin_models && e0.builtin_models.length) mSel.value = embForm.model||e0.builtin_models[0].id;
+      embForm.model = mSel.value;
+      mSel.onchange = ()=>{ embForm.model = mSel.value; paintEmbDl(); };
+      mRow.appendChild(mSel);
+      m.appendChild(mRow);
+      const miRow = el("div","prow");
+      miRow.appendChild(Object.assign(el("span","k"),{textContent:t("fMirror")}));
+      const miSel = el("select","pselect");
+      [["hf-mirror",t("mirrorHf")],["huggingface",t("mirrorOfficial")]].forEach(([v,label])=>{
+        const op=el("option"); op.value=v; op.textContent=label; miSel.appendChild(op);
+      });
+      miSel.value = embForm.mirror||"hf-mirror";
+      miSel.onchange = ()=>{ embForm.mirror = miSel.value; };
+      miRow.appendChild(miSel);
+      m.appendChild(miRow);
+      // 下载状态条（paintEmbDl 原位重画，轮询不动表单其余部分）
+      const stRow = el("div","prow");
+      stRow.appendChild(el("span","k"));
+      embDlEl = el("span");
+      embDlEl.style.cssText = "flex:1;min-width:0;font-size:12.5px;color:var(--muted)";
+      stRow.appendChild(embDlEl);
+      m.appendChild(stRow);
+      paintEmbDl();
+    } else if(ty==="ollama"){
+      if(!embForm.base) embForm.base = "http://localhost:11434";   // 同上：显示默认落草稿
+      m.appendChild(prow(t("fOlUrl"), ptext(embForm.base||"http://localhost:11434", v=>{ embForm.base=v; }, "300px")));
+      m.appendChild(prow(t("fModel"), ptext(embForm.model||"", v=>{ embForm.model=v; }, "300px")));
+    } else {
+      m.appendChild(prow(t("fBase"), ptext(embForm.base||"", v=>{ embForm.base=v; }, "300px")));
+      m.appendChild(prow(t("fModel"), ptext(embForm.model||"", v=>{ embForm.model=v; }, "300px")));
+      const keyIn = ptext(embForm.key||"", v=>{ embForm.key=v; }, "300px");
+      keyIn.placeholder = embEdit>=0 ? t("keySaved") : "api_key";
+      m.appendChild(prow(t("fKey"), keyIn));
+    }
+    const frow = el("div","prow");
+    frow.appendChild(el("span","k"));
+    const ok = el("button","btn btn-primary"); ok.textContent = t("fOk");
+    ok.onclick = ()=>{
+      const nm = (embForm.name||"").trim();
+      if(!nm) return;
+      embForm.name = nm;
+      if(embEdit===-2){
+        embDraft.profiles.push(JSON.parse(JSON.stringify(embForm)));
+      } else {
+        const oldName = embDraft.profiles[embEdit].name;
+        embDraft.profiles[embEdit] = JSON.parse(JSON.stringify(embForm));
+        if(embDraft.active===oldName && oldName!==nm) embDraft.active = nm;   // 改名联动使用中引用
+      }
+      embEdit=-1; embForm=null; render();
+    };
+    const cancel = el("button","btn"); cancel.textContent = t("fCancel");
+    cancel.onclick = ()=>{ embEdit=-1; embForm=null; render(); };
+    frow.appendChild(ok); frow.appendChild(cancel);
+    m.appendChild(frow);
+  } else {
+    const add = el("button","btn"); add.textContent = t("eAdd"); add.style.marginTop="8px";
+    add.onclick = ()=>{ embEdit=-2; embForm={type:"builtin"}; render(); };
+    m.appendChild(add);
+  }
+
+  // 全局段：内置模型目录（空=恢复默认；属于 [embedding] 全局，不属于单个 profile）
+  m.appendChild(Object.assign(el("div","sec-label"),{textContent:t("eGlobal")}));
+  const dirRow = el("div","prow");
+  dirRow.appendChild(Object.assign(el("span","k"),{textContent:t("eDir")}));
+  const dirIn = ptext(embDraft.dir, v=>{ embDraft.dir=v; }, "300px");
+  dirIn.placeholder = e0.models_dir_default || "";
+  dirRow.appendChild(dirIn);
+  const openDir = el("button","btn"); openDir.textContent = t("eDirOpen");
+  openDir.onclick = ()=>{
+    api("/api/setup/embedding/open-models-dir", { method:"POST" })
+      .catch(err=>{ embErr = err.message; render(); });
+  };
+  dirRow.appendChild(openDir);
+  m.appendChild(dirRow);
+
+  if(embErr) m.appendChild(Object.assign(el("div","pdesc fb2 err"),{textContent:embErr}));
+  const foot = el("div","mfoot");
+  const cancel = el("button","btn"); cancel.textContent = t("fCancel");
+  cancel.onclick = closeEmbModal;
+  const ok = el("button","btn btn-primary"); ok.textContent = t("fOk");
+  ok.onclick = ()=>{
+    embErr = ""; ok.disabled = true;
+    embApply().then(()=>refreshEmb()).then(()=>{
+      closeEmbModal(); flashPrefs("e");
+    }).catch(err=>{
+      embErr = err.message; ok.disabled = false;
+      refreshEmb().catch(()=>{}).then(()=>render());   // 部分步骤可能已生效：同步服务端真值，弹窗保持
+    });
+  };
+  foot.appendChild(cancel); foot.appendChild(ok);
+  m.appendChild(foot);
+  mask.appendChild(m);
+  mask.onclick = e=>{ if(e.target===mask) closeEmbModal(); };
+  return mask;
+}
+
+/* ---------- LLM 服务管理弹窗：与 embedding 弹窗同构。kind 两档（OpenAI/Anthropic 兼容），
+   temperature/max_tokens 为高级参数（留空/0 = 不传）；编辑表单内带「测试连接」（真实调
+   /api/llm/test，成功显示实测耗时，失败显示后端错误）。确定即生效。 ---------- */
+function openLlmModal(){
+  const l = PREFS.llm || {};
+  llmDraft = { active:l.active||"",
+    profiles:(l.profiles||[]).map(p=>({ name:p.name, kind:p.kind, base:p.base_url||"",
+      model:p.model||"", key:"", temperature:p.temperature||"", maxTokens:p.max_tokens||0 })) };
+  llmEdit = -1; llmForm = null; llmErr = ""; llmModal = true; render();
+}
+function closeLlmModal(){
+  llmModal = false; llmDraft = null; llmEdit = -1; llmForm = null;
+  render();
+}
+async function llmApply(){
+  const draft = llmDraft, old = PREFS.llm || {};
+  for(const p of draft.profiles){
+    await api("/api/llm/profile", { method:"POST", body:{
+      name:p.name.trim(), kind:p.kind, base_url:String(p.base||"").trim(), model:String(p.model||"").trim(),
+      api_key:p.key||"", temperature:String(p.temperature||"").trim(), max_tokens:p.maxTokens||0,
+      activate:false } });   // api_key 空/掩码 = 同名保留旧 key（后端收口）
+  }
+  const keep = {}; draft.profiles.forEach(p=>{ keep[p.name]=true; });
+  for(const sp of old.profiles||[]){
+    if(!keep[sp.name]){
+      await api("/api/llm/delete", { method:"POST", body:{ name:sp.name } });   // 删使用中项后端自动置空
+    }
+  }
+  let serverActive = old.active || "";
+  if(serverActive && !keep[serverActive]) serverActive = "";
+  if(draft.active !== serverActive){
+    await api("/api/llm/active", { method:"POST", body:{ name:draft.active } });   // 空串 = 停用
+  }
+}
+function renderLlmModal(){
+  const mask = el("div","mask");
+  const m = el("div","modal");
+  m.appendChild(Object.assign(el("h3"),{textContent:t("lTitle")+" · "+t("eProfiles")}));
+
+  llmDraft.profiles.forEach((p,idx)=>{
+    const row = el("div","prof"+(llmDraft.active===p.name?" sel":""));
+    row.style.cursor = "default";
+    const info = el("span","info");
+    info.innerHTML = '<span class="badge-type t-'+(p.kind==="anthropic"?"pitfall":"rule")+'">'
+      + esc(p.kind==="anthropic"?t("tagAnthropic"):t("tagOpenai")) + '</span>'
+      + ' <b>'+esc(p.name)+'</b> <span class="mono">'+esc(p.model||"")+ (p.base?" @ "+esc(p.base):"") +'</span>';
+    row.appendChild(info);
+    const acts = el("span");
+    acts.style.cssText = "margin-left:auto;display:flex;gap:6px;flex:none";
+    if(llmDraft.active===p.name){
+      acts.appendChild(Object.assign(el("span","chip on"),{textContent:t("eActive")}));
+    } else {
+      const sa = el("button","btn"); sa.textContent = t("eSetActive"); sa.style.padding="2px 10px";
+      sa.onclick = ()=>{ llmDraft.active = p.name; render(); };
+      acts.appendChild(sa);
+    }
+    const ed = el("button","btn"); ed.textContent = t("eEdit"); ed.style.padding="2px 10px";
+    ed.onclick = ()=>{ llmEdit = idx; llmForm = JSON.parse(JSON.stringify(p)); llmDraft._testMsg=null; render(); };
+    acts.appendChild(ed);
+    const del = el("button","btn btn-danger"); del.textContent = t("eDel"); del.style.padding="2px 10px";
+    del.onclick = ()=>{
+      if(llmDraft.active===p.name) llmDraft.active = "";
+      llmDraft.profiles.splice(idx,1);
+      if(llmEdit===idx){ llmEdit=-1; llmForm=null; }
+      render();
+    };
+    acts.appendChild(del);
+    row.appendChild(acts);
+    m.appendChild(row);
+  });
+
+  if(llmForm){
+    m.appendChild(Object.assign(el("div","sec-label"),
+      {textContent:llmEdit===-2?t("eAddTitle"):t("eEditTitle")}));
+    m.appendChild(prow(t("fName"), ptext(llmForm.name||"", v=>{ llmForm.name=v; }, "300px")));
+    const kindRow = el("div","prow");
+    kindRow.appendChild(Object.assign(el("span","k"),{textContent:t("fType")}));
+    const sel = el("select","pselect");
+    [["openai",t("kindOpenai")],["anthropic",t("kindAnthropic")]].forEach(([v,label])=>{
+      const op=el("option"); op.value=v; op.textContent=label; sel.appendChild(op);
+    });
+    sel.value = llmForm.kind||"openai";
+    sel.onchange = ()=>{ llmForm.kind = sel.value; };
+    kindRow.appendChild(sel);
+    m.appendChild(kindRow);
+    m.appendChild(prow(t("fBase"), ptext(llmForm.base||"", v=>{ llmForm.base=v; }, "300px")));
+    m.appendChild(prow(t("fModel"), ptext(llmForm.model||"", v=>{ llmForm.model=v; }, "300px")));
+    const keyIn = ptext(llmForm.key||"", v=>{ llmForm.key=v; }, "300px");
+    keyIn.placeholder = llmEdit>=0 ? t("keySaved") : "api_key";
+    m.appendChild(prow(t("fKey"), keyIn));
+    m.appendChild(prow(t("fTemp"), ptext(llmForm.temperature||"", v=>{ llmForm.temperature=v; }, "120px")));
+    m.appendChild(prow(t("fMaxTokens"), pnum(llmForm.maxTokens||0,0,128000,v=>{ llmForm.maxTokens=v; })));
+    const frow = el("div","prow");
+    frow.appendChild(el("span","k"));
+    const test = el("button","btn");
+    test.textContent = llmDraft._testing ? t("lTesting") : t("lTest");
+    test.disabled = !!llmDraft._testing;
+    test.onclick = ()=>{
+      llmDraft._testing = true; llmDraft._testMsg = null; render();
+      const started = Date.now();
+      api("/api/llm/test", { method:"POST", body:{
+        name:(llmForm.name||"").trim(), kind:llmForm.kind||"openai",
+        base_url:String(llmForm.base||"").trim(), model:String(llmForm.model||"").trim(),
+        api_key:llmForm.key||"", temperature:String(llmForm.temperature||"").trim(),
+        max_tokens:llmForm.maxTokens||0 } }).then(()=>{
+        llmDraft._testing = false;
+        llmDraft._testMsg = { txt:t("lTestOk").replace("{ms}", String(Date.now()-started)), err:false };
+        render();
+      }).catch(err=>{
+        llmDraft._testing = false;
+        llmDraft._testMsg = { txt:err.message, err:true };
+        render();
+      });
+    };
+    frow.appendChild(test);
+    if(llmDraft._testMsg)
+      frow.appendChild(Object.assign(el("span","fb2"+(llmDraft._testMsg.err?" err":"")),
+        {textContent:llmDraft._testMsg.txt}));
+    const ok = el("button","btn btn-primary"); ok.textContent = t("fOk");
+    ok.onclick = ()=>{
+      const nm = (llmForm.name||"").trim();
+      if(!nm) return;
+      llmForm.name = nm;
+      if(llmEdit===-2){
+        llmDraft.profiles.push(JSON.parse(JSON.stringify(llmForm)));
+      } else {
+        const oldName = llmDraft.profiles[llmEdit].name;
+        llmDraft.profiles[llmEdit] = JSON.parse(JSON.stringify(llmForm));
+        if(llmDraft.active===oldName && oldName!==nm) llmDraft.active = nm;
+      }
+      llmEdit=-1; llmForm=null; render();
+    };
+    const cancel = el("button","btn"); cancel.textContent = t("fCancel");
+    cancel.onclick = ()=>{ llmEdit=-1; llmForm=null; render(); };
+    frow.appendChild(ok); frow.appendChild(cancel);
+    m.appendChild(frow);
+  } else {
+    const add = el("button","btn"); add.textContent = t("eAdd"); add.style.marginTop="8px";
+    add.onclick = ()=>{ llmEdit=-2; llmForm={kind:"openai"}; llmDraft._testMsg=null; render(); };
+    m.appendChild(add);
+  }
+
+  if(llmErr) m.appendChild(Object.assign(el("div","pdesc fb2 err"),{textContent:llmErr}));
+  const foot = el("div","mfoot");
+  const cancel = el("button","btn"); cancel.textContent = t("fCancel");
+  cancel.onclick = closeLlmModal;
+  const ok = el("button","btn btn-primary"); ok.textContent = t("fOk");
+  ok.onclick = ()=>{
+    llmErr = ""; ok.disabled = true;
+    llmApply().then(()=>refreshLlm()).then(()=>{
+      closeLlmModal(); flashPrefs("l");
+    }).catch(err=>{
+      llmErr = err.message; ok.disabled = false;
+      refreshLlm().catch(()=>{}).then(()=>render());
+    });
+  };
+  foot.appendChild(cancel); foot.appendChild(ok);
+  m.appendChild(foot);
+  mask.appendChild(m);
+  mask.onclick = e=>{ if(e.target===mask) closeLlmModal(); };
+  return mask;
+}
+
 /* ================= 日志页 ================= */
 /* 三来源（ok=CLI/hook 客户端、daemon=守护进程、sidecar=embed 边车）实时日志查看器，只读。
    2s 轮询 GET /api/logs?tail=400&sig=…：签名不变时后端回 {unchanged:true}，跳过重绘；
@@ -1264,8 +2130,8 @@ function renderBody(app){
   });
   main.appendChild(side);
 
-  // 管理页（Task 5）、日志页（Task 3）与其他页（Task 4）已接入真实数据；引导/设置两页仍为占位：
-  // 真实内容（引导卡 / 设置卡）按实施计划 Task 6-7 接入，占位文案走 i18n（notImpl 键）
+  // 管理页（Task 5）、日志页（Task 3）、其他页（Task 4）与设置页（Task 6）已接入真实数据；
+  // 引导页仍为占位：真实内容（agent 卡）按实施计划 Task 7 接入，占位文案走 i18n（notImpl 键）
   if(state.menu==="manage"){
     loadManage();
     main.appendChild(renderTree());
@@ -1280,6 +2146,10 @@ function renderBody(app){
     main.appendChild(renderMisc());
     return;
   }
+  if(state.menu==="prefs"){
+    main.appendChild(renderPrefs());
+    return;
+  }
   const ph = el("div","placeholder");
   ph.textContent = "「"+t(state.menu)+"」"+t("notImpl");
   main.appendChild(ph);
@@ -1292,3 +2162,4 @@ function renderBody(app){
 })();
 
 render();
+
