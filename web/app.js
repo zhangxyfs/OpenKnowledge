@@ -127,15 +127,16 @@ const I18N = {
     cfmDelete:"确定删除条目「{t}」？",
     cfmArchive:"归档条目「{t}」？归档后退出 INDEX 与强制注入，仍可被检索命中。",
     emNew:"新建条目", emEdit:"编辑条目", emExists:"条目已存在", emNoProject:"尚无已注册项目，请先 ok init",
+    editingSub:"（详情区内联编辑 · 保存前不落盘）",
     fTitle:"标题", fTags:"tags（逗号分隔）", fMand:"mandatory（每会话必注入）",
-    fSummary:"摘要", fBody:"正文",
+    fSummary:"摘要", fBody:"正文（markdown）", fBodyHint:"编辑区撑满剩余高度",
     typeRule:"规则", typePitfall:"踩坑", typeNote:"笔记", typeReference:"参考",
     optBtn:"✨ 优化", optBusy:"优化中…", optEmpty:"正文为空，无可优化内容",
     optTip:"结合项目真实代码与相关条目据实润色标题/标签/摘要/正文（类型与 mandatory 不动）；先出对照预览，确认回填后点保存才生效。",
-    cmpTitle:"优化对照预览", cmpBasis:"依据：条目引用的真实代码 + 相关条目 + INDEX 摘录",
+    cmpTitle:"✨ 优化对照", cmpBasis:"依据：条目引用的真实代码 + 相关条目 + INDEX 摘录",
     cmpNotice:"模型判断：当前内容已足够简练准确，无需优化。如下仍有差异仅为排版/标点，可逐字段回填或直接放弃。",
-    cmpApply:"回填表单", cmpDiscard:"放弃", cmpFill:"回填", cmpFilled:"已回填",
-    cmpOld:"原数据", cmpNew:"优化后", cmpNote:"回填只改表单，点「保存」才写入 .md",
+    cmpApply:"全部接受并回填", cmpDiscard:"放弃", cmpFill:"回填", cmpFilled:"✓ 已回填",
+    cmpOld:"原内容", cmpNew:"优化后", cmpNote:"回填只改表单，点「保存」才写入 .md",
     cmpUsage:"消耗 {t} token（入 {p} / 出 {c}）",
     llmTitle:"尚未配置模型",
     llmMsg:"「优化」需要调用大模型。请先到 设置页 → 模型配置 添加一个 OpenAI 兼容或 Anthropic 兼容服务。",
@@ -229,14 +230,15 @@ const I18N = {
     cfmDelete:"Delete entry \"{t}\"?",
     cfmArchive:"Archive entry \"{t}\"? It leaves INDEX and mandatory injection, but stays searchable.",
     emNew:"New entry", emEdit:"Edit entry", emExists:"Entry already exists", emNoProject:"No registered project yet; run ok init first",
+    editingSub:"(inline in detail pane · not written until Save)",
     fTitle:"Title", fTags:"tags (comma-separated)", fMand:"mandatory (injected every session)",
-    fSummary:"Summary", fBody:"Body",
+    fSummary:"Summary", fBody:"Body (markdown)", fBodyHint:"editor fills remaining height",
     typeRule:"Rule", typePitfall:"Pitfall", typeNote:"Note", typeReference:"Reference",
     optBtn:"✨ Optimize", optBusy:"Optimizing…", optEmpty:"Body is empty; nothing to optimize",
     optTip:"Polishes title/tags/summary/body against real code and related entries (type and mandatory untouched); shows a diff preview first — nothing is written until you fill back and save.",
-    cmpTitle:"Optimize preview", cmpBasis:"Basis: real code referenced by the entry + related entries + INDEX excerpt",
+    cmpTitle:"✨ Optimize comparison", cmpBasis:"Basis: real code referenced by the entry + related entries + INDEX excerpt",
     cmpNotice:"The model considers the content already concise and accurate — no optimization needed. Any difference below is layout/punctuation only; fill back per field or discard.",
-    cmpApply:"Fill all back", cmpDiscard:"Discard", cmpFill:"Fill", cmpFilled:"Filled",
+    cmpApply:"Accept all & fill back", cmpDiscard:"Discard", cmpFill:"Fill", cmpFilled:"✓ Filled",
     cmpOld:"Original", cmpNew:"Optimized", cmpNote:"Fill-back only edits the form; Save writes the .md",
     cmpUsage:"Cost {t} tokens (in {p} / out {c})",
     llmTitle:"No model configured",
@@ -525,6 +527,7 @@ async function toggleAgent(a){
 /* ================= 状态 ================= */
 const state = { menu:"manage", lang:"zh", theme:"light", collapsed:false,
                 open:{}, openTouched:false, sel:null, projSel:null, q:"", mgmtFb:null, treeShown:{},
+                edView:"read",   // 详情区态：read 只读 | edit 内联编辑 | cmp 优化对照
                 logSrc:{ ok:true, daemon:true, sidecar:true }, logSem:false, logQ:"",
                 logAuto:true, logStick:true, miscFb:null };
 const t = k => I18N[state.lang][k];
@@ -641,10 +644,11 @@ function renderMd(src){
    archived/summary/mtime[unix 秒]；无 size/born——born 从 tags 的 born:<名> 提取，
    大小后端不返回故详情不展示）。条目操作沿用旧 GUI 语义（旧 app.js:638-825）：
    操作组在详情页右上（编辑/归档或取消归档/删除，草稿额外批准）；新建按钮在树头部
-   搜索框旁；新建/编辑复用同一弹窗 + ✨优化走 /api/entry/optimize（对照预览回填，
-   保存才落盘）。born/继承徽标 hover 浮动窗沿用 v2.18.2 行为（branch-info，旧
-   app.js:321-374）。弹窗挂 document.body（position:fixed），不进 #app 渲染周期——
-   后台刷新（refreshManage/loadDetail/loadBranchInfo 完成）整页重渲不会打掉表单输入态。
+   搜索框旁；新建/编辑走详情区内联编辑态（规范源 docs/prototypes/prototype-edit-inline.html，
+   原 640px 弹窗已废弃）+ ✨优化走 /api/entry/optimize（详情区对照态回填，保存才落盘）。
+   born/继承徽标 hover 浮动窗沿用 v2.18.2 行为（branch-info，旧 app.js:321-374）。
+   编辑/对照态期间轮询与后台刷新跳过整页重渲（edBusy 守卫）；表单值 oninput 直写
+   edDraft，重渲不丢内容。
    试用反馈迭代（manage-v2）：树栏加宽至 360px + 可拖拽分隔条（localStorage 持久化，
    200px~50% 钳制）；点项目节点右侧显示项目 README（GET /api/project/readme，无 README
    回落 wiki 概述条目）；截断标题悬停出完整标题浮窗（事件委托）；项目按 last_update
@@ -654,8 +658,10 @@ const TYPE_LABEL = { pitfall:"坑", note:"注", rule:"规", reference:"参" };
 let MGMT = null;        // {list:[{name,paths,lastUpdate,entries,err}], loadErr} 缓存；loadManage 惰性加载
 let DETAIL = null;      // {key(project\nfile), data, err} 当前选中条目全文缓存
 const BRANCH = {};      // project → branch-info（会话级缓存；null=已拉取但失败/无数据，占位防重拉）
-let entryMask = null, cmpMask = null, llmMask = null;   // 管理页弹窗节点（body 级，同时只各存一个）
-let optAbort = null;    // 优化进行中的 AbortController；关闭编辑弹窗即取消
+let llmMask = null;   // 未配置模型提示弹窗节点（body 级，只存一个）
+let optAbort = null;  // 优化进行中的 AbortController；退出编辑态即取消
+let edDraft = null, edBase = null, edCmp = null;   // 内联编辑草稿/脏态基线/优化结果（同时只存一份）
+let edErr = "", edSavedFb = false;   // 编辑态保存失败错误（操作行 fb2 err）/ 只读态 ✓已保存 闪示
 const README = {};      // project → {data, err} 项目 README/wiki 概述缓存（条目变更即失效）
 const LAZY_STEP = 50;   // 树内条目懒加载步进：项目条目 >50 时先渲 50，滚到底附近再追加下一批
 const TREE_W_KEY = "ok-tree-w";   // 树栏宽度 localStorage 键（拖拽分隔条持久化）
@@ -699,12 +705,12 @@ function refreshManage(){
     if(!state.openTouched && list.length && !list.some(p=>state.open[p.name]===true)){
       state.open = {}; state.open[list[0].name] = true;
     }
-    // 选中条目已消失（外部删除/项目删除）→ 清选择与详情缓存
-    if(state.sel && !findEntry(state.sel.project, state.sel.file)){ state.sel = null; DETAIL = null; }
+    // 选中条目已消失（外部删除/项目删除）→ 清选择与详情缓存（编辑/对照态中不动选择，保存时报错兜底）
+    if(!edBusy() && state.sel && !findEntry(state.sel.project, state.sel.file)){ state.sel = null; DETAIL = null; }
   }).catch(err=>{
     MGMT = { list:[], loadErr: err.message };
   }).then(()=>{
-    if(state.menu!=="manage") return;
+    if(state.menu!=="manage" || edBusy()) return;   // 编辑/对照态中不重渲（草稿优先）
     const ae = document.activeElement;
     if(ae && ae.classList && ae.classList.contains("search")){
       const sc = document.querySelector(".tree-scroll");
@@ -723,7 +729,7 @@ function loadDetail(force){
   api("/api/entry?project="+encodeURIComponent(state.sel.project)+"&file="+encodeURIComponent(state.sel.file))
     .then(d=>{ if(DETAIL && DETAIL.key===key) DETAIL = { key:key, data:d, err:"" }; })
     .catch(err=>{ if(DETAIL && DETAIL.key===key) DETAIL = { key:key, data:null, err:err.message }; })
-    .then(()=>{ if(state.menu==="manage") render(); });
+    .then(()=>{ if(state.menu==="manage" && !edBusy()) render(); });
 }
 // loadBranchInfo 惰性拉项目分支上下文（继承徽标 hover 数据，v2.18.2 既有端点）
 function loadBranchInfo(project){
@@ -732,7 +738,7 @@ function loadBranchInfo(project){
   api("/api/project/branch-info?project="+encodeURIComponent(project))
     .then(info=>{ BRANCH[project] = info || null; })
     .catch(()=>{ BRANCH[project] = null; })
-    .then(()=>{ if(state.menu==="manage") render(); });
+    .then(()=>{ if(state.menu==="manage" && !edBusy()) render(); });
 }
 // loadReadme 拉项目 README/wiki 概述（点项目节点时，反馈3）；条目变更后由调用方删缓存重拉
 function loadReadme(project, force){
@@ -742,7 +748,7 @@ function loadReadme(project, force){
   api("/api/project/readme?project="+encodeURIComponent(project))
     .then(d=>{ README[project] = { data:d, err:"" }; })
     .catch(err=>{ README[project] = { data:null, err:err.message }; })
-    .then(()=>{ if(state.menu==="manage" && !state.sel && state.projSel===project) render(); });
+    .then(()=>{ if(state.menu==="manage" && !state.sel && state.projSel===project && !edBusy()) render(); });
 }
 
 /* 管理页 ~4s 轮询（反馈6，沿用日志页轮询范式）：菜单在管理页且页面可见时，重拉
@@ -774,7 +780,8 @@ async function pollManage(){
       delete README[openP.name];   // wiki 概述回落可能随条目变化
       if(state.projSel===openP.name && !state.sel) loadReadme(openP.name);
     }
-    if(state.sel && !findEntry(state.sel.project, state.sel.file)){ state.sel = null; DETAIL = null; }
+    if(!edBusy() && state.sel && !findEntry(state.sel.project, state.sel.file)){ state.sel = null; DETAIL = null; }
+    if(edBusy()) return;   // 编辑/对照态中缓存照更、界面不重渲，不打断表单
     const ae = document.activeElement;
     if(ae && ae.classList && ae.classList.contains("search")){
       const sc = document.querySelector(".tree-scroll");
@@ -836,7 +843,7 @@ function renderTree(){
     const def = (state.sel && findEntry(state.sel.project, state.sel.file) && state.sel.project)
       || state.projSel
       || (MGMT.list[0] && MGMT.list[0].name) || "";
-    openEntryModal(def, null);
+    startNew(def);
   };
   tools.appendChild(add);
   tree.appendChild(tools);
@@ -877,6 +884,7 @@ function fillTree(scroll){
       +'<span class="cnt">'+(p.err?"!":list.length)+'</span>';
     pj.title = p.err ? t("mgTreeErr")+p.err : (p.paths||[]).join("\n");
     pj.onclick = ()=>{
+      exitEdit();
       state.openTouched = true;
       if(open){ state.open[p.name] = false; }              // 再点收起 → 全收起
       else { state.open = {}; state.open[p.name] = true; } // 展开即互斥收起其他
@@ -895,7 +903,7 @@ function fillTree(scroll){
           +(e.mandatory?'<span class="badge-mand">★</span>':"")
           +(e.draft?'<span class="badge-draft">'+t("draft")+'</span>':"")+'</span>'
           +'<span class="t2">'+esc(e.title)+'</span>';
-        leaf.onclick = ()=>{ state.sel={ project:p.name, file:e.file }; state.mgmtFb=null; loadDetail(); render(); };
+        leaf.onclick = ()=>{ exitEdit(); state.sel={ project:p.name, file:e.file }; state.mgmtFb=null; loadDetail(); render(); };
         kids.appendChild(leaf);
       });
       if(list.length > shown){
@@ -996,6 +1004,12 @@ function renderProjectReadme(d, project){
 }
 
 function renderDetail(){
+  // 详情区三态分派（内联编辑改版，规范源 prototype-edit-inline.html）：编辑/对照态接管详情区
+  if(edBusy()){
+    if(state.edView==="cmp" && edCmp) return renderEntryCmp();
+    if(state.edView==="edit") return renderEntryEdit();
+    exitEdit();   // 数据缺失兜底：回只读
+  }
   const d = el("div","detail");
   const sel = state.sel && findEntry(state.sel.project, state.sel.file);
   if(!sel){
@@ -1009,7 +1023,7 @@ function renderDetail(){
   if(state.mgmtFb)
     ops.appendChild(Object.assign(el("span","fb2"+(state.mgmtFb.err?" err":"")),{textContent:state.mgmtFb.txt}));
   const mk = (label, cls, fn)=>{ const b=el("button",cls); b.textContent=label; b.onclick=fn; return b; };
-  ops.appendChild(mk(t("opEdit"), "btn", ()=>openEntryModal(proj, e.file)));
+  ops.appendChild(mk(t("opEdit"), "btn", ()=>startEdit(proj, e.file)));
   if(e.draft) ops.appendChild(mk(t("opApprove"), "btn", ()=>approveEntry(proj, e)));
   ops.appendChild(mk(e.archived?t("opUnarchive"):t("opArchive"), "btn", ()=>archiveEntry(proj, e, e.archived)));
   ops.appendChild(mk(t("opDelete"), "btn btn-danger", ()=>delEntry(proj, e)));
@@ -1021,7 +1035,9 @@ function renderDetail(){
   fm.innerHTML = "<b>"+esc(e.file)+"</b> · "+t("modified")+" "+fmtTime(e.mtime);
   d.appendChild(fm);
   d.appendChild(Object.assign(el("h1","d-title"),{textContent:e.title}));
-  const at = el("div","d-attrs"); at.innerHTML = detailAttrs(e, proj); d.appendChild(at);
+  const at = el("div","d-attrs"); at.innerHTML = detailAttrs(e, proj);
+  if(edSavedFb) at.appendChild(Object.assign(el("span","fb2"),{textContent:t("saved")}));   // 保存成功闪示（1.5s 自消）
+  d.appendChild(at);
   const sm = el("div","d-summary"); sm.textContent = e.summary; d.appendChild(sm);
   const bd = el("div","d-body md");
   const det = DETAIL && DETAIL.key===(proj+"\n"+e.file) ? DETAIL : null;
@@ -1064,186 +1080,278 @@ function delEntry(proj, e){
     .catch(opFail);
 }
 
-/* ---------- 新建/编辑复用弹窗（含 ✨优化） ----------
-   表单值由 DOM 直读（弹窗期间不整页重渲）；保存成功才落盘——新建 POST /api/entry，
-   编辑 PUT /api/entry（file 为身份，不可改名；created/draft/archived 由后端继承）。 */
-function openEntryModal(project, file){
-  if(!project){
-    state.mgmtFb = { txt:t("emNoProject"), err:true }; render(); return;
-  }
-  if(!file){
-    editModal_open(project, null, null);
-    return;
-  }
+/* ---------- 条目内联编辑（详情区三态：只读/编辑/优化对照） ----------
+   规范源 docs/prototypes/prototype-edit-inline.html（用户已验收），DOM/样式对齐原型。
+   编辑态：标题整行 → 类型/tags/mandatory 一行 → 摘要整行 → 正文撑满剩余高度；
+   取消/保存/✨优化在右上操作行。表单值 oninput 直写 edDraft（不重渲不丢焦点），
+   保存才落盘——新建 POST /api/entry（保存后选中新条目）、编辑 PUT /api/entry
+   （file 为身份不可改名；created/draft/archived 由后端继承）。
+   取消无脏检查确认：原型未画确认弹窗，取消即弃稿（与原型切条目即弃稿同语义）。 */
+function edBusy(){ return state.edView!=="read" && !!edDraft; }
+// 退出编辑/对照态：取消进行中的优化请求，草稿/基线/对照数据一并丢弃
+function exitEdit(){
+  if(optAbort){ optAbort.abort(); optAbort=null; }
+  edDraft=null; edBase=null; edCmp=null; edErr=""; state.edView="read";
+}
+function newDraft(project, file, d){
+  d = d || {};
+  edDraft = { project:project, file:file, title:d.title||"", type:d.type||"note",
+    tags:(d.tags||[]).join(", "), mandatory:!!d.mandatory,
+    summary:d.summary||"", body:d.body||"" };
+  edBase = Object.assign({}, edDraft);   // 脏态基线快照（改回基线值保存按钮自动变灰）
+  edCmp=null; edErr=""; state.edView="edit"; state.mgmtFb=null;
+}
+// 编辑入口（只读态「编辑」按钮）：详情全文已在缓存（DETAIL）则直接用，否则拉取后进编辑态
+function startEdit(project, file){
+  const det = DETAIL && DETAIL.key===(project+"\n"+file) && DETAIL.data ? DETAIL.data : null;
+  if(det){ newDraft(project, file, det); render(); return; }
   api("/api/entry?project="+encodeURIComponent(project)+"&file="+encodeURIComponent(file))
-    .then(d=>{ editModal_open(project, file, d); })
+    .then(d=>{ newDraft(project, file, d); render(); })
     .catch(opFail);
 }
-function editModal_open(project, file, init){
-  init = init || {};
-  const isEdit = !!file;
-  const mask = el("div","mask");
-  entryMask = mask;
-  const m = el("div","modal");
-  m.appendChild(Object.assign(el("h3"),{textContent:isEdit?t("emEdit"):t("emNew")}));
-  // 字段行构造器
-  const row = (label, input)=>{
-    const r = el("div","efield");
-    r.appendChild(Object.assign(el("span","k"),{textContent:label}));
-    r.appendChild(input);
-    m.appendChild(r);
-    return input;
-  };
-  // 项目：新建可选（条目身份=项目+文件名）；编辑只读
-  if(isEdit){
-    row(t("xProject"), Object.assign(el("span"),{textContent:project}));
+// 新建入口（树头部「+ 新建」）：复用内联编辑态（原型未覆盖新建，决策记录见编辑报告）——
+// 空白表单进编辑态，保存成功后选中新条目并展开其项目
+function startNew(defProject){
+  if(!defProject){
+    state.mgmtFb = { txt:t("emNoProject"), err:true }; render(); return;
   }
+  exitEdit();
+  newDraft(defProject, null, null);
+  render();
+}
+/* 编辑态（原型 renderEdit 平移，mock 换真）：详情区等高 flex 列——顶部操作行 + 字段组 +
+   正文 textarea 撑满剩余高度。表单值 oninput 直写 edDraft（不重渲不丢焦点）。 */
+function renderEntryEdit(){
+  const isNew = !edDraft.file;
+  const d = el("div","detail editing");
+  d.appendChild(Object.assign(el("div","d-path"),
+    {textContent:"projects/"+edDraft.project+"/knowledge/"+(edDraft.file||"")}));
+  if(!isNew){
+    const found = findEntry(edDraft.project, edDraft.file);
+    const fm = el("div","d-filemeta");
+    fm.innerHTML = "<b>"+esc(edDraft.file)+"</b>"
+      +(found ? " · "+t("modified")+" "+fmtTime(found.entry.mtime) : "");
+    d.appendChild(fm);
+  }
+
+  // 顶部操作行：标题+副题 | 保存失败错误（fb2 err 范式，沿用 prefsErr 驻留语义）+ 取消/保存/✨优化
+  const bar = el("div","editbar");
+  const bt = el("span","eb-title");
+  bt.textContent = isNew ? t("emNew") : t("emEdit");
+  bt.appendChild(Object.assign(el("span","eb-sub"),{textContent:t("editingSub")}));
+  bar.appendChild(bt);
+  const acts = el("span","eb-acts");
+  if(edErr) acts.appendChild(Object.assign(el("span","fb2 err"),{textContent:edErr}));
+  const cancel = el("button","btn"); cancel.textContent = t("fCancel");
+  cancel.onclick = ()=>{ exitEdit(); render(); };
+  const save = el("button","btn btn-primary"); save.textContent = t("save");
+  const opt = el("button","btn"); opt.textContent = t("optBtn"); opt.title = t("optTip");
+  acts.appendChild(cancel); acts.appendChild(save); acts.appendChild(opt);
+  bar.appendChild(acts);
+  d.appendChild(bar);
+
+  // 脏态只同步保存按钮禁用态（原型语义：无改动不可点保存；基线=进入编辑时的快照 edBase）
+  const dirtyChk = ()=>{ save.disabled = !isDirty(); };
+  const isDirty = ()=> fTitle.value!==edBase.title || fType.value!==edBase.type
+    || fTags.value!==edBase.tags || fMand.checked!==edBase.mandatory
+    || fSummary.value!==edBase.summary || fBody.value!==edBase.body
+    || (isNew && projSel.value!==edBase.project);
+
+  // 项目（仅新建可选，条目身份=项目+文件名；编辑态项目即身份不可改）
   let projSel = null;
-  if(!isEdit){
+  if(isNew){
     projSel = el("select","pselect");
     MGMT.list.forEach(p=>{ const o=el("option"); o.value=p.name; o.textContent=p.name; projSel.appendChild(o); });
-    projSel.value = project;
-    row(t("xProject"), projSel);
+    projSel.value = edDraft.project;
+    projSel.onchange = ()=>{
+      edDraft.project = projSel.value; dirtyChk();
+      const dp = d.querySelector(".d-path");   // 路径行随项目联动（原位改文本，不重渲）
+      if(dp) dp.textContent = "projects/"+edDraft.project+"/knowledge/";
+    };
+    d.appendChild(efField(t("xProject"), projSel));
   }
-  const fTitle = row(t("fTitle"), el("input","pinput")); fTitle.value = init.title||"";
+
+  // 标题（整行）
+  const fTitle = el("input","pinput"); fTitle.value = edDraft.title;
+  fTitle.oninput = ()=>{ edDraft.title=fTitle.value; dirtyChk(); };
+  d.appendChild(efField(t("fTitle"), fTitle));
+
+  // 类型 / tags / mandatory：小控件收进一行（tags 弹性占满）
+  const meta = el("div","ef-meta");
   const fType = el("select","pselect");
   [["rule","typeRule"],["pitfall","typePitfall"],["note","typeNote"],["reference","typeReference"]]
     .forEach(([v,k])=>{ const o=el("option"); o.value=v; o.textContent=t(k); fType.appendChild(o); });
-  fType.value = init.type||"note";
-  row(t("fType"), fType);
-  const fTags = row(t("fTags"), el("input","pinput")); fTags.value = (init.tags||[]).join(", ");
-  const fMand = el("input"); fMand.type="checkbox"; fMand.className="radio"; fMand.checked = !!init.mandatory;
-  {
-    const r = el("label","efield");
-    r.appendChild(fMand);
-    r.appendChild(document.createTextNode(t("fMand")));
-    m.appendChild(r);
-  }
-  const fSummary = row(t("fSummary"), el("input","pinput")); fSummary.value = init.summary||"";
-  const fBody = el("textarea","pinput"); fBody.rows = 10; fBody.value = init.body||"";
-  row(t("fBody"), fBody);
-  const errLine = el("div","pdesc fb2 err");
-  m.appendChild(errLine);
+  fType.value = edDraft.type;
+  fType.onchange = ()=>{ edDraft.type=fType.value; dirtyChk(); };
+  meta.appendChild(efField(t("fType"), fType));
+  const fTags = el("input","pinput"); fTags.value = edDraft.tags;
+  fTags.oninput = ()=>{ edDraft.tags=fTags.value; dirtyChk(); };
+  const tagsF = efField(t("fTags"), fTags); tagsF.classList.add("ef-tags");
+  meta.appendChild(tagsF);
+  const fMand = el("input"); fMand.type="checkbox"; fMand.className="radio"; fMand.checked = edDraft.mandatory;
+  fMand.onchange = ()=>{ edDraft.mandatory=fMand.checked; dirtyChk(); };
+  const mandL = el("label","ef-mand");
+  mandL.appendChild(fMand); mandL.appendChild(document.createTextNode(t("fMand")));
+  meta.appendChild(mandL);
+  d.appendChild(meta);
 
-  const curProject = ()=>isEdit ? project : projSel.value;
-  const fields = { title:fTitle, tags:fTags, summary:fSummary, body:fBody };
-  const close = ()=>{
-    if(optAbort){ optAbort.abort(); optAbort=null; }   // 关闭弹窗 = 取消进行中的优化
-    if(cmpMask){ cmpMask.remove(); cmpMask=null; }
-    if(llmMask){ llmMask.remove(); llmMask=null; }
-    mask.remove();
-    if(entryMask===mask) entryMask=null;
-  };
+  // 摘要（整行）
+  const fSummary = el("input","pinput"); fSummary.value = edDraft.summary;
+  fSummary.oninput = ()=>{ edDraft.summary=fSummary.value; dirtyChk(); };
+  d.appendChild(efField(t("fSummary"), fSummary));
 
-  const foot = el("div","mfoot");
-  const save = el("button","btn btn-primary"); save.textContent = t("save");
+  // 正文：撑满剩余高度（本次改版主要诉求；resize:none 不允许拖拽变形）
+  const bodyF = el("div","ef ef-grow");
+  const bl = el("div","ef-label");
+  bl.textContent = t("fBody");
+  bl.appendChild(Object.assign(el("span","hint"),{textContent:"· "+t("fBodyHint")}));
+  bodyF.appendChild(bl);
+  const fBody = el("textarea","pinput ef-body"); fBody.value = edDraft.body;
+  fBody.oninput = ()=>{ edDraft.body=fBody.value; dirtyChk(); };
+  bodyF.appendChild(fBody);
+  d.appendChild(bodyF);
+
+  save.disabled = !isDirty();
   save.onclick = ()=>{
-    const payload = { project:curProject(), title:fTitle.value, type:fType.value,
+    const payload = { project:edDraft.project, title:fTitle.value, type:fType.value,
       tags:fTags.value.split(",").map(s=>s.trim()).filter(Boolean),
       mandatory:fMand.checked, summary:fSummary.value, body:fBody.value };
     save.disabled = true;
-    if(isEdit) payload.file = file;
-    api("/api/entry", { method:isEdit?"PUT":"POST", body:payload })
-      .then(()=>{ close(); afterEntryOp(); })
+    if(!isNew) payload.file = edDraft.file;
+    api("/api/entry", { method:isNew?"POST":"PUT", body:payload })
+      .then(resp=>{
+        // 保存成功回只读详情（三按钮随编辑态消失）；新建选中新条目并展开其项目
+        if(isNew && resp && resp.file){
+          state.sel = { project:payload.project, file:resp.file };
+          state.projSel = payload.project;
+          if(state.open[payload.project]!==true){
+            state.openTouched = true; state.open = {}; state.open[payload.project] = true;
+          }
+        }
+        exitEdit();
+        afterEntryOp();   // 树/详情/README/其他页联动刷新（Task 5 既有范式）
+        flashSaved();
+      })
       .catch(err=>{
-        errLine.textContent = err.status===409 ? t("emExists") : err.message;
-        save.disabled = false;
+        edErr = err.status===409 ? t("emExists") : err.message;   // 错误驻留操作行，表单值由 edDraft 恢复
+        render();
       });
   };
-  const cancel = el("button","btn"); cancel.textContent = t("fCancel");
-  cancel.onclick = close;
-  // ✨优化：loading（禁用+文案）→ 对照预览弹窗；409=未配置模型弹窗；关闭编辑弹窗取消请求
-  const opt = el("button","btn"); opt.textContent = t("optBtn"); opt.title = t("optTip");
+  // ✨优化：loading（禁用+文案）→ 对照态；409=未配置模型弹窗；退出编辑态取消请求
   opt.onclick = ()=>{
-    if(!fBody.value.trim()){ errLine.textContent = t("optEmpty"); return; }
-    errLine.textContent = "";
+    if(!fBody.value.trim()){ edErr = t("optEmpty"); render(); return; }
+    edErr = "";
     opt.disabled = true;
-    const oldText = opt.textContent;
     opt.textContent = t("optBusy");
     optAbort = new AbortController();
     api("/api/entry/optimize", {
       method:"POST", signal:optAbort.signal,
-      body:{ project:curProject(), file:file||"", title:fTitle.value,
+      body:{ project:edDraft.project, file:edDraft.file||"", title:fTitle.value,
              tags:fTags.value, summary:fSummary.value, body:fBody.value },
     }).then(out=>{
-      // 一律打开对照预览（no_change 提示在弹窗内展示）
-      openCmpModal({ title:fTitle.value, tags:fTags.value, summary:fSummary.value, body:fBody.value },
-                   out||{}, fields);
+      edCmp = out||{}; state.edView="cmp"; render();   // 一律进对照态（no_change 提示在态内展示）
     }).catch(err=>{
-      if(err && err.name==="AbortError") return;   // 关弹窗主动取消，静默
+      if(err && err.name==="AbortError") return;   // 退出编辑态主动取消，静默
       if(err.status===409) openLlmNeededModal();
-      else errLine.textContent = err.message;
+      else { edErr = err.message; render(); }
     }).finally(()=>{
       optAbort = null;
-      opt.disabled = false;
-      opt.textContent = oldText;
+      if(state.edView==="edit"){ opt.disabled = false; opt.textContent = t("optBtn"); }
     });
   };
-  foot.appendChild(save); foot.appendChild(cancel); foot.appendChild(opt);
-  m.appendChild(foot);
-  mask.appendChild(m);
-  mask.onclick = ev=>{ if(ev.target===mask) close(); };
-  document.body.appendChild(mask);
+  return d;
+}
+function efField(label, input){
+  const f = el("div","ef");
+  f.appendChild(Object.assign(el("div","ef-label"),{textContent:label}));
+  f.appendChild(input);
+  return f;
 }
 
-/* ---------- 优化对照预览弹窗（旧 app.js:689-748 平移；回填只改表单，保存才落盘） ---------- */
-const CMP_FIELDS = [["title","fTitle"],["tags","fTags"],["summary","fSummary"],["body","fBody"]];
+/* ---------- 优化对照态（原型 renderCmp 平移；回填只改 edDraft，保存才落盘） ---------- */
 function usageText(u){
   if(!u || (!u.prompt && !u.completion)) return "";
   return t("cmpUsage").replace("{t}", u.prompt+u.completion)
     .replace("{p}", u.prompt).replace("{c}", u.completion);
 }
-function openCmpModal(oldV, newV, fields){
-  const mask = el("div","mask");
-  cmpMask = mask;
-  const m = el("div","modal cmp-box");
-  const h = el("h3"); h.textContent = t("cmpTitle");
-  const basis = el("span","cmp-basis"); basis.textContent = " "+t("cmpBasis");
-  h.appendChild(basis);
-  m.appendChild(h);
-  const usage = el("span","cmp-note"); usage.textContent = usageText(newV.usage);
-  if(newV.no_change){
-    m.appendChild(Object.assign(el("div","cmp-notice"),{textContent:t("cmpNotice")}));
-  }
-  const box = el("div");
-  // 单字段回填值：no_change 场景模型可能不回字段，空值回退原值（不得清空表单）
+// 保存成功反馈（原型语义：回只读详情后徽标行闪 ✓ 已保存，1.5s 自消）
+function flashSaved(){
+  edSavedFb = true; render();
+  setTimeout(()=>{ edSavedFb=false; if(!edBusy()) render(); }, 1500);
+}
+/* 对照态：顶部 tokens+放弃/全部接受并回填；标题/tags/摘要 old→new 紧凑对照（逐字段回填）；
+   正文左右分栏（两栏等高各自滚动，新栏头回填按钮）。类型/mandatory 不参与回填（沿用旧 cmp 语义）。 */
+function renderEntryCmp(){
+  const d = el("div","detail compare");
+  d.appendChild(Object.assign(el("div","d-path"),
+    {textContent:"projects/"+edDraft.project+"/knowledge/"+(edDraft.file||"")}));
+  // 单字段回填值：no_change 场景模型可能不回字段，空值回退草稿原值（不得清空表单）
   const fillVal = key=>{
-    if(key==="tags") return (newV.tags||[]).join(", ") || oldV.tags || "";
-    return newV[key] || oldV[key] || "";
+    if(key==="tags") return (edCmp.tags||[]).join(", ") || edDraft.tags || "";
+    return edCmp[key] || edDraft[key] || "";
   };
-  CMP_FIELDS.forEach(([key,labelKey])=>{
-    const oldText = oldV[key] || "";
-    const newText = fillVal(key);
-    const div = el("div","cmp-field");
-    const name = el("div","cmp-name");
-    name.appendChild(Object.assign(el("span"),{textContent:t(labelKey)}));
-    const fill = el("button","btn cmp-fill"); fill.textContent = t("cmpFill");
-    fill.onclick = ()=>{ fields[key].value = fillVal(key); fill.textContent = t("cmpFilled"); };
-    name.appendChild(fill);
-    div.appendChild(name);
-    const oldD = el("div","cmp-old");
-    oldD.appendChild(Object.assign(el("span","cmp-tag old"),{textContent:t("cmpOld")}));
-    oldD.appendChild(document.createTextNode(oldText));
-    div.appendChild(oldD);
-    const newD = el("div","cmp-new");
-    newD.appendChild(Object.assign(el("span","cmp-tag new"),{textContent:t("cmpNew")}));
-    newD.appendChild(document.createTextNode(newText));
-    div.appendChild(newD);
-    box.appendChild(div);
-  });
-  m.appendChild(box);
-  const foot = el("div","mfoot");
-  const apply = el("button","btn btn-primary"); apply.textContent = t("cmpApply");
-  apply.onclick = ()=>{ CMP_FIELDS.forEach(([key])=>{ fields[key].value = fillVal(key); }); close(); };
+
+  // 顶部操作行：标题+依据 | tokens 用量 + 放弃 / 全部接受并回填
+  const bar = el("div","editbar");
+  const bt = el("span","eb-title");
+  bt.textContent = t("cmpTitle");
+  bt.appendChild(Object.assign(el("span","cmp-basis"),{textContent:" · "+t("cmpBasis")}));
+  bar.appendChild(bt);
+  const acts = el("span","eb-acts");
+  acts.appendChild(Object.assign(el("span","cmp-note"),{textContent:usageText(edCmp.usage)}));
   const discard = el("button","btn"); discard.textContent = t("cmpDiscard");
-  const close = ()=>{ mask.remove(); if(cmpMask===mask) cmpMask=null; };
-  discard.onclick = close;
-  foot.appendChild(apply); foot.appendChild(discard); foot.appendChild(usage);
-  foot.appendChild(Object.assign(el("span","cmp-note"),{textContent:t("cmpNote")}));
-  m.appendChild(foot);
-  mask.appendChild(m);
-  mask.onclick = ev=>{ if(ev.target===mask) close(); };
-  document.body.appendChild(mask);
+  discard.onclick = ()=>{ state.edView="edit"; render(); };   // 放弃 → 回编辑态（草稿不动）
+  const apply = el("button","btn btn-primary"); apply.textContent = t("cmpApply");
+  apply.onclick = ()=>{                                       // 接受 → 回填草稿回编辑态
+    edDraft.title=fillVal("title"); edDraft.tags=fillVal("tags");
+    edDraft.summary=fillVal("summary"); edDraft.body=fillVal("body");
+    state.edView="edit"; render();
+  };
+  acts.appendChild(discard); acts.appendChild(apply);
+  bar.appendChild(acts);
+  d.appendChild(bar);
+  if(edCmp.no_change){
+    d.appendChild(Object.assign(el("div","cmp-notice"),{textContent:t("cmpNotice")}));
+  }
+
+  // 小字段对照（标题/tags/摘要）：old（删除线灰）→ new 一行一个，右端逐字段回填
+  const meta = el("div","cmp-meta");
+  [["title","fTitle"],["tags","fTags"],["summary","fSummary"]].forEach(([key,labelKey])=>{
+    const row = el("div","cmp-mrow");
+    row.appendChild(Object.assign(el("span","k"),{textContent:t(labelKey)}));
+    row.appendChild(Object.assign(el("span","old"),{textContent:edDraft[key]}));
+    row.appendChild(Object.assign(el("span","arrow"),{textContent:"→"}));
+    row.appendChild(Object.assign(el("span","new"),{textContent:fillVal(key)}));
+    const fill = el("button","btn cmp-fill"); fill.textContent = t("cmpFill");
+    fill.onclick = ()=>{ edDraft[key]=fillVal(key); fill.textContent=t("cmpFilled"); fill.disabled=true; };
+    row.appendChild(fill);
+    meta.appendChild(row);
+  });
+  d.appendChild(meta);
+
+  // 正文左右分栏对照（两栏等高、各自滚动）
+  const split = el("div","cmp-split");
+  const pnOld = el("div","cmp-pane old");
+  const hOld = el("div","cmp-pane-head");
+  hOld.innerHTML = '<span class="cmp-tag old">'+t("cmpOld")+'</span>';
+  pnOld.appendChild(hOld);
+  pnOld.appendChild(Object.assign(el("div","cmp-pane-body"),{textContent:edDraft.body}));
+  const pnNew = el("div","cmp-pane new");
+  const hNew = el("div","cmp-pane-head");
+  hNew.innerHTML = '<span class="cmp-tag new">'+t("cmpNew")+'</span>';
+  const fillBody = el("button","btn cmp-fill"); fillBody.textContent = t("cmpFill");
+  fillBody.onclick = ()=>{ edDraft.body=fillVal("body"); fillBody.textContent=t("cmpFilled"); fillBody.disabled=true; };
+  hNew.appendChild(fillBody);
+  pnNew.appendChild(hNew);
+  pnNew.appendChild(Object.assign(el("div","cmp-pane-body"),{textContent:fillVal("body")}));
+  split.appendChild(pnOld); split.appendChild(pnNew);
+  d.appendChild(split);
+
+  const note = el("div","cmp-note");
+  note.style.marginTop = "8px";
+  note.textContent = t("cmpNote");
+  d.appendChild(note);
+  return d;
 }
 
 /* ---------- 未配置模型提示弹窗（409 no_llm；去配置 → 设置页） ---------- */
@@ -1257,8 +1365,7 @@ function openLlmNeededModal(){
   const close = ()=>{ mask.remove(); if(llmMask===mask) llmMask=null; };
   const go = el("button","btn btn-primary"); go.textContent = t("llmGo");
   go.onclick = ()=>{
-    if(entryMask){ entryMask.remove(); entryMask=null; }
-    if(cmpMask){ cmpMask.remove(); cmpMask=null; }
+    exitEdit();   // 去配置 = 离开管理页，编辑草稿一并丢弃（沿用旧弹窗关闭语义）
     close();
     state.menu = "prefs"; location.hash = "prefs"; render();
   };
@@ -2607,6 +2714,7 @@ function renderBody(app){
     b.innerHTML = '<span class="ico">'+m.ico+'</span><span class="txt">'+t(m.key)+'</span>'
                 + '<span class="tip">'+t(m.key)+'</span>';
     b.onclick = ()=>{
+      exitEdit();
       state.menu=m.key; location.hash=m.key;
       // 跨页缓存联动（Task 4 评审约定）：切到其他页重拉项目列表缓存；切到管理页重拉树数据
       if(m.key==="misc" && MISC) refreshMisc();

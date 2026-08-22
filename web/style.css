@@ -303,25 +303,53 @@ table.rules .pinput { width:100%; padding:3px 8px; font-size:12.5px; }
 .ph-row .pinput { flex:1; }
 .mfoot { display:flex; justify-content:flex-end; gap:8px; margin-top:14px; }
 
-/* ---------- 管理页：条目编辑弹窗 + 优化对照预览弹窗（自旧 GUI 平移，配色换 CSS 变量） ---------- */
-.efield { display:flex; align-items:center; gap:10px; margin:8px 0; }
-.efield .k { width:110px; color:var(--muted); font-size:13px; flex:none; }
-.efield .pinput, .efield .pselect { flex:1; min-width:0; }
-.efield textarea.pinput { min-height:180px; resize:vertical; font:13px Consolas,monospace; }
-.cmp-box { width:760px; max-width:94vw; }
+/* ---------- 管理页：条目内联编辑态 + 优化对照态（规范源 prototype-edit-inline.html 平移） ---------- */
+/* 编辑态：详情区变等高 flex 列——顶部操作行 + 字段组 + 正文撑满剩余高度 */
+.detail.editing, .detail.compare { display:flex; flex-direction:column; overflow:hidden; padding-bottom:20px; }
+.editbar { display:flex; align-items:center; gap:8px; margin:8px 0 14px; flex:none; }
+.editbar .eb-title { font-size:14px; font-weight:600; display:flex; align-items:center; gap:8px; }
+.editbar .eb-sub { color:var(--muted); font-size:12px; font-weight:400; }
+.editbar .eb-acts { margin-left:auto; display:flex; align-items:center; gap:8px; }
+/* 字段组：小标签在上、控件在下；标签不吃固定宽，纵向排布给正文让位 */
+.ef { margin-bottom:10px; flex:none; }
+.ef-label { font-size:12px; color:var(--muted); font-weight:600; margin-bottom:4px; }
+.ef .pinput { width:100%; }
+/* 元信息行：类型/tags/mandatory 三个小控件收进一行，tags 弹性占满 */
+.ef-meta { display:flex; gap:14px; align-items:flex-end; flex-wrap:wrap; }
+.ef-meta .ef { margin-bottom:0; }
+.ef-meta .ef-tags { flex:1; min-width:220px; }
+.ef-mand { display:flex; align-items:center; gap:6px; padding-bottom:6px; font-size:13px; cursor:pointer; }
+/* 正文：分组占满剩余高度（主要诉求），textarea 不允许拖拽变形 */
+.ef-grow { flex:1; display:flex; flex-direction:column; min-height:0; margin-bottom:0; }
+.ef-grow .ef-label { display:flex; align-items:center; gap:8px; }
+.ef-grow .ef-label .hint { font-weight:400; }
+textarea.ef-body { flex:1; min-height:0; resize:none; font:13px/1.7 Consolas,"Cascadia Code",monospace; }
+/* 对照态：小字段紧凑 old→new 对照 + 正文左右分栏（old=灰底 / new=绿边） */
+.cmp-meta { flex:none; border:1px solid var(--border); border-radius:8px; background:var(--card);
+            padding:8px 14px; margin-bottom:12px; }
+.cmp-mrow { display:flex; align-items:baseline; gap:10px; padding:4px 0; font-size:12.5px; }
+.cmp-mrow + .cmp-mrow { border-top:1px dashed var(--border); }
+.cmp-mrow .k { color:var(--muted); flex:none; font-weight:600; font-size:12px; white-space:nowrap; }
+.cmp-mrow .old { color:var(--muted); text-decoration:line-through; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:34%; }
+.cmp-mrow .arrow { color:var(--muted); flex:none; }
+.cmp-mrow .new { color:var(--fg); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; min-width:0; }
+.cmp-mrow .cmp-fill { margin-left:auto; flex:none; }
+/* 正文分栏：两栏等高、各自滚动 */
+.cmp-split { flex:1; display:flex; gap:12px; min-height:0; }
+.cmp-pane { flex:1; display:flex; flex-direction:column; min-width:0; background:var(--card);
+            border:1px solid var(--border); border-radius:8px; overflow:hidden; }
+.cmp-pane.new { border-color:var(--ok); }
+.cmp-pane-head { padding:6px 12px; border-bottom:1px solid var(--border); font-size:12px; font-weight:600;
+                 display:flex; align-items:center; gap:8px; flex:none; }
+.cmp-pane-head .cmp-fill { margin-left:auto; }
+.cmp-pane-body { flex:1; overflow-y:auto; padding:12px 16px; font:13px/1.7 Consolas,"Cascadia Code",monospace;
+                 white-space:pre-wrap; word-break:break-word; }
+.cmp-pane.old .cmp-pane-body { color:var(--muted); background:var(--hover); }
 .cmp-basis { font-size:12px; font-weight:400; color:var(--muted); }
 .cmp-notice { background:var(--sel-bg); color:var(--sel-fg); border:1px solid var(--primary);
               border-radius:6px; padding:8px 10px; margin-bottom:10px; font-size:13px; line-height:1.5; }
 .cmp-note { font-size:12px; align-self:center; color:var(--muted); }
-.cmp-field { border:1px solid var(--border); border-radius:8px; padding:10px 12px; margin-bottom:10px; }
-.cmp-name { font-size:12px; color:var(--muted); margin-bottom:6px; font-weight:600;
-            display:flex; justify-content:space-between; align-items:center; }
 .cmp-fill { font-size:12px; padding:1px 10px; }
-.cmp-old, .cmp-new { font-size:13px; line-height:1.6; border-radius:6px; padding:8px 10px;
-                     white-space:pre-wrap; word-break:break-word; }
-.cmp-old { background:var(--hover); color:var(--muted); }
-.cmp-new { background:var(--ok-bg); border:1px solid var(--ok); margin-top:6px; }
-.cmp-tag { display:inline-block; font-size:11px; border-radius:4px; padding:0 6px;
-           margin-right:8px; vertical-align:1px; }
+.cmp-tag { display:inline-block; font-size:11px; border-radius:4px; padding:0 6px; }
 .cmp-tag.old { background:var(--border); color:var(--muted); }
 .cmp-tag.new { background:var(--ok); color:#fff; }
