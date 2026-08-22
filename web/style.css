@@ -171,15 +171,17 @@ body.tree-resizing { cursor:col-resize; user-select:none; }
 .md pre { background:var(--pre-bg); color:var(--pre-fg); border-radius:8px; padding:12px 14px; overflow-x:auto; }
 .md pre code { background:none; color:inherit; padding:0; }
 .md ul,.md ol { margin:8px 0; padding-left:24px; }
-/* README 增强渲染补充（manage-fix3）：h4-h6 / hr / 引用块 / GFM 表格 / 外链图 / 相对路径图占位徽标 */
+/* README 增强渲染补充（manage-fix3/fix4）：h4-h6 / hr / 引用块 / GFM 表格（顶满宽度）/ 外链+相对路径图 / details 折叠块 */
 .md h4 { font-size:13.5px; margin:12px 0 6px; }
 .md h5,.md h6 { font-size:12.5px; margin:10px 0 4px; }
 .md hr { border:none; border-top:1px solid var(--border); margin:14px 0; }
 .md blockquote { margin:8px 0; padding:2px 12px; border-left:3px solid var(--border); color:var(--muted); }
-.md table { border-collapse:collapse; margin:10px 0; font-size:13px; }
+.md table { border-collapse:collapse; margin:10px 0; font-size:13px; width:100%; }
 .md th,.md td { border:1px solid var(--border); padding:5px 10px; }
 .md th { background:var(--hover); }
 .md img { max-width:100%; }
+.md details { margin:8px 0; }
+.md summary { cursor:pointer; font-weight:600; }
 .img-ph { display:inline-block; padding:1px 8px; border:1px dashed var(--border); border-radius:4px;
           background:var(--hover); color:var(--muted); font-size:12px; }
 

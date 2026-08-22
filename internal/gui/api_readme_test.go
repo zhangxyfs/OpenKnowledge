@@ -1,8 +1,10 @@
 package gui
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -118,5 +120,53 @@ func TestAPIProjectReadme(t *testing.T) {
 	}
 	if code, _ = getReadme(t, srv.URL, "../etc"); code != 400 {
 		t.Fatalf("traversal project name: code=%d, want 400", code)
+	}
+}
+
+// TestAPIProjectReadmeAsset 覆盖 readme-asset 端点四态：正常读取 / .. 穿越与绝对
+// 路径 / 非法扩展名 / 文件不存在；另验 <img> 直链的 ?token= 查询鉴权与错误令牌 401。
+func TestAPIProjectReadmeAsset(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	dir := t.TempDir()
+	png := []byte("\x89PNG\r\n\x1a\nfake")
+	if err := os.MkdirAll(filepath.Join(dir, "docs", "assets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "docs", "assets", "logo.png"), png, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mkProjectAt(t, okHome, "assetProj", dir)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	base := srv.URL + "/api/project/readme-asset?project=assetProj"
+
+	// 1. 正常读取：200 + 字节一致 + Content-Type 按扩展名
+	code, data := do(t, "GET", base+"&path="+url.QueryEscape("docs/assets/logo.png"), testToken, nil)
+	if code != 200 || !bytes.Equal(data, png) {
+		t.Fatalf("normal: code=%d len=%d", code, len(data))
+	}
+	// 2. 穿越与绝对路径：403（含 URL 编码的 ..%2f）
+	for _, p := range []string{"../secret.png", "..\\secret.png", "../../etc/x.png", "/etc/x.png", "C:/Windows/x.png"} {
+		if code, _ = do(t, "GET", base+"&path="+url.QueryEscape(p), testToken, nil); code != 403 {
+			t.Fatalf("traversal %q: code=%d, want 403", p, code)
+		}
+	}
+	// 3. 非法扩展名：400（README.md 存在但不是图片）
+	if code, _ = do(t, "GET", base+"&path=README.md", testToken, nil); code != 400 {
+		t.Fatalf("bad ext: code=%d, want 400", code)
+	}
+	// 4. 文件不存在：404
+	if code, _ = do(t, "GET", base+"&path=docs/assets/ghost.png", testToken, nil); code != 404 {
+		t.Fatalf("missing: code=%d, want 404", code)
+	}
+	// 5. <img> 直链鉴权：?token= 放行，错误令牌 401
+	if code, _ = do(t, "GET", base+"&path="+url.QueryEscape("docs/assets/logo.png")+"&token="+testToken, "", nil); code != 200 {
+		t.Fatalf("query token: code=%d, want 200", code)
+	}
+	if code, _ = do(t, "GET", base+"&path="+url.QueryEscape("docs/assets/logo.png"), "", nil); code != 401 {
+		t.Fatalf("no token: code=%d, want 401", code)
 	}
 }

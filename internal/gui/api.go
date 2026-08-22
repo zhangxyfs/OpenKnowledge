@@ -89,6 +89,8 @@ func NewHandler(webDir, token string, beats chan<- struct{}) *Handler {
 	api("POST /api/entry/optimize", h.apiEntryOptimize)
 	api("GET /api/project/branch-info", h.apiProjectBranchInfo)
 	api("GET /api/project/readme", h.apiProjectReadme)
+	// README 相对路径图片直链：<img src> 无法带 X-Ok-Token 头，本端点另放 ?token= 校验
+	mux.HandleFunc("GET /api/project/readme-asset", h.withAuthQuery(h.apiProjectReadmeAsset))
 	api("POST /api/heartbeat", h.apiHeartbeat)
 	api("POST /api/shutdown", h.apiShutdown)
 	api("POST /api/uninstall", h.apiUninstall)
@@ -128,6 +130,18 @@ func (h *Handler) withAuth(fn http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-Ok-Token") != h.token {
 			writeErr(w, http.StatusUnauthorized, "缺少或错误的 X-Ok-Token")
+			return
+		}
+		fn(w, r)
+	}
+}
+
+// withAuthQuery 同 withAuth，另接受 ?token= 查询参数——仅供 <img src> 直链端点
+// （浏览器 img 请求无法携带自定义头），其他端点一律走 withAuth 不放查询令牌。
+func (h *Handler) withAuthQuery(fn http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Ok-Token") != h.token && r.URL.Query().Get("token") != h.token {
+			writeErr(w, http.StatusUnauthorized, "缺少或错误的令牌")
 			return
 		}
 		fn(w, r)
@@ -1469,6 +1483,94 @@ func (h *Handler) apiProjectReadme(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"found": false})
+}
+
+// readmeImageTypes：readme-asset 端点放行的图片扩展名 → Content-Type。
+// 硬编码不取 mime.TypeByExtension（Windows 下读注册表，结果不可靠）。
+var readmeImageTypes = map[string]string{
+	".png":  "image/png",
+	".jpg":  "image/jpeg",
+	".jpeg": "image/jpeg",
+	".gif":  "image/gif",
+	".svg":  "image/svg+xml",
+	".webp": "image/webp",
+	".ico":  "image/x-icon",
+	".bmp":  "image/bmp",
+}
+
+// apiProjectReadmeAsset 分发项目 README 引用的相对路径图片（管理页 README 视图把
+// 相对路径 <img> 重写为本端点直链）。安全口径：项目名走 resolveProject 校验；
+// path 拒绝绝对路径/盘符/rooted 路径与 .. 穿越（Clean 后仍须落在项目根目录内，
+// Abs 复核兜底）；仅放行 readmeImageTypes 图片扩展名；10MB 上限防病态文件。
+// 缺失 404、非法扩展 400、越界/超限 403。svg 经 <img> 加载脚本不执行，可放行。
+func (h *Handler) apiProjectReadmeAsset(w http.ResponseWriter, r *http.Request) {
+	name := r.URL.Query().Get("project")
+	if st := resolveProject(w, name); st == nil {
+		return
+	}
+	rel := r.URL.Query().Get("path")
+	if rel == "" {
+		writeErr(w, http.StatusBadRequest, "缺少 path 参数")
+		return
+	}
+	if filepath.IsAbs(rel) || filepath.VolumeName(rel) != "" ||
+		strings.HasPrefix(rel, "/") || strings.HasPrefix(rel, "\\") {
+		writeErr(w, http.StatusForbidden, "非法路径：拒绝绝对路径与盘符")
+		return
+	}
+	cleaned := filepath.Clean(rel)
+	if cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) || filepath.IsAbs(cleaned) {
+		writeErr(w, http.StatusForbidden, "非法路径：越出项目根目录")
+		return
+	}
+	ctype, ok := readmeImageTypes[strings.ToLower(filepath.Ext(cleaned))]
+	if !ok {
+		writeErr(w, http.StatusBadRequest, "仅允许图片扩展名")
+		return
+	}
+	reg, err := registry.Load(registry.DefaultPath())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	root := ""
+	for _, p := range reg.Projects {
+		if p.Name == name && len(p.Paths) > 0 {
+			root = p.Paths[0]
+			break
+		}
+	}
+	if root == "" {
+		writeErr(w, http.StatusNotFound, "项目无根目录")
+		return
+	}
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	full := filepath.Join(rootAbs, cleaned)
+	if full != rootAbs && !strings.HasPrefix(full, rootAbs+string(filepath.Separator)) {
+		writeErr(w, http.StatusForbidden, "非法路径：越出项目根目录")
+		return
+	}
+	fi, err := os.Stat(full)
+	if err != nil || fi.IsDir() {
+		writeErr(w, http.StatusNotFound, "文件不存在")
+		return
+	}
+	if fi.Size() > 10<<20 {
+		writeErr(w, http.StatusForbidden, "文件超过 10MB 上限")
+		return
+	}
+	data, err := os.ReadFile(full)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "文件不存在")
+		return
+	}
+	w.Header().Set("Content-Type", ctype)
+	w.Header().Set("Cache-Control", "no-cache")
+	_, _ = w.Write(data)
 }
 
 // hasExactTag 判定 tags 是否含精确等于 name 的标签（防 sewiki/nowiki 子串误判，

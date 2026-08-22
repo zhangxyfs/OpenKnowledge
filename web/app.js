@@ -636,14 +636,15 @@ function renderMd(src){
   return html;
 }
 
-/* ---- README 增强渲染（manage-fix3 反馈3）：仅 renderProjectReadme 使用，条目正文仍走上方
-   renderMd 不动。在 renderMd 基础上加：GFM 管道表格、h4-h6、有序列表、引用块、hr、
-   行内链接/图片、白名单内联 HTML；最终整串过 sanitizeHtml（DOMParser 解析后按白名单
-   重建，见下）兜底。README 与条目正文都不可全信：白名单外标签拆壳留内容，script/iframe/
-   object 等连内容剥除，on 事件属性与 style 等一律剥除，href/src 走协议白名单。 ---- */
+/* ---- README 增强渲染（manage-fix3 反馈3 + manage-fix4 复验）：仅 renderProjectReadme 使用，
+   条目正文仍走上方 renderMd 不动。在 renderMd 基础上加：GFM 管道表格（转义感知分列）、h4-h6、
+   有序列表、引用块、hr、行内链接/图片、白名单内联 HTML（含 details/summary 折叠块）；最终整串
+   过 sanitizeHtml（DOMParser 解析后按白名单重建，见下）兜底。README 与条目正文都不可全信：
+   白名单外标签拆壳留内容，script/iframe/object 等连内容剥除，on 事件属性与 style 等一律剥除，
+   href/src 走协议白名单；相对路径图重写为 /api/project/readme-asset 直链（proj 由调用方传入）。 ---- */
 const RICH_TAGS = {p:1,br:1,b:1,strong:1,i:1,em:1,a:1,img:1,code:1,pre:1,span:1,div:1,
   h1:1,h2:1,h3:1,h4:1,h5:1,h6:1,ul:1,ol:1,li:1,blockquote:1,sub:1,sup:1,hr:1,
-  table:1,thead:1,tbody:1,tr:1,th:1,td:1};
+  table:1,thead:1,tbody:1,tr:1,th:1,td:1,details:1,summary:1};
 const RICH_DROP = {script:1,iframe:1,object:1,style:1,svg:1,math:1,template:1,noscript:1};
 // inlineRich：先整体 esc；code 段占位保护（内容保持字面）；白名单标签的转义序列还原为真
 // 标签（属性仍带实体，交由 sanitizeHtml 清洗重建）；再做加粗/斜体/链接/图片行内替换
@@ -674,22 +675,28 @@ function richAttrs(n, extra){
   }
   return s;
 }
-function serKids(n){
+function serKids(n, proj){
   let out = "";
-  for(let i=0;i<n.childNodes.length;i++) out += serNode(n.childNodes[i]);
+  for(let i=0;i<n.childNodes.length;i++) out += serNode(n.childNodes[i], proj);
   return out;
 }
-function serNode(n){
+function serNode(n, proj){
   if(n.nodeType===3) return esc(n.nodeValue);
   if(n.nodeType!==1) return "";
   const tag = n.tagName.toLowerCase();
   if(RICH_DROP[tag]) return "";
-  if(!RICH_TAGS[tag]) return serKids(n);   // 白名单外标签拆壳、保留子内容
+  if(!RICH_TAGS[tag]) return serKids(n, proj);   // 白名单外标签拆壳、保留子内容
   if(tag==="img"){
     const src = (n.getAttribute("src")||"").trim();
     if(/^https?:\/\//i.test(src))   // shields.io 等外链图正常放行
       return '<img src="'+esc(src)+'"'+richAttrs(n,["alt","width","height"])+'>';
-    // 相对路径图 daemon 不分发（白名单静态文件）→ 占位徽标，避免 404 刷屏
+    // 相对路径图重写为 readme-asset 端点直链（daemon 从项目根分发；?token= 因 <img> 无法带鉴权头）
+    if(proj && src && !/^[a-z][a-z0-9+.-]*:/i.test(src) && !src.startsWith("//")){
+      const u = "/api/project/readme-asset?project="+encodeURIComponent(proj)
+              + "&path="+encodeURIComponent(src)+"&token="+encodeURIComponent(window.OK_TOKEN||"");
+      return '<img src="'+esc(u)+'"'+richAttrs(n,["alt","width","height"])+'>';
+    }
+    // 无项目上下文兜底（当前调用方恒有项目）：占位徽标，避免 404 刷屏
     const label = (n.getAttribute("alt")||"").trim() || src.split("/").pop() || "image";
     return '<span class="img-ph" title="'+esc(src)+'">'+esc(label)+'</span>';
   }
@@ -697,19 +704,44 @@ function serNode(n){
     const at = richAttrs(n,["href"]);
     // 外链新窗口打开，避免整窗导航把 GUI 顶掉
     const ext = /\shref="https?:\/\//i.test(at) ? ' target="_blank" rel="noopener noreferrer"' : "";
-    return "<a"+at+ext+">"+serKids(n)+"</a>";
+    return "<a"+at+ext+">"+serKids(n, proj)+"</a>";
   }
-  if(tag==="td"||tag==="th") return "<"+tag+richAttrs(n,["colspan","rowspan"])+">"+serKids(n)+"</"+tag+">";
+  if(tag==="td"||tag==="th") return "<"+tag+richAttrs(n,["colspan","rowspan"])+">"+serKids(n, proj)+"</"+tag+">";
   if(tag==="br"||tag==="hr") return "<"+tag+">";
-  return "<"+tag+richAttrs(n)+">"+serKids(n)+"</"+tag+">";
+  return "<"+tag+richAttrs(n)+">"+serKids(n, proj)+"</"+tag+">";
 }
-function sanitizeHtml(html){
+function sanitizeHtml(html, proj){
   const doc = new DOMParser().parseFromString(html, "text/html");
-  return serKids(doc.body);
+  return serKids(doc.body, proj);
 }
-function renderMdRich(src){
+function renderMdRich(src, proj){
   const lines = src.split("\n"); let html="", i=0;
-  const cells = l=>{ let s=l.trim(); if(s.startsWith("|")) s=s.slice(1); if(s.endsWith("|")) s=s.slice(0,-1); return s.split("|").map(c=>c.trim()); };
+  // 表格分列（manage-fix4）：按未转义的 | 切，\| 归并为字面 |；列数与表头不符时
+  // 回退反引号代码段感知（代码段内裸 | 不分列）——GFM 要求表格内 \| 转义，但
+  // 两种写法都兼容，分列结果与表头列数一致才接受回退。
+  const splitRow = (l, codeAware)=>{
+    let s = l.trim();
+    if(s.startsWith("|")) s = s.slice(1);
+    if(s.endsWith("|") && !/\\\|$/.test(s)) s = s.slice(0,-1);
+    const out = []; let cur = "", code = false;
+    for(let k=0;k<s.length;k++){
+      const ch = s[k];
+      if(ch==="\\" && s[k+1]==="|"){ cur += "|"; k++; continue; }
+      if(ch==="`"){ code = !code; cur += ch; continue; }
+      if(ch==="|" && !(codeAware && code)){ out.push(cur); cur=""; continue; }
+      cur += ch;
+    }
+    out.push(cur);
+    return out.map(c=>c.trim());
+  };
+  const cells = (l, n)=>{
+    const cs = splitRow(l, false);
+    if(n && cs.length!==n){
+      const cs2 = splitRow(l, true);
+      if(cs2.length===n) return cs2;
+    }
+    return cs;
+  };
   const isDelim = l=>{ const cs=cells(l); return cs.length>0 && cs.every(c=>/^:?-+:?$/.test(c)); };
   const aligns = l=>cells(l).map(c=>c.startsWith(":")&&c.endsWith(":")?"center":c.endsWith(":")?"right":"");
   while(i<lines.length){
@@ -723,7 +755,7 @@ function renderMdRich(src){
     if(l.trim().startsWith("|") && i+1<lines.length && isDelim(lines[i+1])){
       const heads = cells(l), al = aligns(lines[i+1]); i += 2;
       const rows = [];
-      while(i<lines.length && lines[i].trim().startsWith("|")) rows.push(cells(lines[i++]));
+      while(i<lines.length && lines[i].trim().startsWith("|")) rows.push(cells(lines[i++], heads.length));
       const at = j=>al[j]?' align="'+al[j]+'"':"";
       html += "<table><thead><tr>"+heads.map((x,j)=>"<th"+at(j)+">"+inlineRich(x)+"</th>").join("")
             + "</tr></thead><tbody>"
@@ -755,7 +787,7 @@ function renderMdRich(src){
     if(l.trim()===""){ i++; continue; }
     html += "<p>"+inlineRich(l)+"</p>"; i++;
   }
-  return sanitizeHtml(html);
+  return sanitizeHtml(html, proj);
 }
 
 /* ================= 管理页 ================= */
@@ -779,7 +811,10 @@ function renderMdRich(src){
    复验迭代（manage-fix3）：默认展开的项目同时默认选中（右侧直接显示其 README）；
    项目行双热区——名前图标/箭头区（.pj-toggle）=展开/收起，项目名区（.pj-name，含计数）
    =选中并预览 README；README 正文走 renderMdRich（GFM 表格 + 白名单内联 HTML +
-   协议白名单图链，相对路径图渲染为 .img-ph 占位徽标），条目正文仍走 renderMd 不动。 */
+   协议白名单图链），条目正文仍走 renderMd 不动。
+   复验迭代（manage-fix4）：README 相对路径图经 /api/project/readme-asset 真实分发
+   （替换原 .img-ph 占位徽标）；表格转义感知分列（\| 与代码段裸 | 兼容）+ 顶满宽度；
+   details/summary 入白名单，折叠块真实可折叠。 */
 const TYPE_LABEL = { pitfall:"坑", note:"注", rule:"规", reference:"参" };
 let MGMT = null;        // {list:[{name,paths,lastUpdate,entries,err}], loadErr} 缓存；loadManage 惰性加载
 let DETAIL = null;      // {key(project\nfile), data, err} 当前选中条目全文缓存
@@ -1118,8 +1153,9 @@ function renderTreeResizer(){
   return bar;
 }
 
-// 项目节点详情（反馈3）：项目名 + README/wiki 概述来源行 + renderMdRich 正文（manage-fix3：
-// 表格/白名单内联 HTML/外链图，相对路径图显示占位徽标）；无 README 给空态提示
+// 项目节点详情（反馈3）：项目名 + README/wiki 概述来源行 + renderMdRich 正文（manage-fix4：
+// 表格/白名单内联 HTML/details 折叠块/外链图，相对路径图经 readme-asset 端点真实分发）；
+// 无 README 给空态提示
 function renderProjectReadme(d, project){
   const rm = README[project];
   d.appendChild(Object.assign(el("div","d-path"),{textContent:"projects/"+project+"/"}));
@@ -1140,7 +1176,7 @@ function renderProjectReadme(d, project){
   const src = r.source==="wiki" ? t("readmeSrcWiki") : t("readmeSrcReadme");
   d.appendChild(Object.assign(el("div","d-filemeta"),{textContent:src.replace("{p}", r.path||"")}));
   const bd = el("div","d-body md");
-  bd.innerHTML = renderMdRich(r.content||"");
+  bd.innerHTML = renderMdRich(r.content||"", project);
   d.appendChild(bd);
 }
 
