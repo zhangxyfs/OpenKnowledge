@@ -220,7 +220,15 @@ button { font:inherit; color:inherit; }
 .chip.off { background:var(--hover); color:var(--muted); }
 .fb { font-size:12px; color:var(--ok); margin-top:4px; display:none; }
 .fb.show { display:block; }
-.detail-toggle { background:none; border:none; color:var(--muted); font-size:12px; cursor:pointer; padding:0; }
+.fb.err { color:#dc2626; }
+/* Reasonix 专属三档（旧 GUI rx-enforce-card 语义，挂进 reasonix agent 卡内） */
+.rxmodes { margin-top:8px; background:var(--bg); border-radius:6px; padding:8px 12px; font-size:12px; }
+.rxmodes .rx-title { font-weight:600; color:var(--fg); font-size:12.5px; }
+.rxmodes .rx-desc { color:var(--muted); margin:2px 0 6px; }
+.rxmodes .rx-opt { display:block; color:var(--fg); margin:2px 0; cursor:pointer; }
+.rxmodes .rx-opt input { accent-color:var(--primary); }
+.detail-toggle { background:none; border:none; color:var(--muted); font-size:12px; cursor:pointer; padding:0;
+                 display:block; text-align:left; margin-top:2px; }  /* 块级：codex 卡两个 toggle（信任门说明+明细）各占一行 */
 .detail-toggle:hover { color:var(--primary); }
 .adetail { display:none; margin-top:6px; font-size:12px; color:var(--muted); background:var(--bg);
            border-radius:6px; padding:8px 12px; }
