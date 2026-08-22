@@ -215,7 +215,7 @@ Windows 下大小写不敏感与分隔符混乱问题全部收敛到 `NormalizeP
 func LoadMerged(projectPath, globalPath string) (Config, error)
 ```
 
-生效配置 = **内置默认 ← 全局 `~/.openknowledge/config.toml` ← 项目 `config.toml`**，后者覆盖前者（TOML 依次解码到同一 struct 实现）。`Enforce` 规则只有项目级。API key 解析收敛在一处：
+生效配置 = **内置默认 ← 全局 `~/.openknowledge/config.toml` ← 项目 `config.toml`**，后者覆盖前者（TOML 依次解码到同一 struct 实现）。`[[enforce]]` 两层均可配置（GUI 规则卡写全局层）。API key 解析收敛在一处：
 
 ```go
 func (e Embedding) ResolvedAPIKey() string  // api_key 字段 > api_key_env 环境变量 > ""
@@ -264,7 +264,7 @@ v1 仅 `changelog_required`：触碰文件中存在匹配 `code_globs` 的 且 �
 - `setup.go`：见第 6.4 节
 - `toggle.go`：`On`/`Off` 即删除/创建 `~/.openknowledge/hooks-disabled` 标志文件
 
-### 5.11 gui — 配置中心 Web UI（api.go 1540 行 + changelog/embedding/llm/api_hookstimeout/api_enforce 五个专题文件 + browser/window 平台件）
+### 5.11 gui — 配置中心 Web UI（api.go 1552 行 + changelog/embedding/llm/api_hookstimeout/api_enforce 五个专题文件 + browser/window 平台件）
 
 配置中心是五页单页应用（管理/引导/设置/日志/其他），供不熟悉命令行的用户完成首次引导与日常知识维护。gui 包只出 HTTP API 与静态页，进程生命周期由 internal/daemon 托管（okd 常驻，页面关闭不退出）。**双入口**：`ok gui`（或无参数运行）与 `OkManager.exe` 同为薄启动器——EnsureCurrent 确保 okd 在线后以应用模式打开浏览器即退（`daemon.OpenGUI`）；托盘双击同链路。
 
@@ -277,12 +277,12 @@ v1 仅 `changelog_required`：触碰文件中存在匹配 `code_globs` 的 且 �
 |------|------|
 | 管理 | `GET /api/projects`、`GET /api/entries?project=`、`GET/POST/PUT/DELETE /api/entry`（标题 slug 定文件名、重复 409、写后同步索引）、`POST /api/approve`（草稿转正）、`POST /api/entry/archive`（归档/取消）、`POST /api/entry/optimize`（LLM 优化对照，未配置 409 `no_llm`）、`GET /api/search?project=&q=`、`GET /api/project/branch-info?project=`（继承徽标 hover 数据） |
 | 引导 | `GET /api/status`（agents[id/name/detected/hooksInstalled]、skillsInstalled、hooksTimeout、rxEnforceMode、disabled、app_version、home）、`POST /api/setup/hooks`（`{"agent":id}` 单装 / 缺省全装）、`POST /api/setup/hooks/remove`（单 agent 卸载）、`POST /api/setup/skills`、`POST /api/reasonix/enforce-mode`（mixed/soft/hard，落盘即生效） |
-| 设置 | `POST /api/toggle`（全局开关）；`POST /api/hooks/timeout`（独立写 `[hooks] timeout_sec`，1~60，**不重装 hooks**）；`GET/POST /api/retrieve`（dedup_turns 跨轮冷却）；`GET/POST /api/capture`（沉淀 mode/turn_interval；`turn_interval:0`=保持不变）；`GET/POST /api/gate`（泛化门控开关+短语表）；`GET/POST /api/enforce/rules`（`[[enforce]]` 整体读写，type 仅 changelog、code_globs/message 非空，空数组=清空）；embedding：`GET /api/setup/embedding` + `profile`/`DELETE profile`/`active`/`test`/`download`（断点续传+sha256，前端 1s 轮询进度）/`download/cancel`（留 .part 续传）/`models-dir`/`open-models-dir`/`ollama-models`；LLM：`GET /api/llm` + `profile`/`delete`/`active`/`max-tokens`/`test` |
+| 设置 | `POST /api/toggle`（全局开关）；`POST /api/hooks/timeout`（独立写 `[hooks] timeout_sec`，1~60，**不重装 hooks**）；`GET/POST /api/retrieve`（dedup_turns 跨轮冷却）；`GET/POST /api/capture`（沉淀 mode/turn_interval；`turn_interval:0`=保持不变）；`GET/POST /api/gate`（泛化门控开关+短语表）；`GET/POST /api/enforce/rules`（`[[enforce]]` 整体读写，type 仅 changelog、code_globs/message 非空，空数组=清空）——retrieve/capture/gate/enforce-rules 四族的 `project` 参数可选：**缺省读写全局 `config.toml`**（经 `resolveConfigTarget` 分流，读 `config.Load` 缺文件按默认值），显式传项目名保持项目级合并读、项目 config 写的旧行为；embedding：`GET /api/setup/embedding` + `profile`/`DELETE profile`/`active`/`test`/`download`（断点续传+sha256，前端 1s 轮询进度）/`download/cancel`（留 .part 续传）/`models-dir`/`open-models-dir`/`ollama-models`；LLM：`GET /api/llm` + `profile`/`delete`/`active`/`max-tokens`/`test` |
 | 日志 | `GET /api/logs?tail=&sig=`（ok/daemon/sidecar 三来源，行带 `src`/`semantic` 标记；sig 命中返回 `unchanged` 前端跳过重绘） |
 | 其他 | `GET /api/export?project=`（zip）、`POST /api/import`（multipart 32MB，`Report{imported,skipped,projects}`）、`GET /api/changelog`（`current/pending/all`，pending 只算严格大于 last_seen 且不超过 current 的版本）、`POST /api/changelog/seen`（仅升级首弹关闭才标已读，写 `~/.openknowledge/gui.json`）、`DELETE /api/project`、`GET /help.md`（静态） |
 | 横切 | `POST /api/heartbeat?project=`（返回该项目 kb.db mtime 作 `version`；beats 通道生产传 nil——存活感知由 daemon.json 自省 + 托盘承担，新前端不再 5s 轮询）、`POST /api/shutdown`、`POST /api/uninstall`、`GET/POST /api/inject`（注入预算） |
 
-前端 `web/`（零依赖原生 HTML/JS/CSS，无构建链；index.html 骨架 + app.js + style.css）：左右栏五菜单 + `location.hash` 路由（刷新恢复当前菜单）+ 中英切换（只翻界面 chrome 不翻数据）+ 昼夜 CSS 变量双主题 + 整页重渲保持各滚动容器 scrollTop。「管理」=项目→条目两级树（类型徽标/mandatory★/draft/归档置灰 + 标题过滤 + 计数）+ markdown 详情 + 右上操作组（编辑/批准/归档/删除）+ 新建/编辑弹窗内 ✨优化（loading→对照预览→逐字段回填，409 弹「尚未配置模型」）；「引导」=agent 卡片（品牌字形 data-URI、未检测不渲染、安装/卸载双态、明细展开）+ Reasonix 强制检查三档卡 + Codex 信任门说明卡；「设置」=八卡（全局开关/语义检索/模型配置/Hook 超时/跨轮注入冷却/经验沉淀/泛化门控/规则配置），开关即存、简单输入行内保存改回原值变灰、弹窗确定生效闪 ✓；「日志」=深色控制台（来源 chips+仅语义+过滤，贴底滚动）；「其他」=导出/导入/更新日志/使用帮助/删除项目知识库（备份+ack+输名三重解锁）/关于。启动横切：升级后首次打开自动弹更新日志（pending 非空 → body 级弹窗，不进 render 周期）；`/api/projects` 为空时落「引导」页（旧 GUI"无项目隐藏管理 tab"语义的等价形态）。daemon 被替换致 token 过期 401 时自动刷新一次页面取新 token（sessionStorage 标志防循环）。
+前端 `web/`（零依赖原生 HTML/JS/CSS，无构建链；index.html 骨架 + app.js + style.css）：左右栏五菜单 + `location.hash` 路由（刷新恢复当前菜单）+ 中英切换（只翻界面 chrome 不翻数据）+ 昼夜 CSS 变量双主题 + 整页重渲保持各滚动容器 scrollTop。「管理」=项目→条目两级树（类型徽标/mandatory★/draft/归档置灰 + 标题过滤 + 计数）+ markdown 详情 + 右上操作组（编辑/批准/归档/删除）+ 新建/编辑弹窗内 ✨优化（loading→对照预览→逐字段回填，409 弹「尚未配置模型」）；「引导」=agent 卡片（品牌字形 data-URI、未检测不渲染、安装/卸载双态、明细展开）+ Reasonix 强制检查三档卡 + Codex 信任门说明卡；「设置」=八卡（全局开关/语义检索/模型配置/Hook 超时/跨轮注入冷却/经验沉淀/泛化门控/规则配置；后四卡为全局配置，不带 project、无项目也可用），开关即存、简单输入行内保存改回原值变灰、弹窗确定生效闪 ✓；「日志」=深色控制台（来源 chips+仅语义+过滤，贴底滚动）；「其他」=导出/导入/更新日志/使用帮助/删除项目知识库（备份+ack+输名三重解锁）/关于。启动横切：升级后首次打开自动弹更新日志（pending 非空 → body 级弹窗，不进 render 周期）；`/api/projects` 为空时落「引导」页（旧 GUI"无项目隐藏管理 tab"语义的等价形态）。daemon 被替换致 token 过期 401 时自动刷新一次页面取新 token（sessionStorage 标志防循环）。
 
 ### 5.12 backup — 知识库导出/导入（251 行）
 
@@ -960,12 +960,12 @@ os.ReadDir(knowledge/)                # 只拿文件名，不读内容
 
 ### 18.2 项目配置 `~/.openknowledge/projects/<名>/config.toml`
 
-可覆盖以上全部参数（`[[enforce]]` 仅项目级）：
+可覆盖以上全部参数（`[[enforce]]` 全局层同样可配，GUI 规则卡写全局层）：
 
 | 参数 | 说明 |
 |------|------|
-| `capture.mode` | 经验沉淀模式：`propose`（默认，AI 主动提议草稿人批准）或 `auto`（Stop hook 周期阻断强制自省）；`ok capture <mode>` 或 GUI 设置页沉淀卡写入 |
-| `capture.turn_interval` | auto 模式的自省间隔（Stop 次数，默认 5）；仅项目/全局配置手改 |
+| `capture.mode` | 经验沉淀模式：`propose`（默认，AI 主动提议草稿人批准）或 `auto`（Stop hook 周期阻断强制自省）；`ok capture <mode>`（写项目层）或 GUI 设置页沉淀卡（写全局层） |
+| `capture.turn_interval` | auto 模式的自省间隔（Stop 次数，默认 5）；GUI 设置页沉淀卡（写全局层）或手改 |
 | `provenance.auto_born` | 新建条目自动记录 born 分支溯源标签（默认 true）；手改配置文件（新配置中心未暴露该键） |
 | `wiki.stale_commits` | wiki 落后多少 commit 触发 prompt 提示（默认 20，0 = 关闭；游标失效 gone/归属存疑 legacy_orphan 提示不受此阈值门控） |
 | `[[enforce]].type` | 规则类型，v1 仅 `changelog_required` |

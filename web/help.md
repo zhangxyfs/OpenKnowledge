@@ -63,10 +63,10 @@ daemon 常驻后台、按需自动拉起，无需手动管理；托盘图标右�
 
 ### 项目配置（知识库根目录 `config.toml`）
 
-- `[capture] mode`（默认 propose）——沉淀模式：propose=AI 自主判断 / auto=到间隔自动提醒。改法：GUI 设置页"经验沉淀"卡，或 `ok capture`
+- `[capture] mode`（默认 propose）——沉淀模式：propose=AI 自主判断 / auto=到间隔自动提醒。改法：GUI 设置页"经验沉淀"卡（写全局配置），或 `ok capture`（写项目配置）
 - `[capture] turn_interval`（默认 5）——auto 模式的提醒间隔（回合数）。改法：同上
 - `[provenance] auto_born`（默认 true）——新建条目自动记录出生分支（born 标签）。改法：手改文件
-- `[enforce]`（默认空）——强制检查规则（如 changelog_required：改了代码必须更新 CHANGELOG，否则阻断）。改法：GUI 设置页"规则配置"卡，或手改文件
+- `[enforce]`（默认空）——强制检查规则（如 changelog_required：改了代码必须更新 CHANGELOG，否则阻断）。改法：GUI 设置页"规则配置"卡（写全局配置），或手改文件
 - `[wiki] stale_commits`（默认 20）——wiki 落后多少 commit 开始提醒；0 = 关闭提醒。改法：手改文件
 - `[retrieve] top_n`（默认 2）——每次注入最多检索命中条数。改法：手改文件
 - `[retrieve] min_score`（默认 0.5，≤0 关闭）——注入的最低置信阈值（关键词/语义通道独立判定，宁缺毋滥不凑 top_n；随库规模缩放）

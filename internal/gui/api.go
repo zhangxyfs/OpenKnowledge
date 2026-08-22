@@ -201,6 +201,37 @@ func resolveProject(w http.ResponseWriter, name string) *store.Store {
 	return st
 }
 
+// globalConfigPath 返回全局配置文件路径（OK_HOME/config.toml）。
+func globalConfigPath() string {
+	return filepath.Join(registry.Home(), "config.toml")
+}
+
+// resolveConfigTarget 把可选 project 参数解析为配置读写目标：空 = 全局
+// config.toml（读 config.Load，缺文件按默认值，不引入新错误路径）；非空 =
+// 项目 config.toml（读合并配置，项目非法/未注册走 resolveProject 的错误响应）。
+// 返回的 path 是对应 Set 函数的落盘目标。失败时已写错误响应，ok=false。
+func resolveConfigTarget(w http.ResponseWriter, project string) (path string, cfg config.Config, ok bool) {
+	if project == "" {
+		path = globalConfigPath()
+		cfg, err := config.Load(path)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return "", config.Config{}, false
+		}
+		return path, cfg, true
+	}
+	st := resolveProject(w, project)
+	if st == nil {
+		return "", config.Config{}, false
+	}
+	cfg, err := config.LoadMerged(st.ConfigPath(), globalConfigPath())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return "", config.Config{}, false
+	}
+	return st.ConfigPath(), cfg, true
+}
+
 // validProjectName 校验项目名形状：必须是不含路径分隔符与盘符的基本名。
 // 注册表名字来自 ok init 的裸输入（无形状约束），registry.toml 也可能被手改；
 // GUI 层拿名字拼 projects/<name>/ 前，穿越段名字（../、绝对路径、C: 盘符）一律拒绝。
@@ -1025,15 +1056,11 @@ func (h *Handler) apiEntryArchive(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, summaryOf(e))
 }
 
-// apiCaptureGet 返回项目合并配置中的捕获模式、turn_interval 与 provenance auto_born。
+// apiCaptureGet 返回捕获模式、turn_interval 与 provenance auto_born。
+// project 缺省 = 全局 config.toml；显式 project = 项目合并配置（旧行为）。
 func (h *Handler) apiCaptureGet(w http.ResponseWriter, r *http.Request) {
-	st := resolveProject(w, r.URL.Query().Get("project"))
-	if st == nil {
-		return
-	}
-	cfg, err := config.LoadMerged(st.ConfigPath(), filepath.Join(registry.Home(), "config.toml"))
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+	_, cfg, ok := resolveConfigTarget(w, r.URL.Query().Get("project"))
+	if !ok {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -1089,6 +1116,7 @@ func setProvenanceAutoBorn(path string, autoBorn bool) error {
 // apiCaptureSet 设置 capture 模式、轮次间隔与 provenance auto_born：
 // [capture] 小节走 config.SetCapture；[provenance] 小节走 setProvenanceAutoBorn。
 // mode 为空、turn_interval 为 0、auto_born 缺省（null）均表示保持不变。
+// project 缺省 = 写全局 config.toml；显式 project = 写项目 config.toml（旧行为）。
 func (h *Handler) apiCaptureSet(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Project      string `json:"project"`
@@ -1099,8 +1127,8 @@ func (h *Handler) apiCaptureSet(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	st := resolveProject(w, req.Project)
-	if st == nil {
+	cfgPath, cfg, ok := resolveConfigTarget(w, req.Project)
+	if !ok {
 		return
 	}
 	if req.Mode != "" && req.Mode != "propose" && req.Mode != "auto" {
@@ -1111,11 +1139,6 @@ func (h *Handler) apiCaptureSet(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "turn_interval 必须在 1~100 之间")
 		return
 	}
-	cfg, err := config.LoadMerged(st.ConfigPath(), filepath.Join(registry.Home(), "config.toml"))
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
 	mode := cfg.Capture.Mode
 	if req.Mode != "" {
 		mode = req.Mode
@@ -1124,14 +1147,14 @@ func (h *Handler) apiCaptureSet(w http.ResponseWriter, r *http.Request) {
 	if req.TurnInterval > 0 {
 		interval = req.TurnInterval
 	}
-	if err := config.SetCapture(st.ConfigPath(), mode, interval, ""); err != nil {
+	if err := config.SetCapture(cfgPath, mode, interval, ""); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	autoBorn := cfg.Provenance.AutoBorn
 	if req.AutoBorn != nil {
 		autoBorn = *req.AutoBorn
-		if err := setProvenanceAutoBorn(st.ConfigPath(), autoBorn); err != nil {
+		if err := setProvenanceAutoBorn(cfgPath, autoBorn); err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -1139,15 +1162,11 @@ func (h *Handler) apiCaptureSet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "mode": mode, "turn_interval": interval, "auto_born": autoBorn})
 }
 
-// apiGateGet 返回项目合并配置中的门控开关、内置短语表与 extra 追加层。
+// apiGateGet 返回门控开关、内置短语表与 extra 追加层。
+// project 缺省 = 全局 config.toml；显式 project = 项目合并配置（旧行为）。
 func (h *Handler) apiGateGet(w http.ResponseWriter, r *http.Request) {
-	st := resolveProject(w, r.URL.Query().Get("project"))
-	if st == nil {
-		return
-	}
-	cfg, err := config.LoadMerged(st.ConfigPath(), filepath.Join(registry.Home(), "config.toml"))
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+	_, cfg, ok := resolveConfigTarget(w, r.URL.Query().Get("project"))
+	if !ok {
 		return
 	}
 	extra := cfg.Retrieve.Gate.ExtraPhrases
@@ -1165,6 +1184,7 @@ func (h *Handler) apiGateGet(w http.ResponseWriter, r *http.Request) {
 // null 表示该字段不变。extra 校验：逐条 trim+折叠空白，按归一化形去重（与内置
 // 重复的直接丢弃），单条 ≤64 字符、总数 ≤200 条；非法即 400。
 // 落盘走 config.SetGate（[retrieve.gate] 整段替换）。
+// project 缺省 = 写全局 config.toml；显式 project = 写项目 config.toml（旧行为）。
 func (h *Handler) apiGateSet(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Project string    `json:"project"`
@@ -1174,13 +1194,8 @@ func (h *Handler) apiGateSet(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	st := resolveProject(w, req.Project)
-	if st == nil {
-		return
-	}
-	cfg, err := config.LoadMerged(st.ConfigPath(), filepath.Join(registry.Home(), "config.toml"))
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+	cfgPath, cfg, ok := resolveConfigTarget(w, req.Project)
+	if !ok {
 		return
 	}
 	enabled := cfg.Retrieve.Gate.Enabled
@@ -1197,7 +1212,7 @@ func (h *Handler) apiGateSet(w http.ResponseWriter, r *http.Request) {
 		extra = cleaned
 	}
 	if req.Enabled != nil || req.Extra != nil {
-		if err := config.SetGate(st.ConfigPath(), enabled, extra); err != nil {
+		if err := config.SetGate(cfgPath, enabled, extra); err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -1286,16 +1301,12 @@ func (h *Handler) apiInjectSet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "mandatory_max_tokens": req.MandatoryMaxTokens})
 }
 
-// apiRetrieveGet 返回项目合并配置中的跨轮注入冷却轮数
+// apiRetrieveGet 返回跨轮注入冷却轮数
 //（[retrieve] dedup_turns，默认 3；<0 归一为 0）。
+// project 缺省 = 全局 config.toml；显式 project = 项目合并配置（旧行为）。
 func (h *Handler) apiRetrieveGet(w http.ResponseWriter, r *http.Request) {
-	st := resolveProject(w, r.URL.Query().Get("project"))
-	if st == nil {
-		return
-	}
-	cfg, err := config.LoadMerged(st.ConfigPath(), filepath.Join(registry.Home(), "config.toml"))
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+	_, cfg, ok := resolveConfigTarget(w, r.URL.Query().Get("project"))
+	if !ok {
 		return
 	}
 	n := cfg.Retrieve.EffectiveDedupTurns()
@@ -1304,6 +1315,7 @@ func (h *Handler) apiRetrieveGet(w http.ResponseWriter, r *http.Request) {
 
 // apiRetrieveSet 设置跨轮注入冷却轮数（0~99，0=关闭，非法 400）；落盘走
 // config.SetRetrieveDedupTurns（[retrieve] 小节内单键 upsert，其余键保留）。
+// project 缺省 = 写全局 config.toml；显式 project = 写项目 config.toml（旧行为）。
 func (h *Handler) apiRetrieveSet(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Project    string `json:"project"`
@@ -1312,15 +1324,15 @@ func (h *Handler) apiRetrieveSet(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	st := resolveProject(w, req.Project)
-	if st == nil {
+	cfgPath, _, ok := resolveConfigTarget(w, req.Project)
+	if !ok {
 		return
 	}
 	if req.DedupTurns < 0 || req.DedupTurns > 99 {
 		writeErr(w, http.StatusBadRequest, "dedup_turns 必须在 0~99 之间")
 		return
 	}
-	if err := config.SetRetrieveDedupTurns(st.ConfigPath(), req.DedupTurns); err != nil {
+	if err := config.SetRetrieveDedupTurns(cfgPath, req.DedupTurns); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}

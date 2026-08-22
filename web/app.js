@@ -84,19 +84,18 @@ const I18N = {
     lTest:"测试连接", lTesting:"测试中…", lTestOk:"✓ 连通（{ms}ms）",
     lNone:"未配置（✨ 优化不可用）",
     hTitle:"Hook 超时", hDesc:"写入各 agent hooks 的超时秒数。2026-08-04 曾发生 Windows 高负载下 5s 超时致 PostToolUse 整会话静默丢失，故默认 10", hSec:"超时（秒）",
-    gtTitle:"泛化门控", gtDesc:"命中内置/自定义短语的泛化 prompt 跳过检索注入与 embed 调用",
+    gtTitle:"泛化门控", gtDesc:"命中内置/自定义短语的泛化 prompt 跳过检索注入与 embed 调用；全局生效（对所有项目生效）",
     gtOn:"启用门控", gtStatus:"内置 {b} 条 · 自定义 {n} 条", gtManage:"管理短语表",
     gtBuiltin:"内置短语（只读，随版本演进）", gtCustom:"自定义短语", gtAdd:"+ 添加", gtPh:"新短语…",
-    noProject:"尚无已注册项目（先 ok init）——该项目级设置暂不可用",
     eDlReady:"✓ 模型已就绪（{dim} 维），sidecar 按需拉起、空闲自动退出",
     eDlBtn:"下载模型（{size}）", eDlDoing:"正在下载 — {done} / {total}", eDlErr:"上次下载失败：",
     eDlNoRt:"⚠ 推理运行时缺失——内置模式仅安装版可用（裸 exe 形态请用 Ollama/自定义）",
     eDirOpen:"打开",
     eIdxWarn:"⚠ 使用中模型（{a}）与当前项目索引（{i}）不符——切换后请运行 ok index 重建",
-    cTitle:"跨轮注入冷却", cDesc:"同会话内已注入的检索条目冷却 N 个 prompt 轮不再注入（门控轮也计）；0 = 关闭（每轮都可注入）", cTurns:"冷却轮数",
-    rTitle:"规则配置（强制检查）", rDesc:"AI 改动命中 code globs 的文件时，回合结束校验 changelog 是否同步更新",
+    cTitle:"跨轮注入冷却", cDesc:"同会话内已注入的检索条目冷却 N 个 prompt 轮不再注入（门控轮也计）；0 = 关闭（每轮都可注入）；全局生效（对所有项目生效）", cTurns:"冷却轮数",
+    rTitle:"规则配置（强制检查）", rDesc:"AI 改动命中 code globs 的文件时，回合结束校验 changelog 是否同步更新；全局生效（对所有项目生效）",
     rType:"类型", rGlobs:"code globs", rCl:"changelog glob", rMsg:"提示语", rAdd:"+ 添加规则",
-    capTitle:"经验沉淀", capDesc:"propose = AI 提议草稿、人批准后入库；auto = 按轮次间隔自动提取",
+    capTitle:"经验沉淀", capDesc:"propose = AI 提议草稿、人批准后入库；auto = 按轮次间隔自动提取；全局生效（对所有项目生效）",
     capMode:"模式", capPropose:"propose（人批准）", capAuto:"auto（自动提取）", capInterval:"轮次间隔",
     lgSemantic:"◆ 语义", lgFilter:"过滤日志…", lgAuto:"自动刷新",
     lgMeta:"共 {n} 行 · 显示 {m} 行", lgEmpty:"（无匹配日志）",
@@ -184,19 +183,18 @@ const I18N = {
     lTest:"Test connection", lTesting:"Testing…", lTestOk:"✓ Connected ({ms}ms)",
     lNone:"Not configured (✨ polish unavailable)",
     hTitle:"Hook timeout", hDesc:"Timeout seconds written into each agent's hooks. On 2026-08-04 a 5s timeout under Windows load silently dropped PostToolUse for an entire session — hence default 10", hSec:"Timeout (s)",
-    gtTitle:"Generalization gate", gtDesc:"Prompts matching builtin/custom phrases skip retrieval injection and embed calls",
+    gtTitle:"Generalization gate", gtDesc:"Prompts matching builtin/custom phrases skip retrieval injection and embed calls; applies globally to all projects",
     gtOn:"Enable gate", gtStatus:"{b} builtin · {n} custom", gtManage:"Manage phrases",
     gtBuiltin:"Builtin phrases (read-only, evolve with releases)", gtCustom:"Custom phrases", gtAdd:"+ Add", gtPh:"New phrase…",
-    noProject:"No registered project yet (run ok init) — this project-level setting is unavailable",
     eDlReady:"✓ Model ready ({dim} dim); sidecar starts on demand and exits when idle",
     eDlBtn:"Download model ({size})", eDlDoing:"Downloading — {done} / {total}", eDlErr:"Last download failed: ",
     eDlNoRt:"⚠ Inference runtime missing — builtin mode requires the installer edition (bare exe: use Ollama/custom)",
     eDirOpen:"Open",
     eIdxWarn:"⚠ Active model ({a}) differs from the project index ({i}) — run ok index to rebuild after switching",
-    cTitle:"Cross-turn injection cooldown", cDesc:"Retrieved entries already injected in this session cool down for N prompt turns (gate turns count too); 0 = off", cTurns:"Cooldown turns",
-    rTitle:"Rules (enforce checks)", rDesc:"When AI edits files matching code globs, session end verifies the changelog was updated",
+    cTitle:"Cross-turn injection cooldown", cDesc:"Retrieved entries already injected in this session cool down for N prompt turns (gate turns count too); 0 = off; applies globally to all projects", cTurns:"Cooldown turns",
+    rTitle:"Rules (enforce checks)", rDesc:"When AI edits files matching code globs, session end verifies the changelog was updated; applies globally to all projects",
     rType:"Type", rGlobs:"code globs", rCl:"changelog glob", rMsg:"Message", rAdd:"+ Add rule",
-    capTitle:"Experience capture", capDesc:"propose = AI drafts, human approves; auto = extract every N turns",
+    capTitle:"Experience capture", capDesc:"propose = AI drafts, human approves; auto = extract every N turns; applies globally to all projects",
     capMode:"Mode", capPropose:"propose (human-approved)", capAuto:"auto (automatic)", capInterval:"Turn interval",
     lgSemantic:"◆ Semantic", lgFilter:"Filter logs…", lgAuto:"Auto-refresh",
     lgMeta:"{n} lines · showing {m}", lgEmpty:"(no matching logs)",
@@ -1079,10 +1077,10 @@ function openLlmNeededModal(){
 
 /* ================= 设置页 ================= */
 /* 八卡照抄原型 renderPrefs（docs/prototypes/prototype-manager-v2.html:801-979），mock 换真。
-   初始聚合拉取：status 先行（取项目名 + hooksTimeout/disabled），随后 embedding/llm 全局两件与
-   retrieve/capture/gate/enforce-rules 项目级四件并行；单件失败只记 PREFS.errs[key]，不拖垮整页。
-   项目级卡（冷却/沉淀/门控/规则）作用项目 = 第一个注册项目（旧 GUI captureProject 缺省语义），
-   无项目时该卡退化为只读提示。保存语义（Global Constraints 范式 2）：
+   初始聚合拉取：status 先行（取项目名 + hooksTimeout/disabled），随后 embedding/llm 两件与
+   retrieve/capture/gate/enforce-rules 四件并行；单件失败只记 PREFS.errs[key]，不拖垮整页。
+   冷却/沉淀/门控/规则四卡为全局配置（端点 project 缺省 = 读写全局 config.toml，无项目也可用）；
+   项目名仅 embedding 卡用于索引模型比对。保存语义（Global Constraints 范式 2）：
    - 开关即开即存：全局总闸 POST /api/toggle、门控 POST /api/gate {enabled}；
    - 行内保存：Hook 超时 POST /api/hooks/timeout、冷却 POST /api/retrieve、沉淀 POST /api/capture
      ——pDirtyLive 对「读回的服务端原值」（PREFS 各件）实时判脏，改回原值自动变灰，oninput 不重渲不丢焦点；
@@ -1106,20 +1104,16 @@ function flashPrefs(key){
   setTimeout(()=>{ prefsFb[key] = false; render(); }, 1500);
 }
 function loadPrefs(){ if(PREFS) return; PREFS = { errs:{} }; refreshPrefs(); }
-// 聚合拉取（多请求并行，非新聚合端点）；项目级四件在无项目时跳过（后端缺 project 400）
+// 聚合拉取（多请求并行，非新聚合端点）；冷却/沉淀/门控/规则四件为全局配置，不带 project
 function refreshPrefs(){
   api("/api/status").then(st=>{
     const project = (st.projects && st.projects[0] && st.projects[0].name) || "";
     const jobs = {
       emb: api("/api/setup/embedding"+(project?"?project="+encodeURIComponent(project):"")),
       llm: api("/api/llm"),
+      retr: api("/api/retrieve"), cap: api("/api/capture"),
+      gate: api("/api/gate"), rules: api("/api/enforce/rules"),
     };
-    if(project){
-      const urls = { retr:"/api/retrieve", cap:"/api/capture", gate:"/api/gate", rules:"/api/enforce/rules" };
-      Object.keys(urls).forEach(k=>{
-        jobs[k] = api(urls[k]+"?project="+encodeURIComponent(project));
-      });
-    }
     const keys = Object.keys(jobs);
     return Promise.all(keys.map(k=>jobs[k].catch(e=>({ __err:e.message })))).then(vals=>{
       const out = { status:st, project:project, errs:{} };
@@ -1193,8 +1187,8 @@ function saveRules(){
   prefsErr.r = "";
   const payload = PREFS_D.rules.map(r=>({ type:r.type, code_globs:splitGlobs(r.globs),
     changelog_glob:String(r.cl||"").trim(), message:String(r.msg||"").trim() }));
-  api("/api/enforce/rules", { method:"POST", body:{ project:PREFS.project, rules:payload } })
-    .then(()=>api("/api/enforce/rules?project="+encodeURIComponent(PREFS.project)))   // 复读核对
+  api("/api/enforce/rules", { method:"POST", body:{ rules:payload } })
+    .then(()=>api("/api/enforce/rules"))   // 复读核对
     .then(d=>{ PREFS.rules = d; syncRulesDraft(); pSave("r"); })
     .catch(err=>{ prefsErr.r = err.message; render(); });
 }
@@ -1210,8 +1204,6 @@ function renderPrefs(){
     d.appendChild(Object.assign(el("div","placeholder"),{textContent:t("mgLoading")}));
     return d;
   }
-  const noProj = !PREFS.project;
-
   // 1. 全局开关：总闸即开即存（setupx Enable/Disable ⇔ OK_HOME/hooks-disabled 标志文件）
   {
     const c = el("div","pcard");
@@ -1307,10 +1299,8 @@ function renderPrefs(){
     });
     d.appendChild(card);
   }
-  // 5. 跨轮注入冷却（项目级）
-  if(noProj){
-    d.appendChild(prefsNoteCard(t("cTitle"), t("cDesc"), t("noProject")));
-  } else if(PREFS.errs.retr){
+  // 5. 跨轮注入冷却（全局，写全局 config.toml）
+  if(PREFS.errs.retr){
     d.appendChild(prefsNoteCard(t("cTitle"), t("cDesc"), t("xLoadFail")+PREFS.errs.retr, true));
   } else {
     const b = el("div");
@@ -1323,16 +1313,14 @@ function renderPrefs(){
     wireSave(card, "c", ()=>{
       const v = PREFS_D.dedupTurns;
       prefsErr.c = "";
-      api("/api/retrieve", { method:"POST", body:{ project:PREFS.project, dedup_turns:v } }).then(()=>{
+      api("/api/retrieve", { method:"POST", body:{ dedup_turns:v } }).then(()=>{
         PREFS.retr.dedup_turns = v; pSave("c");
       }).catch(err=>{ prefsErr.c = err.message; render(); });
     });
     d.appendChild(card);
   }
-  // 6. 经验沉淀（项目级）：保存按钮收进「轮次间隔」行右端；模式+间隔合并判脏
-  if(noProj){
-    d.appendChild(prefsNoteCard(t("capTitle"), t("capDesc"), t("noProject")));
-  } else if(PREFS.errs.cap){
+  // 6. 经验沉淀（全局）：保存按钮收进「轮次间隔」行右端；模式+间隔合并判脏
+  if(PREFS.errs.cap){
     d.appendChild(prefsNoteCard(t("capTitle"), t("capDesc"), t("xLoadFail")+PREFS.errs.cap, true));
   } else {
     const b = el("div");
@@ -1356,7 +1344,7 @@ function renderPrefs(){
     const card = pcard("cap", t("capTitle"), t("capDesc"), b, iRow);
     wireSave(card, "cap", ()=>{
       prefsErr.cap = "";
-      api("/api/capture", { method:"POST", body:{ project:PREFS.project,
+      api("/api/capture", { method:"POST", body:{
         mode:PREFS_D.capMode, turn_interval:PREFS_D.capInterval } }).then(r=>{
         // 后端 turn_interval=0 语义为"保持不变"（api.go）：草稿回写响应真值，显示不与服务端背离
         PREFS.cap.mode = r.mode; PREFS.cap.turn_interval = r.turn_interval;
@@ -1365,10 +1353,8 @@ function renderPrefs(){
     });
     d.appendChild(card);
   }
-  // 7. 泛化门控（项目级）：单行布局（开关即开即存，短语表弹窗内编辑、确定即生效），无保存按钮
-  if(noProj){
-    d.appendChild(prefsNoteCard(t("gtTitle"), t("gtDesc"), t("noProject")));
-  } else if(PREFS.errs.gate){
+  // 7. 泛化门控（全局）：单行布局（开关即开即存，短语表弹窗内编辑、确定即生效），无保存按钮
+  if(PREFS.errs.gate){
     d.appendChild(prefsNoteCard(t("gtTitle"), t("gtDesc"), t("xLoadFail")+PREFS.errs.gate, true));
   } else {
     const c = el("div","pcard");
@@ -1380,7 +1366,7 @@ function renderPrefs(){
     r.appendChild(pswitch(!!g.enabled, ()=>{
       const want = !g.enabled;
       prefsErr.gt = "";
-      api("/api/gate", { method:"POST", body:{ project:PREFS.project, enabled:want } }).then(ng=>{
+      api("/api/gate", { method:"POST", body:{ enabled:want } }).then(ng=>{
         PREFS.gate = ng; flashPrefs("gt");
       }).catch(err=>{ prefsErr.gt = err.message; render(); });
     }));
@@ -1397,10 +1383,8 @@ function renderPrefs(){
     c.appendChild(r);
     d.appendChild(c);
   }
-  // 8. 规则配置（项目级）：保存按钮收进「添加规则」行右端；后端 400 信息经 prefsErr 展示
-  if(noProj){
-    d.appendChild(prefsNoteCard(t("rTitle"), t("rDesc"), t("noProject")));
-  } else if(PREFS.errs.rules){
+  // 8. 规则配置（全局）：保存按钮收进「添加规则」行右端；后端 400 信息经 prefsErr 展示
+  if(PREFS.errs.rules){
     d.appendChild(prefsNoteCard(t("rTitle"), t("rDesc"), t("xLoadFail")+PREFS.errs.rules, true));
   } else {
     const b = el("div");
@@ -1485,7 +1469,7 @@ function renderGateModal(){
   const ok = el("button","btn btn-primary"); ok.textContent = t("fOk");
   ok.onclick = ()=>{
     gateErr = "";
-    api("/api/gate", { method:"POST", body:{ project:PREFS.project, extra:gateDraft } }).then(ng=>{
+    api("/api/gate", { method:"POST", body:{ extra:gateDraft } }).then(ng=>{
       PREFS.gate = ng;   // 响应含 enabled/builtin/extra 全量（清洗去重后的服务端形）
       gateModal = false;
       flashPrefs("gt");

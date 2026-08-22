@@ -18,15 +18,11 @@ type enforceRuleJSON struct {
 	Message       string   `json:"message"`
 }
 
-// apiEnforceRulesGet 返回项目合并配置的 [[enforce]] 规则；无规则给 []（非 null）。
+// apiEnforceRulesGet 返回 [[enforce]] 规则；无规则给 []（非 null）。
+// project 缺省 = 全局 config.toml；显式 project = 项目合并配置（旧行为）。
 func (h *Handler) apiEnforceRulesGet(w http.ResponseWriter, r *http.Request) {
-	st := resolveProject(w, r.URL.Query().Get("project"))
-	if st == nil {
-		return
-	}
-	cfg, err := config.LoadMerged(st.ConfigPath(), filepath.Join(registry.Home(), "config.toml"))
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+	_, cfg, ok := resolveConfigTarget(w, r.URL.Query().Get("project"))
+	if !ok {
 		return
 	}
 	rules := make([]enforceRuleJSON, 0, len(cfg.Enforce))
@@ -39,9 +35,11 @@ func (h *Handler) apiEnforceRulesGet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"rules": rules})
 }
 
-// apiEnforceRulesSet 整体重写项目 config.toml 的 [[enforce]]：逐条校验
+// apiEnforceRulesSet 整体重写 config.toml 的 [[enforce]]：逐条校验
 // （type 仅允许 changelog、code_globs 非空、message 非空，违反 400）；
 // 空数组合法（清空规则）。校验全过才落盘，失败不动既有配置。
+// project 缺省 = 写全局 config.toml；显式 project = 写项目 config.toml（旧行为）。
+// 本端点只按行重写 [[enforce]] 小节、不读配置，故 project 解析只取落盘路径。
 func (h *Handler) apiEnforceRulesSet(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Project string            `json:"project"`
@@ -50,9 +48,15 @@ func (h *Handler) apiEnforceRulesSet(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	st := resolveProject(w, req.Project)
-	if st == nil {
-		return
+	cfgPath := ""
+	if req.Project == "" {
+		cfgPath = filepath.Join(registry.Home(), "config.toml")
+	} else {
+		st := resolveProject(w, req.Project)
+		if st == nil {
+			return
+		}
+		cfgPath = st.ConfigPath()
 	}
 	for _, rule := range req.Rules {
 		if rule.Type != "changelog" {
@@ -75,7 +79,7 @@ func (h *Handler) apiEnforceRulesSet(w http.ResponseWriter, r *http.Request) {
 			ChangelogGlob: rule.ChangelogGlob, Message: rule.Message,
 		})
 	}
-	if err := config.SetEnforceRules(st.ConfigPath(), rules); err != nil {
+	if err := config.SetEnforceRules(cfgPath, rules); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}

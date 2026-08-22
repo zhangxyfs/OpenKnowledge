@@ -3,6 +3,8 @@ package gui
 import (
 	"encoding/json"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -81,5 +83,53 @@ func TestEnforceRulesAPI(t *testing.T) {
 	}
 	if _, rules, _ = getRules(); len(rules) != 0 {
 		t.Fatalf("rules should be cleared: %+v", rules)
+	}
+}
+
+// TestEnforceRulesGlobalDefault project 缺省（不传/空串）→ [[enforce]] 读写全局
+// config.toml；注册项目的 config.toml 不得被写。
+func TestEnforceRulesGlobalDefault(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	mkProject(t, okHome, "demo")
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	globalCfg := filepath.Join(okHome, "config.toml")
+	projCfg := filepath.Join(okHome, "projects", "demo", "config.toml")
+
+	// 缺省 GET → 空数组（非 null）
+	code, data := do(t, "GET", srv.URL+"/api/enforce/rules", testToken, nil)
+	if code != 200 || !strings.Contains(string(data), `"rules":[]`) {
+		t.Fatalf("global rules get: status = %d, body %s", code, data)
+	}
+	// 缺省 POST → 全局落盘
+	code, data = do(t, "POST", srv.URL+"/api/enforce/rules", testToken,
+		map[string]any{"rules": []map[string]any{{
+			"type": "changelog", "code_globs": []string{"**/*.go"},
+			"changelog_glob": "docs/changelogs/**", "message": "改代码必须写变更日志",
+		}}})
+	if code != 200 {
+		t.Fatalf("global rules set: status = %d, body %s", code, data)
+	}
+	gData, err := os.ReadFile(globalCfg)
+	if err != nil {
+		t.Fatalf("global config not written: %v", err)
+	}
+	if !strings.Contains(string(gData), "[[enforce]]") || !strings.Contains(string(gData), "改代码必须写变更日志") {
+		t.Fatalf("global config should contain enforce rules: %q", gData)
+	}
+	// 项目 config 不得被写
+	if _, err := os.Stat(projCfg); !os.IsNotExist(err) {
+		t.Fatalf("project config must stay untouched, stat err = %v", err)
+	}
+	// 缺省 GET 复读 → 1 条
+	code, data = do(t, "GET", srv.URL+"/api/enforce/rules?project=", testToken, nil)
+	if code != 200 || !strings.Contains(string(data), "改代码必须写变更日志") {
+		t.Fatalf("global rules re-get: status = %d, body %s", code, data)
+	}
+	// 校验在全局分支同样生效（非法 type → 400）
+	code, _ = do(t, "POST", srv.URL+"/api/enforce/rules", testToken,
+		map[string]any{"rules": []map[string]any{{"type": "bogus", "code_globs": []string{"x"}, "message": "y"}}})
+	if code != 400 {
+		t.Fatalf("invalid global rule: status = %d, want 400", code)
 	}
 }

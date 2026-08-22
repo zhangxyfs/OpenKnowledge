@@ -1013,6 +1013,51 @@ func TestCaptureRoundTrip(t *testing.T) {
 	}
 }
 
+// TestCaptureGlobalDefault project 缺省（不传/空串）→ 读写全局 config.toml
+//（缺文件按默认值）；注册项目的 config.toml 不得被写。
+func TestCaptureGlobalDefault(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	mkProject(t, okHome, "demo")
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	globalCfg := filepath.Join(okHome, "config.toml")
+	projCfg := filepath.Join(okHome, "projects", "demo", "config.toml")
+
+	// 缺省 GET（全局文件不存在）→ 默认值
+	code, data := do(t, "GET", srv.URL+"/api/capture", testToken, nil)
+	if code != 200 {
+		t.Fatalf("global capture get: status = %d, body %s", code, data)
+	}
+	if !strings.Contains(string(data), `"mode":"propose"`) || !strings.Contains(string(data), `"turn_interval":5`) {
+		t.Fatalf("global defaults: %s", data)
+	}
+
+	// 缺省 POST（project 空串同缺省）→ 写全局 config.toml
+	code, data = do(t, "POST", srv.URL+"/api/capture", testToken,
+		map[string]any{"project": "", "mode": "auto", "turn_interval": 9})
+	if code != 200 {
+		t.Fatalf("global capture set: status = %d, body %s", code, data)
+	}
+	gData, err := os.ReadFile(globalCfg)
+	if err != nil {
+		t.Fatalf("global config not written: %v", err)
+	}
+	if !strings.Contains(string(gData), "[capture]") ||
+		!strings.Contains(string(gData), `mode = "auto"`) ||
+		!strings.Contains(string(gData), "turn_interval = 9") {
+		t.Fatalf("global config should contain capture section: %q", gData)
+	}
+	// 项目 config 不得被写
+	if _, err := os.Stat(projCfg); !os.IsNotExist(err) {
+		t.Fatalf("project config must stay untouched, stat err = %v", err)
+	}
+	// 缺省 GET 复读 → auto/9
+	code, data = do(t, "GET", srv.URL+"/api/capture?project=", testToken, nil)
+	if code != 200 || !strings.Contains(string(data), `"mode":"auto"`) || !strings.Contains(string(data), `"turn_interval":9`) {
+		t.Fatalf("global re-get: status = %d, body %s", code, data)
+	}
+}
+
 // TestBranchInfoAPI 分支上下文端点：base_branch 与 merges 透传 wiki.json，
 // current_branch 键恒存在（非 git 项目为空串）；无谱系时 merges 给 [] 而非 null。
 func TestBranchInfoAPI(t *testing.T) {
@@ -1567,6 +1612,52 @@ func TestGateRoundTrip(t *testing.T) {
 	}
 }
 
+// TestGateGlobalDefault project 缺省 → 读写全局 config.toml（缺文件按默认值）；
+// 注册项目的 config.toml 不得被写。
+func TestGateGlobalDefault(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	mkProject(t, okHome, "demo")
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	globalCfg := filepath.Join(okHome, "config.toml")
+	projCfg := filepath.Join(okHome, "projects", "demo", "config.toml")
+
+	// 缺省 GET → 默认 enabled=true
+	code, data := do(t, "GET", srv.URL+"/api/gate", testToken, nil)
+	if code != 200 || !strings.Contains(string(data), `"enabled":true`) {
+		t.Fatalf("global gate get: status = %d, body %s", code, data)
+	}
+	// 缺省 POST → 全局落盘 [retrieve.gate]
+	code, data = do(t, "POST", srv.URL+"/api/gate", testToken,
+		map[string]any{"enabled": false, "extra": []string{"走起"}})
+	if code != 200 {
+		t.Fatalf("global gate set: status = %d, body %s", code, data)
+	}
+	gData, err := os.ReadFile(globalCfg)
+	if err != nil {
+		t.Fatalf("global config not written: %v", err)
+	}
+	if !strings.Contains(string(gData), "[retrieve.gate]") ||
+		!strings.Contains(string(gData), "enabled = false") ||
+		!strings.Contains(string(gData), `extra_phrases = ["走起"]`) {
+		t.Fatalf("global config should contain gate section: %q", gData)
+	}
+	// 项目 config 不得被写
+	if _, err := os.Stat(projCfg); !os.IsNotExist(err) {
+		t.Fatalf("project config must stay untouched, stat err = %v", err)
+	}
+	// 复读 → enabled=false + extra
+	code, data = do(t, "GET", srv.URL+"/api/gate", testToken, nil)
+	if code != 200 || !strings.Contains(string(data), `"enabled":false`) || !strings.Contains(string(data), "走起") {
+		t.Fatalf("global gate re-get: status = %d, body %s", code, data)
+	}
+	// 校验在全局分支同样生效（空短语 → 400）
+	code, _ = do(t, "POST", srv.URL+"/api/gate", testToken, map[string]any{"extra": []string{"  "}})
+	if code != 400 {
+		t.Fatalf("invalid global phrase: status = %d, want 400", code)
+	}
+}
+
 // /api/inject：mandatory_max_tokens 的 GET 默认值 / POST 落盘 / 非法值 400 / 重复设置幂等。
 func TestInjectMandatoryMaxRoundTrip(t *testing.T) {
 	h, _, okHome := newEnv(t)
@@ -1701,6 +1792,50 @@ func TestRetrieveDedupTurnsRoundTrip(t *testing.T) {
 	cfgData, _ = os.ReadFile(cfgPath)
 	if strings.Count(string(cfgData), "dedup_turns") != 1 {
 		t.Fatalf("重复设置应幂等替换: %q", cfgData)
+	}
+}
+
+// TestRetrieveGlobalDefault project 缺省 → 读写全局 config.toml（缺文件按默认值）；
+// 注册项目的 config.toml 不得被写。
+func TestRetrieveGlobalDefault(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	mkProject(t, okHome, "demo")
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	globalCfg := filepath.Join(okHome, "config.toml")
+	projCfg := filepath.Join(okHome, "projects", "demo", "config.toml")
+
+	// 缺省 GET → 默认 3
+	code, data := do(t, "GET", srv.URL+"/api/retrieve", testToken, nil)
+	if code != 200 || !strings.Contains(string(data), `"dedup_turns":3`) {
+		t.Fatalf("global retrieve get: status = %d, body %s", code, data)
+	}
+	// 缺省 POST → 全局落盘
+	code, data = do(t, "POST", srv.URL+"/api/retrieve", testToken,
+		map[string]any{"dedup_turns": 7})
+	if code != 200 {
+		t.Fatalf("global retrieve set: status = %d, body %s", code, data)
+	}
+	gData, err := os.ReadFile(globalCfg)
+	if err != nil {
+		t.Fatalf("global config not written: %v", err)
+	}
+	if !strings.Contains(string(gData), "dedup_turns = 7") {
+		t.Fatalf("global config should contain dedup_turns = 7: %q", gData)
+	}
+	// 项目 config 不得被写
+	if _, err := os.Stat(projCfg); !os.IsNotExist(err) {
+		t.Fatalf("project config must stay untouched, stat err = %v", err)
+	}
+	// 复读 → 7
+	code, data = do(t, "GET", srv.URL+"/api/retrieve", testToken, nil)
+	if code != 200 || !strings.Contains(string(data), `"dedup_turns":7`) {
+		t.Fatalf("global retrieve re-get: status = %d, body %s", code, data)
+	}
+	// 非法值校验在全局分支同样生效
+	code, _ = do(t, "POST", srv.URL+"/api/retrieve", testToken, map[string]any{"dedup_turns": 100})
+	if code != 400 {
+		t.Fatalf("invalid global dedup_turns: status = %d, want 400", code)
 	}
 }
 
